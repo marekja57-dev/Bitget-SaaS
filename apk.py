@@ -308,7 +308,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# KAFELKI WYNIKÓW (Natywne Streamlit Metrics)
+# KAFELKI WYNIKÓW ORAZ ZEGAR STATUSU NA ŻYWO
 # =====================================================================
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -322,7 +322,7 @@ if futures_ex:
     except Exception:
         pass
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
 
 with col1:
     st.metric(
@@ -345,18 +345,26 @@ with col3:
         delta=f"Aktywne pozycje: {active_positions_count}"
     )
 
+with col_clock:
+    current_time_str = time.strftime("%H:%M:%S")
+    st.metric(
+        label="⏰ Zegar Sesji / Odświeżanie",
+        value=current_time_str,
+        delta=f"Interwał: {scan_interval}s"
+    )
+
 st.markdown("---")
 
 # =====================================================================
-# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI (TREND-FOLLOWING)
+# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI (DYNAMICZNY WYBÓR)
 # =====================================================================
-st.subheader("🥾 Panel Sterowania Botami Trendowymi (Spot & Futures)")
+st.subheader("🥾 Panel Sterowania Botami Trendowymi (W pełni autonomiczny wybór par)")
 with st.container(border=True):
     col_tb1, col_tb2 = st.columns(2)
     
     with col_tb1:
-        st.markdown("### 🟢 Bot Trendowy Spot")
-        bot_spot_coin = st.selectbox("Wybierz parę (Spot)", ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "SUI/USDT"], index=0, key="main_bot_s_coin")
+        st.markdown("### 🟢 Bot Trendowy Spot (Auto-Wybór)")
+        st.info("💡 Bot samoczynnie przeskanuje rynek i wybierze aktywo o najwyższym potencjale zysku.")
         
         def toggle_main_trend_spot():
             st.session_state.trend_bot_spot_active = st.session_state.main_cb_trend_spot
@@ -364,13 +372,12 @@ with st.container(border=True):
         st.checkbox("🟢 Uruchom Bota Spot Trendowego", value=st.session_state.trend_bot_spot_active, key="main_cb_trend_spot", on_change=toggle_main_trend_spot)
         
         if st.session_state.trend_bot_spot_active:
-            st.success("🟢 Bot Spot Trendowy DZIAŁA")
+            st.success("🟢 Bot Spot Trendowy DZIAŁA (Autonomiczny wybór par)")
         else:
             st.info("🔴 Bot Spot Trendowy ZATRZYMANY")
 
     with col_tb2:
-        st.markdown("### 🔵 Bot Trendowy Futures")
-        bot_fut_coin = st.selectbox("Wybierz kontrakt (Futures)", ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "SUI/USDT:USDT"], index=0, key="main_bot_f_coin")
+        st.markdown("### 🔵 Bot Trendowy Futures (Auto-Wybór)")
         bot_fut_lev_mode = st.radio("Dobór dźwigni dla bota Futures", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny z panelu bocznego"], key="main_bot_f_lmode")
         
         def toggle_main_trend_fut():
@@ -379,7 +386,7 @@ with st.container(border=True):
         st.checkbox("🔵 Uruchom Bota Futures Trendowego", value=st.session_state.trend_bot_fut_active, key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
 
         if st.session_state.trend_bot_fut_active:
-            st.success("🟢 Bot Futures Trendowy DZIAŁA")
+            st.success("🟢 Bot Futures Trendowy DZIAŁA (Autonomiczny wybór par)")
         else:
             st.info("🔴 Bot Futures Trendowy ZATRZYMANY")
 
@@ -421,90 +428,106 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# OBSŁUGA DEDYKOWANYCH BOTÓW TRENDOWYCH
+# OBSŁUGA DEDYKOWANYCH BOTÓW TRENDOWYCH (DYNAMIcznie wybierające najlepszą parę)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
-        s_ohlcv = spot_ex.fetch_ohlcv(bot_spot_coin, timeframe=spot_tf, limit=50)
-        s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
-        s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
-        
-        c_macd = s_df["macd"].iloc[-1]
-        c_sig = s_df["signal"].iloc[-1]
-        c_price = s_df["close"].iloc[-1]
+        s_tickers = spot_ex.fetch_tickers()
+        best_spot_candidates = sorted(
+            [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym],
+            key=lambda x: s_tickers[x].get("quoteVolume", 0),
+            reverse=True
+        )
+        if best_spot_candidates:
+            auto_bot_spot_coin = best_spot_candidates[0]
+            s_ohlcv = spot_ex.fetch_ohlcv(auto_bot_spot_coin, timeframe=spot_tf, limit=50)
+            s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
+            s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
+            
+            c_macd = s_df["macd"].iloc[-1]
+            c_sig = s_df["signal"].iloc[-1]
+            c_price = s_df["close"].iloc[-1]
 
-        t_key = f"trend_bot_spot_{bot_spot_coin}"
-        if c_macd > c_sig and not st.session_state.signal_cooldown.get(t_key, False):
-            if spot_free >= MIN_SPOT_TRADE:
-                budget = min(spot_free * (base_allocation_pct / 100.0), max_single_trade_usdt)
-                amount = budget / c_price
-                spot_ex.create_market_buy_order(bot_spot_coin, amount)
-                st.session_state.signal_cooldown[t_key] = True
-                st.session_state.trade_history.insert(0, {
-                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Typ": "BOT SPOT TREND BUY",
-                    "Para": bot_spot_coin,
-                    "Budżet": f"{budget:.2f} USDT",
-                    "Cena": f"{c_price:.4f}"
-                })
-                send_notification(f"🥾 [BOT SPOT] Kupiono {bot_spot_coin} wg trendu MACD za {budget:.1f} USDT")
+            t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
+            if c_macd > c_sig and not st.session_state.signal_cooldown.get(t_key, False):
+                if spot_free >= MIN_SPOT_TRADE:
+                    budget = min(spot_free * (base_allocation_pct / 100.0), max_single_trade_usdt)
+                    amount = budget / c_price
+                    spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
+                    st.session_state.signal_cooldown[t_key] = True
+                    st.session_state.trade_history.insert(0, {
+                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Typ": "BOT SPOT TREND BUY (Auto)",
+                        "Para": auto_bot_spot_coin,
+                        "Budżet": f"{budget:.2f} USDT",
+                        "Cena": f"{c_price:.4f}"
+                    })
+                    send_notification(f"🥾 [BOT SPOT AUTO] Kupiono {auto_bot_spot_coin} wg trendu MACD za {budget:.1f} USDT")
     except Exception:
         pass
 
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
-        f_ohlcv = futures_ex.fetch_ohlcv(bot_fut_coin, timeframe=spot_tf, limit=50)
-        f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
-        f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+        f_tickers = futures_ex.fetch_tickers()
+        best_fut_candidates = sorted(
+            [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
+            key=lambda x: f_tickers[x].get("quoteVolume", 0),
+            reverse=True
+        )
+        if best_fut_candidates:
+            auto_bot_fut_coin = best_fut_candidates[0]
+            f_ohlcv = futures_ex.fetch_ohlcv(auto_bot_fut_coin, timeframe=spot_tf, limit=50)
+            f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+            f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-        f_macd = f_df["macd"].iloc[-1]
-        f_sig = f_df["signal"].iloc[-1]
-        f_price = f_df["close"].iloc[-1]
+            f_macd = f_df["macd"].iloc[-1]
+            f_sig = f_df["signal"].iloc[-1]
+            f_price = f_df["close"].iloc[-1]
 
-        if "Automatyczny" in bot_fut_lev_mode:
-            bot_leverage = 5 if "BTC" in bot_fut_coin or "ETH" in bot_fut_coin else 3
-        else:
-            bot_leverage = manual_leverage
+            if "Automatyczny" in bot_fut_lev_mode:
+                bot_leverage = 5 if "BTC" in auto_bot_fut_coin or "ETH" in auto_bot_fut_coin else 3
+            else:
+                bot_leverage = manual_leverage
 
-        tf_key = f"trend_bot_fut_{bot_fut_coin}"
-        if bot_fut_coin not in st.session_state.active_trades and not st.session_state.signal_cooldown.get(tf_key, False):
-            if fut_free >= MIN_FUT_TRADE:
-                budget = min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt)
-                if f_macd > f_sig:
-                    side = "buy"
-                    label = "LONG"
-                elif f_macd < f_sig:
-                    side = "sell"
-                    label = "SHORT"
-                else:
-                    side = None
+            tf_key = f"trend_bot_fut_{auto_bot_fut_coin}"
+            if auto_bot_fut_coin not in st.session_state.active_trades and not st.session_state.signal_cooldown.get(tf_key, False):
+                if fut_free >= MIN_FUT_TRADE:
+                    budget = min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt)
+                    if f_macd > f_sig:
+                        side = "buy"
+                        label = "LONG"
+                    elif f_macd < f_sig:
+                        side = "sell"
+                        label = "SHORT"
+                    else:
+                        side = None
 
-                if side:
-                    try:
-                        futures_ex.set_leverage(bot_leverage, bot_fut_coin)
-                    except Exception:
-                        pass
-                    
-                    contracts = (budget * bot_leverage) / f_price
-                    futures_ex.create_market_order(bot_fut_coin, side, contracts)
-                    st.session_state.signal_cooldown[tf_key] = True
-                    st.session_state.active_trades[bot_fut_coin] = {
-                        "entry_price": f_price,
-                        "side": side,
-                        "contracts": contracts,
-                        "leverage": bot_leverage
-                    }
-                    st.session_state.trade_history.insert(0, {
-                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Typ": f"BOT FUTURES {label}",
-                        "Para": bot_fut_coin,
-                        "Budżet": f"{budget:.2f} USDT",
-                        "Dźwignia": f"{bot_leverage}x",
-                        "Cena": f"{f_price:.4f}"
-                    })
-                    send_notification(f"🥾 [BOT FUTURES] Otwarto {label} na {bot_fut_coin} ({bot_leverage}x)")
+                    if side:
+                        try:
+                            futures_ex.set_leverage(bot_leverage, auto_bot_fut_coin)
+                        except Exception:
+                            pass
+                        
+                        contracts = (budget * bot_leverage) / f_price
+                        futures_ex.create_market_order(auto_bot_fut_coin, side, contracts)
+                        st.session_state.signal_cooldown[tf_key] = True
+                        st.session_state.active_trades[auto_bot_fut_coin] = {
+                            "entry_price": f_price,
+                            "side": side,
+                            "contracts": contracts,
+                            "leverage": bot_leverage
+                        }
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": f"BOT FUTURES {label} (Auto)",
+                            "Para": auto_bot_fut_coin,
+                            "Budżet": f"{budget:.2f} USDT",
+                            "Dźwignia": f"{bot_leverage}x",
+                            "Cena": f"{f_price:.4f}"
+                        })
+                        send_notification(f"🥾 [BOT FUTURES AUTO] Otwarto {label} na {auto_bot_fut_coin} ({bot_leverage}x)")
     except Exception:
         pass
 
@@ -849,8 +872,6 @@ if source_ex_for_ranking:
         
         for r_idx, (r_sym, r_data) in enumerate(sorted_ranking):
             r_vol = r_data.get("quoteVolume", 0)
-            r_price = r_data.get("last", 0)
-            
             market_type = "Futures" if ((":USDT" in r_sym) or ("/USDT:USDT" in r_sym)) else "Spot"
             
             if r_idx % 4 == 0:
