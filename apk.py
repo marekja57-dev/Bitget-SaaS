@@ -356,9 +356,9 @@ with col_clock:
 st.markdown("---")
 
 # =====================================================================
-# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI (DYNAMICZNY WYBÓR)
+# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
 # =====================================================================
-st.subheader("🥾 Panel Sterowania Botami Trendowymi (W pełni autonomiczny wybór par)")
+st.subheader("🥾 Panel Sterowania Botami Trendowymi (Top 5 Par - Autonomiczny Long/Short)")
 with st.container(border=True):
     col_tb1, col_tb2 = st.columns(2)
     
@@ -372,23 +372,23 @@ with st.container(border=True):
         st.checkbox("🟢 Uruchom Bota Spot Trendowego", value=st.session_state.trend_bot_spot_active, key="main_cb_trend_spot", on_change=toggle_main_trend_spot)
         
         if st.session_state.trend_bot_spot_active:
-            st.success("🟢 Bot Spot Trendowy DZIAŁA (Autonomiczny wybór par)")
+            st.success("🟢 Bot Spot Trendowy DZIAŁA")
         else:
             st.info("🔴 Bot Spot Trendowy ZATRZYMANY")
 
     with col_tb2:
-        st.markdown("### 🔵 Bot Trendowy Futures (Auto-Wybór)")
+        st.markdown("### 🔵 Bot Trendowy Futures (Top 5 Par: Long / Short)")
         bot_fut_lev_mode = st.radio("Dobór dźwigni dla bota Futures", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny z panelu bocznego"], key="main_bot_f_lmode")
         
         def toggle_main_trend_fut():
             st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
 
-        st.checkbox("🔵 Uruchom Bota Futures Trendowego", value=st.session_state.trend_bot_fut_active, key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
+        st.checkbox("🔵 Uruchom Bota Futures (Top 5 Autonomiczny)", value=st.session_state.trend_bot_fut_active, key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
 
         if st.session_state.trend_bot_fut_active:
-            st.success("🟢 Bot Futures Trendowy DZIAŁA (Autonomiczny wybór par)")
+            st.success("🟢 Bot Futures Top 5 DZIAŁA (Automatyczny Long/Short)")
         else:
-            st.info("🔴 Bot Futures Trendowy ZATRZYMANY")
+            st.info("🔴 Bot Futures ZATRZYMANY")
 
 st.markdown("---")
 
@@ -428,7 +428,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# OBSŁUGA DEDYKOWANYCH BOTÓW TRENDOWYCH (DYNAMIcznie wybierające najlepszą parę)
+# OBSŁUGA BOTA SPOT
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -467,68 +467,89 @@ if spot_ex and st.session_state.trend_bot_spot_active:
     except Exception:
         pass
 
+# =====================================================================
+# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR 5 NAJLEPSZYCH PAR (LONG / SHORT)
+# =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
         f_tickers = futures_ex.fetch_tickers()
+        # Wybieramy kandydatów z największym wolumenem
         best_fut_candidates = sorted(
             [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
             key=lambda x: f_tickers[x].get("quoteVolume", 0),
             reverse=True
-        )
-        if best_fut_candidates:
-            auto_bot_fut_coin = best_fut_candidates[0]
-            f_ohlcv = futures_ex.fetch_ohlcv(auto_bot_fut_coin, timeframe=spot_tf, limit=50)
-            f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
-            f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+        )[:15] # pobieramy top 15 do analizy, aby wybrać 5 najlepszych z wyraźnym sygnałem
 
-            f_macd = f_df["macd"].iloc[-1]
-            f_sig = f_df["signal"].iloc[-1]
-            f_price = f_df["close"].iloc[-1]
+        evaluated_pairs = []
+        for sym in best_fut_candidates:
+            try:
+                f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
+                time.sleep(0.03)
+                f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+                f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                
+                f_macd = f_df["macd"].iloc[-1]
+                f_sig = f_df["signal"].iloc[-1]
+                f_price = f_df["close"].iloc[-1]
+                
+                # Siła sygnału (różnica MACD a signal)
+                signal_strength = abs(f_macd - f_sig) / f_price
+                side = "buy" if f_macd > f_sig else "sell"
+                
+                evaluated_pairs.append({
+                    "symbol": sym,
+                    "price": f_price,
+                    "side": side,
+                    "strength": signal_strength
+                })
+            except Exception:
+                continue
+
+        # Sortujemy po sile sygnału i bierzemy top 5
+        top_5_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)[:5]
+
+        for item in top_5_pairs:
+            sym = item["symbol"]
+            f_price = item["price"]
+            side = item["side"]
+            label = "LONG" if side == "buy" else "SHORT"
 
             if "Automatyczny" in bot_fut_lev_mode:
-                bot_leverage = 5 if "BTC" in auto_bot_fut_coin or "ETH" in auto_bot_fut_coin else 3
+                bot_leverage = 5 if "BTC" in sym or "ETH" in sym else 3
             else:
                 bot_leverage = manual_leverage
 
-            tf_key = f"trend_bot_fut_{auto_bot_fut_coin}"
-            if auto_bot_fut_coin not in st.session_state.active_trades and not st.session_state.signal_cooldown.get(tf_key, False):
+            tf_key = f"trend_bot_fut_{sym}"
+            # Jeśli para nie jest jeszcze w aktywnych transakcjach
+            if sym not in st.session_state.active_trades and not st.session_state.signal_cooldown.get(tf_key, False):
                 if fut_free >= MIN_FUT_TRADE:
                     budget = min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt)
-                    if f_macd > f_sig:
-                        side = "buy"
-                        label = "LONG"
-                    elif f_macd < f_sig:
-                        side = "sell"
-                        label = "SHORT"
-                    else:
-                        side = None
-
-                    if side:
-                        try:
-                            futures_ex.set_leverage(bot_leverage, auto_bot_fut_coin)
-                        except Exception:
-                            pass
-                        
-                        contracts = (budget * bot_leverage) / f_price
-                        futures_ex.create_market_order(auto_bot_fut_coin, side, contracts)
-                        st.session_state.signal_cooldown[tf_key] = True
-                        st.session_state.active_trades[auto_bot_fut_coin] = {
-                            "entry_price": f_price,
-                            "side": side,
-                            "contracts": contracts,
-                            "leverage": bot_leverage
-                        }
-                        st.session_state.trade_history.insert(0, {
-                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": f"BOT FUTURES {label} (Auto)",
-                            "Para": auto_bot_fut_coin,
-                            "Budżet": f"{budget:.2f} USDT",
-                            "Dźwignia": f"{bot_leverage}x",
-                            "Cena": f"{f_price:.4f}"
-                        })
-                        send_notification(f"🥾 [BOT FUTURES AUTO] Otwarto {label} na {auto_bot_fut_coin} ({bot_leverage}x)")
-    except Exception:
+                    try:
+                        futures_ex.set_leverage(bot_leverage, sym)
+                    except Exception:
+                        pass
+                    
+                    contracts = (budget * bot_leverage) / f_price
+                    futures_ex.create_market_order(sym, side, contracts)
+                    
+                    st.session_state.signal_cooldown[tf_key] = True
+                    st.session_state.active_trades[sym] = {
+                        "entry_price": f_price,
+                        "side": side,
+                        "contracts": contracts,
+                        "leverage": bot_leverage
+                    }
+                    st.session_state.trade_history.insert(0, {
+                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Typ": f"BOT FUTURES TOP 5 {label}",
+                        "Para": sym,
+                        "Budżet": f"{budget:.2f} USDT",
+                        "Dźwignia": f"{bot_leverage}x",
+                        "Cena": f"{f_price:.4f}"
+                    })
+                    send_notification(f"🥾 [BOT TOP 5] Otwarto {label} na {sym} ({bot_leverage}x)")
+    except Exception as e:
         pass
 
 # =====================================================================
@@ -851,7 +872,7 @@ if futures_ex:
 st.markdown("---")
 
 # =====================================================================
-# RANKING I SKANER NAJLEPSZYCH OKAZJI DLA BOTÓW (SPOT & FUTURES)
+# RANKING I SKANER NAJLEPSZYCH OKAZJI DLA BOTÓW
 # =====================================================================
 st.subheader("🤖 Skaner Najlepszych Okazji dla Botów (Top 8 rynków o największym wolumenie)")
 st.markdown("Poniższa tabela zbiera 8 rynków z najwyższym wolumenem z obu rynków (Spot i Futures) oraz automatycznie ocenia, jaka strategia i kierunek generowałyby w tej chwili największy potencjał zysku.")
