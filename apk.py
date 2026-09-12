@@ -275,7 +275,7 @@ with st.sidebar.container(border=True):
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
-  st.markdown("### 🔄 Pętla Główna Skanera")
+  st.markdown("### 🔄 Pętla Główna Skanera i Pule Par")
 
 
   def toggle_scanner_from_sidebar():
@@ -289,6 +289,14 @@ with st.sidebar.container(border=True):
       on_change=toggle_scanner_from_sidebar,
   )
   scan_interval = st.slider("Interwał odświeżania (s)", 10, 300, 30)
+
+  st.markdown("---")
+  max_spot_scan_pairs = st.slider(
+      "🔍 Liczba par do przeskanowania (Spot)", 5, 50, 15, 5
+  )
+  max_fut_scan_pairs = st.slider(
+      "📈 Liczba par do przeskanowania (Futures)", 5, 50, 15, 5
+  )
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button(
@@ -407,7 +415,7 @@ st.markdown("---")
 # 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
 # =====================================================================
 st.subheader(
-    "🥾 Panel Sterowania Botami Trendowymi (Top 5 Par - Autonomiczny Long/Short)"
+    "🥾 Panel Sterowania Botami Trendowymi (Wybór Par - Autonomiczny Long/Short)"
 )
 with st.container(border=True):
   col_tb1, col_tb2 = st.columns(2)
@@ -439,7 +447,7 @@ with st.container(border=True):
       st.info("🔴 Bot Spot Trendowy ZATRZYMANY")
 
   with col_tb2:
-    st.markdown("### 🔵 Bot Trendowy Futures (Top 5 Par: Long / Short)")
+    st.markdown("### 🔵 Bot Trendowy Futures (Autonomiczny Long / Short)")
     bot_fut_lev_mode = st.radio(
         "Dobór dźwigni dla bota Futures",
         ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny z panelu bocznego"],
@@ -452,14 +460,14 @@ with st.container(border=True):
 
 
     st.checkbox(
-        "🔵 Uruchom Bota Futures (Top 5 Autonomiczny)",
+        "🔵 Uruchom Bota Futures (Autonomiczny)",
         value=st.session_state.trend_bot_fut_active,
         key="main_cb_trend_fut",
         on_change=toggle_main_trend_fut,
     )
 
     if st.session_state.trend_bot_fut_active:
-      st.success("🟢 Bot Futures Top 5 DZIAŁA (Automatyczny Long/Short)")
+      st.success("🟢 Bot Futures DZIAŁA (Automatyczny Long/Short)")
     else:
       st.info("🔴 Bot Futures ZATRZYMANY")
 
@@ -519,7 +527,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# OBSŁUGA BOTA SPOT
+# OBSŁUGA BOTA SPOT (Używa max_spot_scan_pairs)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
   try:
@@ -535,7 +543,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
         ],
         key=lambda x: s_tickers[x].get("quoteVolume", 0),
         reverse=True,
-    )
+    )[:max_spot_scan_pairs]
     if best_spot_candidates:
       auto_bot_spot_coin = best_spot_candidates[0]
       s_ohlcv = spot_ex.fetch_ohlcv(
@@ -582,11 +590,10 @@ if spot_ex and st.session_state.trend_bot_spot_active:
     pass
 
 # =====================================================================
-# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR 5 NAJLEPSZYCH PAR (Z LIMITEM 10)
+# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR (Używa max_fut_scan_pairs)
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
   try:
-    # Sprawdzamy limit 10 aktywnych zleceń przed wykonaniem pętli
     if len(st.session_state.active_trades) < 10:
       f_tickers = futures_ex.fetch_tickers()
       best_fut_candidates = sorted(
@@ -599,13 +606,13 @@ if futures_ex and st.session_state.trend_bot_fut_active:
           ],
           key=lambda x: f_tickers[x].get("quoteVolume", 0),
           reverse=True,
-      )[:15]
+      )[:max_fut_scan_pairs]
 
       evaluated_pairs = []
       for sym in best_fut_candidates:
         try:
           f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
-          time.sleep(0.03)
+          time.sleep(0.02)
           f_df = pd.DataFrame(
               f_ohlcv,
               columns=["timestamp", "open", "high", "low", "close", "volume"],
@@ -631,12 +638,11 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         except Exception:
           continue
 
-      top_5_pairs = sorted(
+      top_signal_pairs = sorted(
           evaluated_pairs, key=lambda x: x["strength"], reverse=True
       )[:5]
 
-      for item in top_5_pairs:
-        # Sprawdzamy w locie, czy nie dobijamy do limitu 10 podczas iteracji
+      for item in top_signal_pairs:
         if len(st.session_state.active_trades) >= 10:
           break
 
@@ -677,7 +683,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 0,
                 {
                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Typ": f"BOT FUTURES TOP 5 {label}",
+                    "Typ": f"BOT FUTURES {label}",
                     "Para": sym,
                     "Budżet": f"{budget:.2f} USDT",
                     "Dźwignia": f"{bot_leverage}x",
@@ -685,7 +691,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 },
             )
             send_notification(
-                f"🥾 [BOT TOP 5] Otwarto {label} na {sym} ({bot_leverage}x)"
+                f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)"
             )
   except Exception as e:
     pass
@@ -746,7 +752,7 @@ if futures_ex and st.session_state.active_trades:
       del st.session_state.active_trades[r_sym]
 
 # =====================================================================
-# SKANER SPOT
+# SKANER SPOT (Oparty na suwaku max_spot_scan_pairs)
 # =====================================================================
 st.subheader("📊 Autonomiczny Skaner Spot (Składanie Zleceń Zakupu)")
 spot_results = []
@@ -760,28 +766,19 @@ if spot_ex:
         and sym.endswith("/USDT")
         and "BULL" not in sym
         and "BEAR" not in sym
-        and data.get("quoteVolume", 0) > 1000000
+        and data.get("quoteVolume", 0) > 500000
     }
     sorted_s = sorted(
         valid_s.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True
     )
-    top_spot_symbols = [item[0] for item in sorted_s[:8]]
+    top_spot_symbols = [item[0] for item in sorted_s[:max_spot_scan_pairs]]
   except Exception:
-    top_spot_symbols = [
-        "BTC/USDT",
-        "ETH/USDT",
-        "SOL/USDT",
-        "XRP/USDT",
-        "ZEC/USDT",
-        "ATOM/USDT",
-        "LINK/USDT",
-        "AVAX/USDT",
-    ]
+    top_spot_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
 
   for idx, sym in enumerate(top_spot_symbols):
     try:
       ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
-      time.sleep(0.05)
+      time.sleep(0.02)
       df = pd.DataFrame(
           ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
       )
@@ -894,7 +891,7 @@ if spot_ex:
 st.markdown("---")
 
 # =====================================================================
-# SKANER FUTURES (Z WERYFIKACJĄ LIMITU MAKS. 10 ZLECEŃ)
+# SKANER FUTURES (Oparty na suwaku max_fut_scan_pairs)
 # =====================================================================
 st.subheader("📈 Autonomiczny Skaner Futures (Long & Short - Max 10 Zleceń)")
 fut_results = []
@@ -913,28 +910,19 @@ if futures_ex:
         and (sym.endswith(":USDT") or "/USDT:USDT" in sym)
         and "BULL" not in sym
         and "BEAR" not in sym
-        and data.get("quoteVolume", 0) > 2000000
+        and data.get("quoteVolume", 0) > 1000000
     }
     sorted_f = sorted(
         valid_f.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True
     )
-    top_fut_symbols = [item[0] for item in sorted_f[:8]]
+    top_fut_symbols = [item[0] for item in sorted_f[:max_fut_scan_pairs]]
   except Exception:
-    top_fut_symbols = [
-        "BTC/USDT:USDT",
-        "ETH/USDT:USDT",
-        "SOL/USDT:USDT",
-        "XRP/USDT:USDT",
-        "ZEC/USDT:USDT",
-        "ATOM/USDT:USDT",
-        "LINK/USDT:USDT",
-        "AVAX/USDT:USDT",
-    ]
+    top_fut_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
 
   for idx, sym in enumerate(top_fut_symbols):
     try:
       ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
-      time.sleep(0.05)
+      time.sleep(0.02)
       df = pd.DataFrame(
           ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
       )
@@ -1039,7 +1027,6 @@ if futures_ex:
           )
 
           if st.session_state.scanner_active and is_futures_signal:
-            # Weryfikacja limitu maksymalnie 10 aktywnych pozycji
             if len(st.session_state.active_trades) >= 10:
               status = "🛡️ Limit 10 aktywnych zleceń osiągnięty"
             elif already_processed_fut or sym in st.session_state.active_trades:
@@ -1105,14 +1092,10 @@ st.markdown("---")
 # =====================================================================
 # RANKING I SKANER NAJLEPSZYCH OKAZJI DLA BOTÓW
 # =====================================================================
-st.subheader(
-    "🤖 Skaner Najlepszych Okazji dla Botów (Top 8 rynków o największym"
-    " wolumenie)"
-)
+st.subheader("🤖 Skaner Najlepszych Okazji dla Botów")
 st.markdown(
-    "Poniższa tabela zbiera 8 rynków z najwyższym wolumenem z obu rynków (Spot i"
-    " Futures) oraz automatycznie ocenia, jaka strategia i kierunek generowałyby"
-    " w tej chwili największy potencjał zysku."
+    "Poniższa tabela zbiera rynki z najwyższym wolumenem zgodnie z ustawioną"
+    " w panelu bocznym liczbą par dla Futures."
 )
 
 combined_bot_ranking = []
@@ -1130,13 +1113,13 @@ if source_ex_for_ranking:
         )
         and "BULL" not in sym
         and "BEAR" not in sym
-        and data.get("quoteVolume", 0) > 1000000
+        and data.get("quoteVolume", 0) > 500000
     }
     sorted_ranking = sorted(
         valid_ranking_items.items(),
         key=lambda x: x[1].get("quoteVolume", 0),
         reverse=True,
-    )[:8]
+    )[:max_fut_scan_pairs]
 
     for r_idx, (r_sym, r_data) in enumerate(sorted_ranking):
       r_vol = r_data.get("quoteVolume", 0)
@@ -1186,7 +1169,7 @@ st.subheader("📜 Dziennik Transakcji w Bieżącej Sesji")
 if st.session_state.trade_history:
   st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
-  st.info("Brak zarejestrowanych transakcji w tej sesji.")
+  st.info("Brak zarejestratowanych transakcji w tej sesji.")
 
 if (
     st.session_state.scanner_active
@@ -1231,4 +1214,3 @@ if not user_subscribed:
   st.stop()
 else:
   st.sidebar.success("✅ Dostęp aktywny (Administrator)")
-
