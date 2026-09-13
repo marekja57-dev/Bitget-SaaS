@@ -1,137 +1,248 @@
 from datetime import datetime
+
 import glob
+
 import os
+
 import time
+
 import ccxt
+
 import pandas as pd
+
 import streamlit as st
+
 
 st.set_page_config(
     page_title="Bitget SAS - Pełna Autonomia",
     layout="wide",
 )
 
+
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
+
 
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
+
 st.markdown(
     """
+
     <style>
+
     @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
 
+
     .stApp {
+
         background-color: #0d0b0a;
+
     }
+
     section[data-testid="stSidebar"] {
+
         background-color: #141110;
+
         border-right: 2px solid #3d2f1f;
+
     }
+
     
+
     section[data-testid="stSidebar"] input {
+
         background-color: #1e1814 !important;
+
         color: #f3d57a !important;
+
         border: 1px solid #f3d57a !important;
+
     }
+
     
+
     .hero-wrapper {
+
         display: flex;
+
         align-items: center;
+
         justify-content: center;
+
         width: 100%;
+
         padding-top: 45px;
+
         padding-bottom: 20px;
+
     }
+
     
+
     .retro-ornate-frame {
+
         position: relative;
+
         background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
+
         border: 6px double #f3d57a;
+
         padding: 40px 30px 50px 30px;
+
         border-radius: 16px;
+
         box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
+
         width: 100%;
+
         max-width: 950px;
+
         text-align: center;
+
         display: flex;
+
         flex-direction: column;
+
         align-items: center;
+
         justify-content: center;
+
     }
+
 
     .retro-ornate-frame::before, .retro-ornate-frame::after {
+
         content: "❖ ❖ ❖";
+
         position: absolute;
+
         color: #f3d57a;
+
         font-size: 1rem;
+
         letter-spacing: 6px;
+
     }
+
     .retro-ornate-frame::before { top: 12px; left: 18px; }
+
     .retro-ornate-frame::after { top: 12px; right: 18px; }
 
+
     .retro-vintage-title {
+
         font-family: 'Bungee Inline', cursive, sans-serif;
+
         font-size: 4.5rem;
+
         color: #f3d57a;
+
         letter-spacing: 6px;
+
         text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
+
         margin: 5px 0 10px 0;
+
         line-height: 1.1;
+
     }
+
 
     .button-spacer {
+
         margin-top: 30px;
+
         width: 100%;
+
         display: flex;
+
         justify-content: center;
+
     }
+
 
     div.stButton > button {
+
         background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
+
         color: #f3d57a !important;
+
         border: 2px solid #f3d57a !important;
+
         font-family: 'Cinzel', serif !important;
+
         font-weight: 700 !important;
+
         font-size: 1rem !important;
+
         padding: 12px 28px !important;
+
         border-radius: 8px !important;
+
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important;
+
         transition: all 0.3s ease !important;
-    }
-    div.stButton > button:hover {
-        background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important;
-        border-color: #ffe89d !important;
-        color: #ffe89d !important;
-        box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important;
-        transform: translateY(-2px);
+
     }
 
+    div.stButton > button:hover {
+
+        background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important;
+
+        border-color: #ffe89d !important;
+
+        color: #ffe89d !important;
+
+        box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important;
+
+        transform: translateY(-2px);
+
+    }
+
+
     div[data-testid="stMetric"] {
+
         border: 2px solid #f3d57a;
+
         border-radius: 10px;
+
         padding: 12px 15px;
+
         background-color: rgba(243, 213, 122, 0.03);
+
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+
     }
+
     div[data-testid="stMetric"] label {
+
         color: #f3d57a !important;
+
     }
+
     </style>
+
     """,
     unsafe_allow_html=True,
 )
 
+
 # =====================================================================
 # STRONA POWITALNA
 # =====================================================================
+
 if not st.session_state.logged_in:
   st.markdown(
       f"""
+
         <div class="hero-wrapper">
+
             <div class="retro-ornate-frame">
+
                 <div class="retro-vintage-title">BITGET SAS</div>
+
         """,
       unsafe_allow_html=True,
   )
@@ -147,31 +258,41 @@ if not st.session_state.logged_in:
   st.markdown("</div></div>", unsafe_allow_html=True)
   st.stop()
 
+
 # =====================================================================
 # INICJALIZACJA CZASU SESJI (Zegar trwania)
 # =====================================================================
+
 if "session_start_time" not in st.session_state:
   st.session_state.session_start_time = datetime.now()
+
 
 # =====================================================================
 # WŁAŚCIWA APLIKACJA (PO WEJŚCIU)
 # =====================================================================
+
 st.title("🚀 Bitget SAS - Panel Operacyjny")
+
 
 if "trade_history" not in st.session_state:
   st.session_state.trade_history = []
 
+
 if "signal_cooldown" not in st.session_state:
   st.session_state.signal_cooldown = {}
+
 
 if "scanner_active" not in st.session_state:
   st.session_state.scanner_active = False
 
+
 if "active_trades" not in st.session_state:
   st.session_state.active_trades = {}
 
+
 if "trend_bot_spot_active" not in st.session_state:
   st.session_state.trend_bot_spot_active = False
+
 
 if "trend_bot_fut_active" not in st.session_state:
   st.session_state.trend_bot_fut_active = False
@@ -197,73 +318,24 @@ def get_exchange(ex_type, api_key="", secret="", password=""):
     return None
 
 
-# =====================================================================
-# FUNKCJA BEZPIECZNEGO OTWIERANIA FUTURES Z SERWEROWYM STOP-LOSEM
-# =====================================================================
-def open_futures_with_exchange_sl_tp(
-    ex, sym, side, contracts, entry_price, sl_pct, tp_pct
-):
-  # 1. Otwarcie pozycji rynkowej
-  order = ex.create_market_order(
-      sym, side, contracts, params={"reduceOnly": False}
-  )
-
-  # 2. Serwerowe zlecenia Stop-Loss i Take-Profit na Bitget
-  try:
-    sl_side = "sell" if side == "buy" else "buy"
-    if side == "buy":
-      sl_price = entry_price * (1 - sl_pct / 100)
-      tp_price = entry_price * (1 + tp_pct / 100)
-    else:
-      sl_price = entry_price * (1 + sl_pct / 100)
-      tp_price = entry_price * (1 - tp_pct / 100)
-
-    # Próba wysłania zabezpieczeń bezpośrednio przez parametry CCXT dla Bitget
-    protection_params = {
-        "stopLoss": {"triggerPrice": sl_price},
-        "takeProfit": {"triggerPrice": tp_price},
-        "reduceOnly": True,
-    }
-    ex.create_order(
-        symbol=sym,
-        type="market",
-        side=sl_side,
-        amount=contracts,
-        params=protection_params,
-    )
-  except Exception:
-    # Fallback – dedykowane zlecenie stop-market w razie odrzucenia parametrów złożonych
-    try:
-      stop_params = {"triggerPrice": sl_price, "reduceOnly": True}
-      ex.create_order(
-          symbol=sym,
-          type="stop_market",
-          side=sl_side,
-          amount=contracts,
-          price=sl_price,
-          params=stop_params,
-      )
-    except Exception:
-      pass
-
-  return order
-
-
 with st.sidebar.container(border=True):
   st.markdown("### 🔑 Konfiguracja API Bitget")
   api_key_input = st.text_input("API Key", type="password")
   secret_input = st.text_input("Secret Key", type="password")
   password_input = st.text_input("Passphrase", type="password")
 
+
 spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
 futures_ex = get_exchange(
     "futures", api_key_input, secret_input, password_input
 )
 
+
 st.sidebar.markdown("---")
 if st.sidebar.button("🔒 Wróć do ekranu powitalnego"):
   st.session_state.logged_in = False
   st.rerun()
+
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -315,15 +387,19 @@ with st.sidebar.container(border=True):
   stop_loss_pct = st.slider("Stop Loss (%)", 0.5, 10.0, 1.5, 0.5)
 
   st.markdown("---")
-  st.markdown("### ⚡ Zarządzanie Dźwignią Futures")
+  st.markdown("### ⚡ Zarządzanie Dźwignią i Pozycjami Futures")
   leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Auto-dobór", "🎛️ Ręczny"])
   manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 50, 5)
+  max_active_trades = st.slider(
+      "🛡️ Maksymalna liczba aktywnych pozycji Futures", 1, 30, 10, 1
+  )
 
   st.markdown("---")
   st.markdown("### 🧠 Inteligentne Wyjście (Dynamic Exit)")
   spot_tf = st.selectbox(
       "Timeframe analizy", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4
   )
+
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -348,14 +424,17 @@ with st.sidebar.container(border=True):
       "📈 Liczba par do przeskanowania (Futures)", 5, 50, 15, 5
   )
 
+
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button(
     "🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary"
 )
 
+
 # =====================================================================
 # KILL SWITCH DLA FUTURES
 # =====================================================================
+
 if emergency_kill:
   if futures_ex:
     try:
@@ -387,9 +466,11 @@ if emergency_kill:
   time.sleep(2)
   st.rerun()
 
+
 # =====================================================================
 # POBIERANIE SALD
 # =====================================================================
+
 spot_free, spot_total = 0.0, 0.0
 if spot_ex:
   try:
@@ -398,6 +479,7 @@ if spot_ex:
     spot_total = float(s_bal.get("total", {}).get("USDT", 0.0))
   except Exception:
     pass
+
 
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
@@ -408,9 +490,11 @@ if futures_ex:
   except Exception:
     pass
 
+
 # =====================================================================
 # KAFELKI WYNIKÓW ORAZ ZEGAR SESJI W ZŁOTYCH RAMKACH
 # =====================================================================
+
 total_unrealized_pnl = 0.0
 active_positions_count = 0
 if futures_ex:
@@ -423,7 +507,9 @@ if futures_ex:
   except Exception:
     pass
 
+
 col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
+
 
 with col1:
   st.metric(
@@ -432,6 +518,7 @@ with col1:
       delta=f"Całkowite: {spot_total:.2f} USDT",
   )
 
+
 with col2:
   st.metric(
       label="🔵 Portfel Futures (USDT)",
@@ -439,12 +526,17 @@ with col2:
       delta=f"Całkowite: {fut_total:.2f} USDT",
   )
 
+
 with col3:
   st.metric(
       label="📊 Wyniki Futures (Niezrealizowane)",
       value=f"{total_unrealized_pnl:+.2f} USDT",
-      delta=f"Aktywne pozycje: {active_positions_count} / 10 max",
+      delta=(
+          f"Aktywne pozycje: {active_positions_count} /"
+          f" {max_active_trades} max"
+      ),
   )
+
 
 with col_clock:
   elapsed = datetime.now() - st.session_state.session_start_time
@@ -459,11 +551,14 @@ with col_clock:
       delta=f"Interwał: {scan_interval}s",
   )
 
+
 st.markdown("---")
+
 
 # =====================================================================
 # 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
 # =====================================================================
+
 st.subheader(
     "🥾 Panel Sterowania Botami Trendowymi (Wybór Par - Autonomiczny Long/Short)"
 )
@@ -503,7 +598,9 @@ with st.container(border=True):
     )
 
     def toggle_main_trend_fut():
-      st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
+      st.session_state.trend_bot_fut_active = (
+          st.session_state.main_cb_trend_fut
+      )
 
     st.checkbox(
         "🔵 Uruchom Bota Futures (Autonomiczny)",
@@ -517,9 +614,12 @@ with st.container(border=True):
     else:
       st.info("🔴 Bot Futures ZATRZYMANY")
 
+
 st.markdown("---")
 
+
 col_btn, col_status = st.columns([2, 1])
+
 
 with col_btn:
   if not st.session_state.scanner_active:
@@ -539,11 +639,13 @@ with col_btn:
       st.session_state.scanner_active = False
       st.rerun()
 
+
 with col_status:
   if st.session_state.scanner_active:
     st.success("🟢 STATUS: AKTYWNY (DZIAŁA)")
   else:
     st.error("🔴 STATUS: ZATRZYMANY")
+
 
 trusted_base_coins = [
     "BTC",
@@ -569,12 +671,15 @@ trusted_base_coins = [
     "ATOM",
 ]
 
+
 MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
+
 
 # =====================================================================
 # OBSŁUGA BOTA SPOT (Używa max_spot_scan_pairs)
 # =====================================================================
+
 if spot_ex and st.session_state.trend_bot_spot_active:
   try:
     s_tickers = spot_ex.fetch_tickers()
@@ -635,12 +740,14 @@ if spot_ex and st.session_state.trend_bot_spot_active:
   except Exception:
     pass
 
+
 # =====================================================================
-# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR Z SERWEROWYM SL/TP
+# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR (Używa max_fut_scan_pairs)
 # =====================================================================
+
 if futures_ex and st.session_state.trend_bot_fut_active:
   try:
-    if len(st.session_state.active_trades) < 10:
+    if len(st.session_state.active_trades) < max_active_trades:
       f_tickers = futures_ex.fetch_tickers()
       best_fut_candidates = sorted(
           [
@@ -689,7 +796,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
       )[:5]
 
       for item in top_signal_pairs:
-        if len(st.session_state.active_trades) >= 10:
+        if len(st.session_state.active_trades) >= max_active_trades:
           break
 
         sym = item["symbol"]
@@ -716,17 +823,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
               pass
 
             contracts = (budget * bot_leverage) / f_price
-
-            # Wywołanie bezpiecznego otwarcia z serwerowym Stop-Loss i Take-Profit
-            open_futures_with_exchange_sl_tp(
-                futures_ex,
-                sym,
-                side,
-                contracts,
-                f_price,
-                stop_loss_pct,
-                take_profit_pct,
-            )
+            futures_ex.create_market_order(sym, side, contracts)
 
             st.session_state.signal_cooldown[tf_key] = True
             st.session_state.active_trades[sym] = {
@@ -748,14 +845,15 @@ if futures_ex and st.session_state.trend_bot_fut_active:
             )
             send_notification(
                 f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)"
-                f" z giełdowym SL/TP"
             )
   except Exception as e:
     pass
 
+
 # =====================================================================
 # SPRAWDZANIE I AUTOMATYCZNE ZAMYKANIE (TP / SL DLA AKTYWNYCH POZYCJI)
 # =====================================================================
+
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
   try:
@@ -808,10 +906,13 @@ if futures_ex and st.session_state.active_trades:
     if r_sym in st.session_state.active_trades:
       del st.session_state.active_trades[r_sym]
 
+
 # =====================================================================
-# SKANER SPOT
+# SKANER SPOT (Oparty na suwaku max_spot_scan_pairs)
 # =====================================================================
+
 st.subheader("📊 Autonomiczny Skaner Spot (Składanie Zleceń Zakupu)")
+
 spot_results = []
 if spot_ex:
   try:
@@ -945,17 +1046,19 @@ if spot_ex:
   if spot_results:
     st.dataframe(pd.DataFrame(spot_results), use_container_width=True)
 
+
 st.markdown("---")
 
+
 # =====================================================================
-# SKANER FUTURES (Z serwerowym SL/TP)
+# SKANER FUTURES (Oparty na suwaku max_fut_scan_pairs)
 # =====================================================================
-max_pozycje = st.slider(
-    "Maksymalna liczba aktywnych pozycji",
-    min_value=1,
-    max_value=50,
-    step=1,
+
+st.subheader(
+    f"📈 Autonomiczny Skaner Futures (Long & Short - Max {max_active_trades}"
+    " Zleceń)"
 )
+
 fut_results = []
 if futures_ex:
   try:
@@ -1089,8 +1192,11 @@ if futures_ex:
           )
 
           if st.session_state.scanner_active and is_futures_signal:
-            if len(st.session_state.active_trades) >= 10:
-              status = "🛡️ Limit 10 aktywnych zleceń osiągnięty"
+            if len(st.session_state.active_trades) >= max_active_trades:
+              status = (
+                  "🛡️ Limit"
+                  f" {max_active_trades} aktywnych zleceń osiągnięty"
+              )
             elif already_processed_fut or sym in st.session_state.active_trades:
               status = "🛡️ Sygnał obsłużony"
             else:
@@ -1104,16 +1210,8 @@ if futures_ex:
                 contract_size = (
                     allocated_budget * dyn_leverage
                 ) / current_price
-
-                # Otwieramy pozycję ze zintegrowanym, giełdowym SL/TP
-                open_futures_with_exchange_sl_tp(
-                    futures_ex,
-                    sym,
-                    trade_action,
-                    contract_size,
-                    current_price,
-                    stop_loss_pct,
-                    take_profit_pct,
+                futures_ex.create_market_order(
+                    sym, trade_action, contract_size
                 )
 
                 st.session_state.signal_cooldown[fut_cooldown_key] = True
@@ -1136,10 +1234,9 @@ if futures_ex:
                     },
                 )
 
-                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x) z SL/TP"
+                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x)"
                 send_notification(
-                    f"🔵 [FUTURES] Otwarto {action_label} na {sym} z"
-                    " zabezpieczeniem giełdowym"
+                    f"🔵 [FUTURES] Otwarto {action_label} na {sym}"
                 )
               except Exception as ex:
                 status = f"❌ Błąd: {ex}"
@@ -1158,19 +1255,24 @@ if futures_ex:
   if fut_results:
     st.dataframe(pd.DataFrame(fut_results), use_container_width=True)
 
+
 st.markdown("---")
+
 
 # =====================================================================
 # RANKING I SKANER NAJLEPSZYCH OKAZJI DLA BOTÓW
 # =====================================================================
+
 st.subheader("🤖 Skaner Najlepszych Okazji dla Botów")
 st.markdown(
     "Poniższa tabela zbiera rynki z najwyższym wolumenem zgodnie z ustawioną"
     " w panelu bocznym liczbą par dla Futures."
 )
 
+
 combined_bot_ranking = []
 source_ex_for_ranking = futures_ex if futures_ex else spot_ex
+
 
 if source_ex_for_ranking:
   try:
@@ -1231,16 +1333,22 @@ if source_ex_for_ranking:
         {"Błąd": f"Nie udało się pobrać danych rankingowych: {e}"}
     )
 
+
 if combined_bot_ranking:
   st.dataframe(pd.DataFrame(combined_bot_ranking), use_container_width=True)
+
 
 st.markdown("---")
 st.subheader("📜 Dziennik Transakcji w Bieżącej Sesji")
 
+
 if st.session_state.trade_history:
-  st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
+  st.dataframe(
+      pd.DataFrame(st.session_state.trade_history), use_container_width=True
+  )
 else:
   st.info("Brak zarejestratowanych transakcji w tej sesji.")
+
 
 if (
     st.session_state.scanner_active
@@ -1250,32 +1358,46 @@ if (
   time.sleep(scan_interval)
   st.rerun()
 
+
 # =====================================================================
 # PANEL SUBSKRYPCJI I ZABEZPIECZENIE SAAS
 # =====================================================================
+
 my_admin_email = "marekja57@wp.pl"
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💎 Strefa SaaS")
+
 
 current_user_email = st.sidebar.text_input(
     "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
 )
 
+
 is_owner = current_user_email == my_admin_email
 user_subscribed = is_owner or False
+
 
 if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
   st.sidebar.markdown(
       f"""
+
         <a href="{stripe_payment_link}" target="_blank">
+
             <div style="background: linear-gradient(135deg, #635bff 0%, #4338ca 100%);
+
                         color: white; padding: 10px 15px; border-radius: 8px;
+
                         text-align: center; font-weight: bold; text-decoration: none;">
+
                 💳 KUP SUBSKRYPCJĘ (49 PLN)
+
             </div>
+
         </a>
+
         """,
       unsafe_allow_html=True,
   )
