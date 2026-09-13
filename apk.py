@@ -1,23 +1,15 @@
 from datetime import datetime
-
 import glob
-
 import os
-
 import time
-
 import ccxt
-
 import pandas as pd
-
 import streamlit as st
-
 
 st.set_page_config(
     page_title="Bitget SAS - Pełna Autonomia",
     layout="wide",
 )
-
 
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
@@ -29,202 +21,107 @@ if "logged_in" not in st.session_state:
 
 st.markdown(
     """
-
-    <style>
-
-    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
-
-
-    .stApp {
-
-        background-color: #0d0b0a;
-
-    }
-
-    section[data-testid="stSidebar"] {
-
-        background-color: #141110;
-
-        border-right: 2px solid #3d2f1f;
-
-    }
-
-    
-
-    section[data-testid="stSidebar"] input {
-
-        background-color: #1e1814 !important;
-
-        color: #f3d57a !important;
-
-        border: 1px solid #f3d57a !important;
-
-    }
-
-    
-
-    .hero-wrapper {
-
-        display: flex;
-
-        align-items: center;
-
-        justify-content: center;
-
-        width: 100%;
-
-        padding-top: 45px;
-
-        padding-bottom: 20px;
-
-    }
-
-    
-
-    .retro-ornate-frame {
-
-        position: relative;
-
-        background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
-
-        border: 6px double #f3d57a;
-
-        padding: 40px 30px 50px 30px;
-
-        border-radius: 16px;
-
-        box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
-
-        width: 100%;
-
-        max-width: 950px;
-
-        text-align: center;
-
-        display: flex;
-
-        flex-direction: column;
-
-        align-items: center;
-
-        justify-content: center;
-
-    }
-
-
-    .retro-ornate-frame::before, .retro-ornate-frame::after {
-
-        content: "❖ ❖ ❖";
-
-        position: absolute;
-
-        color: #f3d57a;
-
-        font-size: 1rem;
-
-        letter-spacing: 6px;
-
-    }
-
-    .retro-ornate-frame::before { top: 12px; left: 18px; }
-
-    .retro-ornate-frame::after { top: 12px; right: 18px; }
-
-
-    .retro-vintage-title {
-
-        font-family: 'Bungee Inline', cursive, sans-serif;
-
-        font-size: 4.5rem;
-
-        color: #f3d57a;
-
-        letter-spacing: 6px;
-
-        text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
-
-        margin: 5px 0 10px 0;
-
-        line-height: 1.1;
-
-    }
-
-
-    .button-spacer {
-
-        margin-top: 30px;
-
-        width: 100%;
-
-        display: flex;
-
-        justify-content: center;
-
-    }
-
-
-    div.stButton > button {
-
-        background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
-
-        color: #f3d57a !important;
-
-        border: 2px solid #f3d57a !important;
-
-        font-family: 'Cinzel', serif !important;
-
-        font-weight: 700 !important;
-
-        font-size: 1rem !important;
-
-        padding: 12px 28px !important;
-
-        border-radius: 8px !important;
-
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important;
-
-        transition: all 0.3s ease !important;
-
-    }
-
-    div.stButton > button:hover {
-
-        background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important;
-
-        border-color: #ffe89d !important;
-
-        color: #ffe89d !important;
-
-        box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important;
-
-        transform: translateY(-2px);
-
-    }
-
-
-    div[data-testid="stMetric"] {
-
-        border: 2px solid #f3d57a;
-
-        border-radius: 10px;
-
-        padding: 12px 15px;
-
-        background-color: rgba(243, 213, 122, 0.03);
-
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-
-    }
-
-    div[data-testid="stMetric"] label {
-
-        color: #f3d57a !important;
-
-    }
-
-    </style>
-
-    """,
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
+
+.stApp {
+    background-color: #0d0b0a;
+}
+section[data-testid="stSidebar"] {
+    background-color: #141110;
+    border-right: 2px solid #3d2f1f;
+}
+
+section[data-testid="stSidebar"] input {
+    background-color: #1e1814 !important;
+    color: #f3d57a !important;
+    border: 1px solid #f3d57a !important;
+}
+
+.hero-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding-top: 45px;
+    padding-bottom: 20px;
+}
+
+.retro-ornate-frame {
+    position: relative;
+    background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
+    border: 6px double #f3d57a;
+    padding: 40px 30px 50px 30px;
+    border-radius: 16px;
+    box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
+    width: 100%;
+    max-width: 950px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.retro-ornate-frame::before, .retro-ornate-frame::after {
+    content: "❖ ❖ ❖";
+    position: absolute;
+    color: #f3d57a;
+    font-size: 1rem;
+    letter-spacing: 6px;
+}
+.retro-ornate-frame::before { top: 12px; left: 18px; }
+.retro-ornate-frame::after { top: 12px; right: 18px; }
+
+.retro-vintage-title {
+    font-family: 'Bungee Inline', cursive, sans-serif;
+    font-size: 4.5rem;
+    color: #f3d57a;
+    letter-spacing: 6px;
+    text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
+    margin: 5px 0 10px 0;
+    line-height: 1.1;
+}
+
+.button-spacer {
+    margin-top: 30px;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+div.stButton > button {
+    background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
+    color: #f3d57a !important;
+    border: 2px solid #f3d57a !important;
+    font-family: 'Cinzel', serif !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    padding: 12px 28px !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important;
+    transition: all 0.3s ease !important;
+}
+div.stButton > button:hover {
+    background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important;
+    border-color: #ffe89d !important;
+    color: #ffe89d !important;
+    box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important;
+    transform: translateY(-2px);
+}
+
+div[data-testid="stMetric"] {
+    border: 2px solid #f3d57a;
+    border-radius: 10px;
+    padding: 12px 15px;
+    background-color: rgba(243, 213, 122, 0.03);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+div[data-testid="stMetric"] label {
+    color: #f3d57a !important;
+}
+</style>
+""",
     unsafe_allow_html=True,
 )
 
@@ -235,15 +132,11 @@ st.markdown(
 
 if not st.session_state.logged_in:
   st.markdown(
-      f"""
-
-        <div class="hero-wrapper">
-
-            <div class="retro-ornate-frame">
-
-                <div class="retro-vintage-title">BITGET SAS</div>
-
-        """,
+      """
+<div class="hero-wrapper">
+    <div class="retro-ornate-frame">
+        <div class="retro-vintage-title">BITGET SAS</div>
+""",
       unsafe_allow_html=True,
   )
 
@@ -1383,22 +1276,14 @@ if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
   st.sidebar.markdown(
       f"""
-
-        <a href="{stripe_payment_link}" target="_blank">
-
-            <div style="background: linear-gradient(135deg, #635bff 0%, #4338ca 100%);
-
-                        color: white; padding: 10px 15px; border-radius: 8px;
-
-                        text-align: center; font-weight: bold; text-decoration: none;">
-
-                💳 KUP SUBSKRYPCJĘ (49 PLN)
-
-            </div>
-
-        </a>
-
-        """,
+<a href="{stripe_payment_link}" target="_blank">
+    <div style="background: linear-gradient(135deg, #635bff 0%, #4338ca 100%);
+                color: white; padding: 10px 15px; border-radius: 8px;
+                text-align: center; font-weight: bold; text-decoration: none;">
+        💳 KUP SUBSKRYPCJĘ (49 PLN)
+    </div>
+</a>
+""",
       unsafe_allow_html=True,
   )
   st.warning(
