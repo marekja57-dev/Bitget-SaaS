@@ -954,7 +954,6 @@ max_pozycje = st.slider(
     "Maksymalna liczba aktywnych pozycji",
     min_value=1,
     max_value=50,
-    value=10, # Domyślna wartość początkowa (np. obecne 10)
     step=1,
 )
 fut_results = []
