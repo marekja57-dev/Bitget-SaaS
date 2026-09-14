@@ -187,49 +187,9 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
 
-# Sidebar - API Credentials
-with st.sidebar.container(border=True):
-    st.markdown("### 💎 Status Administratora")
-    input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
-    input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
-    input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
-
-    if st.button("🚀 ZAPISZ I POŁĄCZ Z GIEŁDĄ", use_container_width=True):
-        if input_api and input_secret and input_pass:
-            st.session_state.api_key = input_api
-            st.session_state.secret_key = input_secret
-            st.session_state.passphrase = input_pass
-            save_credentials(input_api, input_secret, input_pass)
-            st.session_state.logged_in = True
-            st.success("✅ Połączenie z Bitget aktywne")
-            st.rerun()
-        else:
-            st.error("Wypełnij wszystkie pola.")
-
-    if st.session_state.logged_in:
-        st.success("✅ Status: Zalogowany")
-    else:
-        st.warning("⚠️ Brak autoryzacji")
-
-spot_ex = get_exchange("spot")
-futures_ex = get_exchange("futures")
-
-if futures_ex and not st.session_state.known_markets:
-    try:
-        markets = futures_ex.load_markets()
-        st.session_state.known_markets = set(markets.keys())
-    except Exception:
-        pass
-
-st.sidebar.markdown("---")
-if st.sidebar.button("⬅️ Powrót do ekranu powitalnego", use_container_width=True):
-    st.session_state.page = "welcome"
-    st.rerun()
-
 # =====================================================================
-# PEŁNY PANEL SUBSKRYPCJI STRIPE (PRZYWRÓCONY W CAŁOŚCI)
+# UMIESZCZONE NA SAMEJ GÓRZE: PANEL STRIPE I SUBSKRYPCJE
 # =====================================================================
-st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
     st.markdown("### 💳 Panel Subskrybenta (Stripe)")
     sub_mode = st.selectbox("Status Licencji / Dostępu", ["Weryfikacja Automatyczna", "Aktywny (VIP)", "Okres Próbny", "Wygasła"])
@@ -270,6 +230,47 @@ with st.sidebar.container(border=True):
                 st.error(f"Błąd Stripe API: {e}")
         else:
             st.warning("Podaj klucz Secret Key oraz Price ID w panelu.")
+
+st.sidebar.markdown("---")
+
+# Sidebar - API Credentials
+with st.sidebar.container(border=True):
+    st.markdown("### 💎 Status Administratora")
+    input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
+    input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
+    input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
+
+    if st.button("🚀 ZAPISZ I POŁĄCZ Z GIEŁDĄ", use_container_width=True):
+        if input_api and input_secret and input_pass:
+            st.session_state.api_key = input_api
+            st.session_state.secret_key = input_secret
+            st.session_state.passphrase = input_pass
+            save_credentials(input_api, input_secret, input_pass)
+            st.session_state.logged_in = True
+            st.success("✅ Połączenie z Bitget aktywne")
+            st.rerun()
+        else:
+            st.error("Wypełnij wszystkie pola.")
+
+    if st.session_state.logged_in:
+        st.success("✅ Status: Zalogowany")
+    else:
+        st.warning("⚠️ Brak autoryzacji")
+
+spot_ex = get_exchange("spot")
+futures_ex = get_exchange("futures")
+
+if futures_ex and not st.session_state.known_markets:
+    try:
+        markets = futures_ex.load_markets()
+        st.session_state.known_markets = set(markets.keys())
+    except Exception:
+        pass
+
+st.sidebar.markdown("---")
+if st.sidebar.button("⬅️ Powrót do ekranu powitalnego", use_container_width=True):
+    st.session_state.page = "welcome"
+    st.rerun()
 
 # Powiadomienia Telegram
 st.sidebar.markdown("---")
@@ -335,7 +336,7 @@ with st.sidebar.container(border=True):
     max_fut_scan_pairs = st.slider("📈 Liczba par Futures", 5, 30, 10, 5)
 
 st.sidebar.markdown("---")
-emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary")
+emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
 
 if emergency_kill:
     if futures_ex:
