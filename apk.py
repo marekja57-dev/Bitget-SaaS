@@ -14,25 +14,30 @@ st.set_page_config(
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+if "api_key" not in st.session_state:
+    st.session_state.api_key = st.secrets.get(
+        "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
+    )
+if "secret_key" not in st.session_state:
+    st.session_state.secret_key = st.secrets.get(
+        "BITGET_SECRET_KEY",
+        "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
+    )
+if "passphrase" not in st.session_state:
+    st.session_state.passphrase = st.secrets.get(
+        "BITGET_PASSPHRASE", "Zostaw1260"
+    )
+
 # =====================================================================
 # FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT ORAZ DYNAMICZNEJ DŹWIGNI
 # =====================================================================
 def get_exchange(market_type):
     try:
-        api_key = st.secrets.get(
-            "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
-        )
-        secret = st.secrets.get(
-            "BITGET_SECRET_KEY",
-            "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
-        )
-        passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-
         ex_type = "spot" if market_type == "spot" else "swap"
         exchange = ccxt.bitget({
-            "apiKey": api_key,
-            "secret": secret,
-            "password": passphrase,
+            "apiKey": st.session_state.api_key,
+            "secret": st.session_state.secret_key,
+            "password": st.session_state.passphrase,
             "enableRateLimit": True,
             "options": {"defaultType": ex_type},
         })
@@ -45,7 +50,6 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     if "Ręczny" in mode:
         return int(manual_lev)
     
-    # Inteligentne skalowanie bazujące na zmienności (im wyższa zmienność, tym niższa dźwignia)
     if current_vol > 5.0:
         base_lev = 3
     elif current_vol > 3.0:
@@ -55,7 +59,6 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     else:
         base_lev = 12
     
-    # Delikatne podbicie dla głównych, płynnych par przy niskiej zmienności
     if ("BTC" in sym or "ETH" in sym) and current_vol < 2.5:
         base_lev = min(15, base_lev + 3)
         
@@ -165,7 +168,7 @@ st.markdown(
 )
 
 # =====================================================================
-# STRONA POWITALNA Z FORMULARZEM LOGOWANIA I ZAPAMIĘCIWYNIEM DANYCH
+# STRONA POWITALNA - DANE DOSTĘPOWE BITGET (API + HASŁO/PASZPORT)
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
@@ -178,18 +181,22 @@ if not st.session_state.logged_in:
     )
 
     st.markdown(
-        '<p style="color: #f3d57a; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 1px;">Wprowadź dane logowania oraz klucz dostępu (passphrase)</p>',
+        '<p style="color: #f3d57a; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 1px;">Wprowadź klucze API oraz hasło (passphrase) do giełdy Bitget</p>',
         unsafe_allow_html=True,
     )
 
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     with col_l2:
-        login_email = st.text_input("Email / Login", value="marekja57@wp.pl")
-        login_passphrase = st.text_input("Hasło / Passphrase", type="password", value="")
+        input_api = st.text_input("Bitget API Key", value=st.session_state.api_key)
+        input_secret = st.text_input("Bitget Secret Key", type="password", value=st.session_state.secret_key)
+        input_pass = st.text_input("Bitget Passphrase (Hasło)", type="password", value=st.session_state.passphrase)
 
         st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
-        if st.button("🚀 ZALOGUJ SIĘ DO SYSTEMU", use_container_width=True):
-            if login_email:
+        if st.button("🚀 POŁĄCZ Z GIEŁDĄ I ZALOGUJ", use_container_width=True):
+            if input_api and input_secret and input_pass:
+                st.session_state.api_key = input_api
+                st.session_state.secret_key = input_secret
+                st.session_state.passphrase = input_pass
                 st.session_state.logged_in = True
                 st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -237,7 +244,7 @@ if "listing_sniper_active" not in st.session_state:
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Status Administratora")
-    st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
+    st.success("✅ Połączenie z Bitget aktywne")
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -250,7 +257,7 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔒 Wróć do ekranu powitalnego"):
+if st.sidebar.button("🔒 Wróć do ekranu powitalnego (Klucze API)"):
     st.session_state.logged_in = False
     st.rerun()
 
@@ -1357,5 +1364,5 @@ if not user_subscribed:
     st.stop()
 else:
     st.sidebar.markdown("---")
-    st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
+    st.sidebar.success("✅ Połączono z Bitget (Pełny dostęp API)")
 
