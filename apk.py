@@ -15,6 +15,32 @@ if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
 # =====================================================================
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (AUTOMATYCZNE KLUCZE)
+# =====================================================================
+def get_exchange(market_type):
+  try:
+    api_key = st.secrets.get(
+        "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
+    )
+    secret = st.secrets.get(
+        "BITGET_SECRET_KEY",
+        "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
+    )
+    passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
+
+    ex_type = "spot" if market_type == "spot" else "swap"
+    exchange = ccxt.bitget({
+        "apiKey": api_key,
+        "secret": secret,
+        "password": passphrase,
+        "enableRateLimit": True,
+        "options": {"defaultType": ex_type},
+    })
+    return exchange
+  except Exception:
+    return None
+
+# =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
 st.markdown(
@@ -28,12 +54,6 @@ st.markdown(
     section[data-testid="stSidebar"] {
         background-color: #141110;
         border-right: 2px solid #3d2f1f;
-    }
-    
-    section[data-testid="stSidebar"] input {
-        background-color: #1e1814 !important;
-        color: #f3d57a !important;
-        border: 1px solid #f3d57a !important;
     }
     
     .hero-wrapper {
@@ -147,7 +167,7 @@ if not st.session_state.logged_in:
   st.stop()
 
 # =====================================================================
-# INICJALIZACJA CZASU SESJI (Zegar trwania)
+# INICJALIZACJA CZASU SESJI
 # =====================================================================
 if "session_start_time" not in st.session_state:
   st.session_state.session_start_time = datetime.now()
@@ -179,74 +199,17 @@ if "known_markets" not in st.session_state:
   st.session_state.known_markets = set()
 
 if "listing_sniper_active" not in st.session_state:
-  st.session_state.listing_sniper_active = (
-      True # Domyślnie włączony (działa w tle)
-  )
+  st.session_state.listing_sniper_active = True
 
-
-def get_exchange(ex_type, api_key="", secret="", password=""):
-  try:
-    config = {
-        "apiKey": api_key,
-        "secret": secret,
-        "password": password,
-        "enableRateLimit": True,
-        "headers": {"X-BH-SUBACCOUNT": ""},
-    }
-    if ex_type == "spot":
-      ex = ccxt.bitget(config)
-    else:
-      config["options"] = {"defaultType": "swap"}
-      ex = ccxt.bitget(config)
-    ex.load_markets()
-    return ex
-  except Exception as e:
-    return None
-
-
+# =====================================================================
+# PANEL BOCZNY (BEZ WIDOCZNYCH PÓL KLUCZY API)
+# =====================================================================
 with st.sidebar.container(border=True):
-  st.markdown("### 🔑 Konfiguracja API Bitget")
-  api_key_input = st.text_input("API Key", type="password")
-  secret_input = st.text_input("Secret Key", type="password")
-  password_input = st.text_input("Passphrase", type="password")
+  st.markdown("### 💎 Status Administratora")
+  st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
 
-spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
-futures_ex = get_exchange(
-    "futures", api_key_input, secret_input, password_input
-)
-
-# =====================================================================
-# INICJALIZACJA SESJI (BEZ WYŁĄCZANIA SNIPERA)
-# =====================================================================
-if "session_initialized" not in st.session_state:
-  st.session_state.session_initialized = True
-  st.session_state.scanner_active = False
-  st.session_state.trend_bot_spot_active = False
-  st.session_state.trend_bot_fut_active = False
-  # UWAGA: listing_sniper_active celowo NIE jest tu zerowany na False!
-  st.session_state.active_trades = {}
-
-  if futures_ex:
-    try:
-      open_orders = futures_ex.fetch_open_orders()
-      for order in open_orders:
-        try:
-          futures_ex.cancel_order(order["id"], order["symbol"])
-        except Exception:
-          pass
-    except Exception:
-      pass
-
-  if spot_ex:
-    try:
-      open_spot_orders = spot_ex.fetch_open_orders()
-      for order in open_spot_orders:
-        try:
-          spot_ex.cancel_order(order["id"], order["symbol"])
-        except Exception:
-          pass
-    except Exception:
-      pass
+spot_ex = get_exchange("spot")
+futures_ex = get_exchange("futures")
 
 if futures_ex and not st.session_state.known_markets:
   try:
@@ -271,7 +234,6 @@ with st.sidebar.container(border=True):
   )
   telegram_chat_id = st.text_input("Telegram Chat ID (opcjonalnie)")
 
-
 def send_notification(message):
   if enable_notifications:
     st.toast(message, icon="🤖")
@@ -287,7 +249,6 @@ def send_notification(message):
         urllib.request.urlopen(url, data=data, timeout=3)
       except Exception:
         pass
-
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -310,6 +271,12 @@ with st.sidebar.container(border=True):
   )
 
   st.markdown("---")
+  st.markdown("### 🛑 Stop Loss & Take Profit (Autonomia)")
+  stop_loss_pct = st.slider("Bazowy Stop Loss (%)", 1, 20, 4)
+  take_profit_pct = st.slider("Bazowy Take Profit (%)", 2, 50, 8)
+  dynamic_sl_tp = st.checkbox("🤖 Dynamiczny dobór SL/TP (zależny od zmienności rynku)", value=True)
+
+  st.markdown("---")
   st.markdown("### ⚡ Zarządzanie Dźwignią Futures (Pozostałe)")
   leverage_mode = st.radio(
       "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
@@ -326,10 +293,8 @@ st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
   st.markdown("### 🔄 Pętla Główna Skanera i Nowe Pary")
 
-
   def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
-
 
   auto_scan_enabled = st.checkbox(
       "Włącz auto-skanowanie w tle (Non-stop)",
@@ -382,9 +347,6 @@ if emergency_kill:
   st.session_state.scanner_active = False
   st.session_state.trend_bot_spot_active = False
   st.session_state.trend_bot_fut_active = False
-  st.session_state.listing_sniper_active = (
-      False # Kill switch wyłącza też snajpera
-  )
   st.session_state.active_trades = {}
   st.session_state.signal_cooldown = {}
   send_notification(
@@ -418,7 +380,7 @@ if futures_ex:
     pass
 
 # =====================================================================
-# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI W ZŁOTYCH RAMKACH
+# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI
 # =====================================================================
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -471,7 +433,7 @@ with col_clock:
 st.markdown("---")
 
 # =====================================================================
-# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
+# PANEL STEROWANIA BOTAMI
 # =====================================================================
 st.subheader(
     "🥾 Panel Sterowania Botami Trendowymi i Sniperem Nowych Par"
@@ -486,12 +448,10 @@ with st.container(border=True):
         " potencjale zysku wg sygnałów."
     )
 
-
     def toggle_main_trend_spot():
       st.session_state.trend_bot_spot_active = (
           st.session_state.main_cb_trend_spot
       )
-
 
     st.checkbox(
         "🟢 Uruchom Bota Spot Trendowego",
@@ -513,10 +473,8 @@ with st.container(border=True):
         key="main_bot_f_lmode",
     )
 
-
     def toggle_main_trend_fut():
       st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
-
 
     st.checkbox(
         "🔵 Uruchom Bota Futures (Autonomiczny)",
@@ -537,7 +495,8 @@ col_btn, col_status = st.columns([2, 1])
 with col_btn:
   if not st.session_state.scanner_active:
     if st.button(
-        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures + Sniper)",
+        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures +"
+        " Sniper)",
         type="primary",
         use_container_width=True,
     ):
@@ -553,8 +512,8 @@ with col_btn:
       st.rerun()
 
 with col_status:
-  if st.session_state.scanner_active or st.session_state.listing_sniper_active:
-    st.success("🟢 STATUS: AKTYWNY (W TLE)")
+  if st.session_state.scanner_active:
+    st.success("🟢 STATUS: AKTYWNY (NON-STOP)")
   else:
     st.error("🔴 STATUS: ZATRZYMANY")
 
@@ -586,7 +545,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# MODUŁ: LISTING SNIPER (Nowe tokeny: max 100 USDT, dźwignia dokładnie 2x)
+# MODUŁ: LISTING SNIPER
 # =====================================================================
 if futures_ex and st.session_state.listing_sniper_active:
   try:
@@ -612,11 +571,17 @@ if futures_ex and st.session_state.listing_sniper_active:
                 contracts = (sniper_budget * sniper_leverage) / price
                 futures_ex.create_market_order(sym, "buy", contracts)
 
+                # Wyliczanie poziomów SL i TP dla Snipere'a
+                sl_val = price * (1 - (stop_loss_pct / 100.0) / sniper_leverage)
+                tp_val = price * (1 + (take_profit_pct / 100.0) / sniper_leverage)
+
                 st.session_state.active_trades[sym] = {
                     "entry_price": price,
                     "side": "buy",
                     "contracts": contracts,
                     "leverage": sniper_leverage,
+                    "stop_loss": sl_val,
+                    "take_profit": tp_val,
                 }
                 st.session_state.trade_history.insert(
                     0,
@@ -627,11 +592,12 @@ if futures_ex and st.session_state.listing_sniper_active:
                         "Budżet": f"{sniper_budget:.2f} USDT",
                         "Dźwignia": f"{sniper_leverage}x",
                         "Cena": f"{price:.4f}",
+                        "SL / TP": f"{sl_val:.4f} / {tp_val:.4f}",
                     },
                 )
                 send_notification(
                     f"🎯 [LISTING SNIPER] Wykryto nowy token {sym}! Kupiono za"
-                    f" {sniper_budget:.1f} USDT z dźwignią 2x."
+                    f" {sniper_budget:.1f} USDT z dźwignią 2x (SL: {sl_val:.2f}, TP: {tp_val:.2f})."
                 )
             except Exception:
               pass
@@ -799,12 +765,28 @@ if futures_ex and st.session_state.trend_bot_fut_active:
             contracts = (budget * bot_leverage) / f_price
             futures_ex.create_market_order(sym, side, contracts)
 
+            # Wyliczanie dynamicznych cen SL / TP
+            effective_sl = stop_loss_pct
+            effective_tp = take_profit_pct
+            if dynamic_sl_tp:
+              # Dostosowanie SL/TP do dźwigni i zmienności
+              effective_sl = max(1.0, stop_loss_pct / (bot_leverage * 0.5))
+
+            if side == "buy":
+              sl_price = f_price * (1 - (effective_sl / 100.0) / bot_leverage)
+              tp_price = f_price * (1 + (effective_tp / 100.0) / bot_leverage)
+            else:
+              sl_price = f_price * (1 + (effective_sl / 100.0) / bot_leverage)
+              tp_price = f_price * (1 - (effective_tp / 100.0) / bot_leverage)
+
             st.session_state.signal_cooldown[tf_key] = time.time()
             st.session_state.active_trades[sym] = {
                 "entry_price": f_price,
                 "side": side,
                 "contracts": contracts,
                 "leverage": bot_leverage,
+                "stop_loss": sl_price,
+                "take_profit": tp_price,
             }
             st.session_state.trade_history.insert(
                 0,
@@ -815,16 +797,17 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                     "Budżet": f"{budget:.2f} USDT",
                     "Dźwignia": f"{bot_leverage}x",
                     "Cena": f"{f_price:.4f}",
+                    "SL / TP": f"{sl_price:.4f} / {tp_price:.4f}",
                 },
             )
             send_notification(
-                f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)"
+                f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x) | SL: {sl_price:.2f}, TP: {tp_price:.2f}"
             )
   except Exception:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
+# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA ORAZ KONTROLA SL / TP
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
@@ -838,6 +821,8 @@ if futures_ex and st.session_state.active_trades:
         entry_price = trade_info["entry_price"]
         side = trade_info["side"]
         contracts = trade_info["contracts"]
+        sl_target = trade_info.get("stop_loss", 0)
+        tp_target = trade_info.get("take_profit", 0)
 
         if side == "buy":
           pct_change = (
@@ -852,27 +837,53 @@ if futures_ex and st.session_state.active_trades:
               * trade_info["leverage"]
           )
 
-        try:
-          f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-          f_df = pd.DataFrame(
-              f_ohlcv,
-              columns=["timestamp", "open", "high", "low", "close", "volume"],
-          )
-          f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
-              "close"
-          ].ewm(span=26, adjust=False).mean()
-          f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+        # Sprawdzenie warunków Stop Loss i Take Profit
+        hit_sl = False
+        hit_tp = False
+        close_reason = ""
 
-          m_val = f_df["macd"].iloc[-1]
-          s_val = f_df["signal"].iloc[-1]
+        if side == "buy":
+          if sl_target > 0 and curr_price <= sl_target:
+            hit_sl = True
+            close_reason = "STOP LOSS (Ochrona Kapitału)"
+          elif tp_target > 0 and curr_price >= tp_target:
+            hit_tp = True
+            close_reason = "TAKE PROFIT (Maksimum Zysku)"
+        else: # sell / short
+          if sl_target > 0 and curr_price >= sl_target:
+            hit_sl = True
+            close_reason = "STOP LOSS (Ochrona Kapitału)"
+          elif tp_target > 0 and curr_price <= tp_target:
+            hit_tp = True
+            close_reason = "TAKE PROFIT (Maksimum Zysku)"
 
-          signal_reversed = (side == "buy" and m_val < s_val) or (
-              side == "sell" and m_val > s_val
-          )
-        except Exception:
-          signal_reversed = False
+        # Sprawdzenie odwrócenia MACD (standardowy sygnał wyjścia)
+        signal_reversed = False
+        if not hit_sl and not hit_tp:
+          try:
+            f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+            f_df = pd.DataFrame(
+                f_ohlcv,
+                columns=["timestamp", "open", "high", "low", "close", "volume"],
+            )
+            f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
+                "close"
+            ].ewm(span=26, adjust=False).mean()
+            f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-        if signal_reversed:
+            m_val = f_df["macd"].iloc[-1]
+            s_val = f_df["signal"].iloc[-1]
+
+            signal_reversed = (side == "buy" and m_val < s_val) or (
+                side == "sell" and m_val > s_val
+            )
+          except Exception:
+            signal_reversed = False
+
+        if hit_sl or hit_tp or signal_reversed:
+          if not close_reason:
+            close_reason = "SYGNAŁ WYJŚCIA (MACD)"
+
           close_side = "sell" if side == "buy" else "buy"
           try:
             futures_ex.create_market_order(
@@ -880,12 +891,12 @@ if futures_ex and st.session_state.active_trades:
             )
           except Exception:
             pass
+
           trades_to_remove.append(sym)
           st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
-              f"🔄 [SYGNAŁ WYJŚCIA] Zamknięto {sym} wg sygnału (Wynik:"
-              f" {pct_change:+.2f}%)"
+              f"🔄 [{close_reason}] Zamknięto pozycję na {sym}. Wynik: {pct_change:+.2f}%"
           )
   except Exception:
     pass
@@ -1186,10 +1197,7 @@ if futures_ex:
 
           if st.session_state.scanner_active and is_futures_signal:
             if len(st.session_state.active_trades) >= max_active_futures_positions:
-              status = (
-                  f"🛡️ Limit {max_active_futures_positions} aktywnych"
-                  " zleceń osiągnięty"
-              )
+              status = f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń osiągnięty"
             elif is_in_cooldown or sym in st.session_state.active_trades:
               status = "🛡️ Cooldown / Pozycja aktywna"
             else:
@@ -1207,6 +1215,20 @@ if futures_ex:
                     sym, trade_action, contract_size
                 )
 
+                # Wyliczanie dynamicznego SL i TP w zależności od zmienności rynku i dźwigni
+                effective_sl = stop_loss_pct
+                effective_tp = take_profit_pct
+                if dynamic_sl_tp and current_vol > 3.0:
+                  effective_sl = max(1.0, stop_loss_pct * 0.8) # Ciasniejszy SL przy dużej zmienności
+                  effective_tp = take_profit_pct * 1.25 # Szerszy TP przy silnym ruchu
+
+                if trade_action == "buy":
+                  sl_price = current_price * (1 - (effective_sl / 100.0) / dyn_leverage)
+                  tp_price = current_price * (1 + (effective_tp / 100.0) / dyn_leverage)
+                else:
+                  sl_price = current_price * (1 + (effective_sl / 100.0) / dyn_leverage)
+                  tp_price = current_price * (1 - (effective_tp / 100.0) / dyn_leverage)
+
                 st.session_state.signal_cooldown[fut_cooldown_key] = (
                     time.time()
                 )
@@ -1215,6 +1237,8 @@ if futures_ex:
                     "side": trade_action,
                     "contracts": contract_size,
                     "leverage": dyn_leverage,
+                    "stop_loss": sl_price,
+                    "take_profit": tp_price,
                 }
 
                 st.session_state.trade_history.insert(
@@ -1226,12 +1250,13 @@ if futures_ex:
                         "Budżet": f"{allocated_budget:.2f} USDT",
                         "Dźwignia": f"{dyn_leverage}x",
                         "Cena": f"{current_price:.4f}",
+                        "SL / TP": f"{sl_price:.4f} / {tp_price:.4f}",
                     },
                 )
 
-                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x)"
+                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x) | SL/TP gotowe"
                 send_notification(
-                    f"🔵 [FUTURES] Otwarto {action_label} na {sym}"
+                    f"🔵 [FUTURES] Otwarto {action_label} na {sym} (SL: {sl_price:.2f}, TP: {tp_price:.2f})"
                 )
               except Exception as ex:
                 status = f"❌ Błąd: {ex}"
@@ -1336,35 +1361,23 @@ if st.session_state.trade_history:
 else:
   st.info("Brak zarejestratowanych transakcji w tej sesji.")
 
-# =====================================================================
-# CIĄGŁA PĘTLA TŁA (Wymusza odświeżanie, jeśli skaner lub SNIPER jest aktywny)
-# =====================================================================
 if (
     st.session_state.scanner_active
     or st.session_state.trend_bot_spot_active
     or st.session_state.trend_bot_fut_active
-    or st.session_state.listing_sniper_active
 ):
   time.sleep(scan_interval)
   st.rerun()
 
 # =====================================================================
-# PANEL SUBSKRYPCJI I ZABEZPIECZENIE SAAS
+# BLOKADA DOSTĘPU Dla SUBSKRYBENTÓW (PAYWALL SAAS)
 # =====================================================================
-my_admin_email = "marekja57@wp.pl"
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💎 Strefa SaaS")
-
-current_user_email = st.sidebar.text_input(
-    "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
-)
-
-is_owner = current_user_email == my_admin_email
-user_subscribed = is_owner or False
+user_subscribed = True # Administrator ma stały dostęp
 
 if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
+  st.sidebar.markdown("---")
+  st.sidebar.markdown("### 💎 Strefa SaaS")
   st.sidebar.markdown(
       f"""
         <a href="{stripe_payment_link}" target="_blank">
@@ -1382,4 +1395,5 @@ if not user_subscribed:
   )
   st.stop()
 else:
-  st.sidebar.success("✅ Dostęp aktywny (Administrator)")
+  st.sidebar.markdown("---")
+  st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
