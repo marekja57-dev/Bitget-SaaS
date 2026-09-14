@@ -203,9 +203,10 @@ if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
 # =====================================================================
-# AUTORYZACIJA ADMINISTRATORA ORAZ UKRYWANIE PÓL API
+# BEZPIECZNA AUTORYZACJA ADMINISTRATORA (HASŁO ZAMIAST JAWNEGO E-MAILA)
 # =====================================================================
 try:
+  admin_pass_env = st.secrets.get("ADMIN_PASSWORD", "Zostaw1260")
   admin_key_env = st.secrets.get(
       "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
   )
@@ -215,32 +216,34 @@ try:
   )
   admin_passphrase_env = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
 except Exception:
+  admin_pass_env = "Zostaw1260"
   admin_key_env = "bg_bad3414dc389df75aadc7794100d5c2"
-  admin_sec_env = (
-      "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
-  )
+  admin_sec_env = "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
   admin_passphrase_env = "Zostaw1260"
 
 with st.sidebar.container(border=True):
   st.markdown("### 💎 Autoryzacja Administratora")
-  admin_input = st.text_input("Hasło dostępu / Administratora:")
+  admin_password_input = st.text_input(
+      "Hasło dostępu / Administratora:", type="password"
+  )
 
-# Sprawdzamy czy wpisano Twój e-mail lub hasło administratora
-is_admin = admin_input.strip() in ["marekja57@wp.pl", "Zostaw1260"]
+is_admin = admin_password_input == admin_pass_env
 
-if is_admin:
-  st.sidebar.success("✅ Autoryzacja administratora aktywna")
-  api_key_input = admin_key_env
-  secret_input = admin_sec_env
-  password_input = admin_passphrase_env
-else:
-  if admin_input:
-    st.sidebar.error("❌ Nieprawidłowy e-mail lub hasło administratora")
-  with st.sidebar.container(border=True):
-    st.markdown("### 🔑 Konfiguracja API Bitget")
-    api_key_input = st.text_input("API Key", type="password")
-    secret_input = st.text_input("Secret Key", type="password")
-    password_input = st.text_input("Passphrase", type="password")
+ADMIN_API_KEY = admin_key_env if is_admin else ""
+ADMIN_SECRET_KEY = admin_sec_env if is_admin else ""
+ADMIN_PASSPHRASE = admin_passphrase_env if is_admin else ""
+
+with st.sidebar.container(border=True):
+  st.markdown("### 🔑 Konfiguracja API Bitget")
+  api_key_input = st.text_input(
+      "API Key", value=ADMIN_API_KEY, type="password"
+  )
+  secret_input = st.text_input(
+      "Secret Key", value=ADMIN_SECRET_KEY, type="password"
+  )
+  password_input = st.text_input(
+      "Passphrase", value=ADMIN_PASSPHRASE, type="password"
+  )
 
 spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
 futures_ex = get_exchange(
@@ -313,7 +316,9 @@ with st.sidebar.container(border=True):
   leverage_mode = st.radio(
       "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
   )
-  manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 50, 5)
+  manual_leverage = st.slider(
+      "Stała dźwignia Futures (Ręczna)", 1, 50, 5
+  )
 
   st.markdown("---")
   st.markdown("### 🧠 Inteligentne Wyjście & Sygnały")
