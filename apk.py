@@ -8,9 +8,7 @@ import streamlit as st
 # KONFIGURACJA STRONY I STYLIZACJA RETRO-VINTAGE
 # ==========================================
 st.set_page_config(
-    page_title="Bitget SAS - Autonomiczny Terminal Inwestycyjny",
-    page_icon="⚡",
-    layout="wide",
+    page_title="Bitget SAS - Terminal", page_icon="🛡️", layout="wide"
 )
 
 st.markdown(
@@ -21,13 +19,40 @@ st.markdown(
     .stButton>button:hover { background-color: #f4d03f; color: #000000; }
     .metric-card { background-color: #1a1c23; border: 1px solid #d4af37; padding: 15px; border-radius: 6px; margin-bottom: 10px; }
     .stAlert { background-color: #161b22; color: #e6e6e6; border: 1px solid #30363d; }
+    
+    /* Złote ramki dla pól API, Typu Rynku oraz Interwału w panelu bocznym */
+    .stTextInput input, .stSelectbox div[data-baseweb="select"] {
+        border: 1px solid #d4af37 !important;
+        border-radius: 4px !important;
+        background-color: #161b22 !important;
+    }
+
+    /* Styl retro dla ekranu startowego / banera głównego */
+    .retro-banner {
+        background-color: #12141c;
+        border: 3px solid #d4af37;
+        padding: 20px;
+        text-align: center;
+        border-radius: 6px;
+        box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
+        margin-bottom: 25px;
+    }
+    .retro-title {
+        color: #d4af37;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 36px;
+        font-weight: bold;
+        letter-spacing: 5px;
+        text-transform: uppercase;
+        margin: 0;
+    }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 # ==========================================
-# INICJALIZACJA STANÓW SESJI
+# INICJALIZACJA STANÓW SESJI I ROZPOZNAWANIE ADMINA PO IP
 # ==========================================
 if "bot_active" not in st.session_state:
   st.session_state.bot_active = False
@@ -35,18 +60,57 @@ if "trade_history" not in st.session_state:
   st.session_state.trade_history = []
 if "position_timers" not in st.session_state:
   st.session_state.position_timers = {}
-if "session_start_time" not in st.session_state:
+if (
+    "session_start_time" not in st.session_state
+    or not isinstance(st.session_state.session_start_time, (int, float))
+):
   st.session_state.session_start_time = time.time()
 if "top_pairs_cache" not in st.session_state:
   st.session_state.top_pairs_cache = []
+
+# Bezpieczne pobieranie IP klienta z nagłówków proxy serwera (Hetzner)
+try:
+  headers = st.context.headers
+  client_ip = (
+      headers.get("X-Forwarded-For", "").split(",")[0].strip()
+      or headers.get("X-Real-IP", "127.0.0.1")
+  )
+except Exception:
+  client_ip = "127.0.0.1"
+
+# Weryfikacja czy to administrator po adresie IP
+admin_saved_ip = (
+    st.secrets.get("ADMIN_IP", "127.0.0.1")
+    if "ADMIN_IP" in st.secrets
+    else "127.0.0.1"
+)
+is_admin_ip = client_ip == admin_saved_ip
+
+if is_admin_ip:
+  admin_default_key = st.secrets.get("ADMIN_API_KEY", "")
+  admin_default_secret = st.secrets.get("ADMIN_API_SECRET", "")
+  admin_default_password = st.secrets.get("ADMIN_API_PASSWORD", "")
+else:
+  admin_default_key = ""
+  admin_default_secret = ""
+  admin_default_password = ""
 
 # ==========================================
 # PANEL BOCZNY - BITGET SAS CONTROL & SECURITY
 # ==========================================
 st.sidebar.title("🛡️ Bitget SAS Control")
-api_key = st.sidebar.text_input("API Key", type="password")
-api_secret = st.sidebar.text_input("API Secret", type="password")
-api_password = st.sidebar.text_input("API Password (Passphrase)", type="password")
+if is_admin_ip:
+  st.sidebar.success("👑 Zalogowano jako Administrator (Auto-IP)")
+
+api_key = st.sidebar.text_input(
+    "API Key", value=admin_default_key, type="password"
+)
+api_secret = st.sidebar.text_input(
+    "API Secret", value=admin_default_secret, type="password"
+)
+api_password = st.sidebar.text_input(
+    "API Password (Passphrase)", value=admin_default_password, type="password"
+)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Parametry Rynku i Skanera")
@@ -55,7 +119,6 @@ tf = st.sidebar.selectbox(
     "Interwał Analityczny", ["5m", "15m", "1h", "4h"], index=1
 )
 
-# Suwak szerokości skanowania giełdy
 scan_breadth = st.sidebar.slider(
     "Szerokość skanowania rynku (liczba par)", 10, 50, 20, step=5
 )
@@ -63,11 +126,9 @@ scan_breadth = st.sidebar.slider(
 st.sidebar.markdown("---")
 st.sidebar.subheader("💰 Zarządzanie Ryzykiem i Kapitałem")
 
-# NOWY SUWAK: Maksymalna liczba jednoczesnych zleceń (0 - 50)
 max_open_trades = st.sidebar.slider(
     "Maks. liczba otwartych pozycji jednocześnie", 0, 50, 5, step=1
 )
-
 risk_pct_per_trade = (
     st.sidebar.slider("Alokacja kapitału z konta na pozycję (%)", 1.0, 25.0, 10.0, 1.0)
     / 100.0
@@ -92,7 +153,6 @@ min_hold_seconds = st.sidebar.number_input(
 
 st.sidebar.markdown("---")
 
-# Przycisk awaryjny KILL SWITCH
 if st.sidebar.button("🚨 KILL SWITCH (Zamknij wszystko)", type="primary"):
   st.session_state.bot_active = False
   if api_key and api_secret and api_password:
@@ -210,12 +270,15 @@ def analyze_market_conditions(exchange, symbol, timeframe):
 
 
 # ==========================================
-# INTERFEJS I WIDOCZNY KAPITAŁ ORAZ ZEGAR SESJI
+# INTERFEJS GŁÓWNY
 # ==========================================
-st.title("⚡ Bitget SAS - Autonomiczny Terminal Inwestycyjny")
 st.markdown(
-    "Profesjonalna platforma autonomiczna z kontrolą liczby zleceń, dynamicznym"
-    " kapitałem oraz tabelą Top 10."
+    """
+    <div class="retro-banner">
+        <h1 class="retro-title">BITGET SAS</h1>
+    </div>
+""",
+    unsafe_allow_html=True,
 )
 
 free_bal, total_bal = 0.0, 0.0
@@ -226,7 +289,14 @@ if api_key and api_secret and api_password:
   except Exception:
     pass
 
-session_uptime = int(time.time() - st.session_state.session_start_time)
+try:
+  session_uptime = int(
+      time.time() - float(st.session_state.session_start_time)
+  )
+except Exception:
+  st.session_state.session_start_time = time.time()
+  session_uptime = 0
+
 hours, remainder = divmod(session_uptime, 3600)
 minutes, seconds = divmod(remainder, 60)
 uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -279,19 +349,18 @@ with c_stop:
 st.markdown("---")
 
 # ==========================================
-# GŁÓWNA PĘTLA AUTONOMICZNA I TABELA TOP 10
+# ZAKŁADKI: HANDEL, SUBSKRYPCJA, LOGI, DIAGNOSTYKA
 # ==========================================
 if api_key and api_secret and api_password:
   try:
     exchange = init_exchange(api_key, api_secret, api_password, market_type)
 
-    tab1, tab2, tab3 = st.tabs(
-        [
-            "📊 Tabela Top 10 i Skaner Rynku",
-            "📜 Dziennik Zdarzeń SAS",
-            "⚙️ Status Połączenia",
-        ]
-    )
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Tabela Top 10 i Skaner Rynku",
+        "💳 Subskrypcja (49 zł)",
+        "📜 Dziennik Zdarzeń SAS",
+        "⚙️ Status Połączenia",
+    ])
 
     with tab1:
       st.subheader("Tablica Najlepszych Par Rynkowych (Top 10)")
@@ -405,11 +474,10 @@ if api_key and api_secret and api_password:
                 except Exception as ex:
                   st.error(f"Błąd zamykania {symbol}: {ex}")
 
-            # --- B. OTWIERANIE NOWEJ POZYCJI Z UWZGLĘDNIENIEM LIMITU ZLECEŃ ---
+            # --- B. OTWIERANIE NOWEJ POZYCJI ---
             else:
-              # Sprawdzenie limitu maksymalnej liczby otwartych pozycji z suwaka
               if len(active_positions_map) >= max_open_trades:
-                continue # Osiągnięto limit jednoczesnych pozycji
+                continue
 
               if free_usdt < 10.0:
                 continue
@@ -439,7 +507,6 @@ if api_key and api_secret and api_password:
                   st.session_state.trade_history.append(log_msg)
                   st.success(log_msg)
                   free_usdt -= allocated_margin
-                  # Aktualizujemy mapę pozycji lokalnie w pętli
                   active_positions_map[symbol] = {"side": "long"}
                 except Exception:
                   pass
@@ -475,6 +542,55 @@ if api_key and api_secret and api_password:
           )
 
     with tab2:
+      st.subheader("💳 Panel Płatności i Subskrypcji systemu Bitget SAS")
+      st.markdown(
+          "Aktywuj pełny dostęp do autonomicznego terminala inwestycyjnego."
+          " Koszt subskrypcji wynosi **49 zł / miesiąc**."
+      )
+
+      col_sub1, col_sub2 = st.columns(2)
+      with col_sub1:
+        st.markdown(
+            """
+                <div style="background-color: #161b22; border: 1px solid #d4af37; padding: 20px; border-radius: 6px;">
+                    <h3>Pakiet Miesięczny SAS</h3>
+                    <p style="font-size: 24px; color: #d4af37; font-weight: bold;">49 PLN <span style="font-size: 14px; color: #888;">/ mc</span></p>
+                    <ul style="color: #ccc; line-height: 1.6;">
+                        <li>Pełny dostęp do algorytmu Top 10</li>
+                        <li>Automatyczny skaner rynkowy</li>
+                        <li>Ochrona Stop Loss / Take Profit</li>
+                        <li>Bezpieczne szyfrowanie sesji</li>
+                    </ul>
+                </div>
+                """,
+            unsafe_allow_html=True,
+        )
+      with col_sub2:
+        st.markdown("### Opłać subskrypcję online")
+        st.write(
+            "Kliknij poniższy przycisk, aby przejść do bezpiecznej bramki"
+            " płatności Stripe i opłacić abonament."
+        )
+
+        stripe_payment_link = (
+            "https://buy.stripe.com/test_placeholder_link_49zl"
+        )
+        st.markdown(
+            f"""
+                <a href="{stripe_payment_link}" target="_blank">
+                    <button style="background-color: #d4af37; color: #000000; padding: 12px 24px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%;">
+                        💳 Opłać Subskrypcję (49 PLN)
+                    </button>
+                </a>
+                """,
+            unsafe_allow_html=True,
+        )
+        st.info(
+            "Po opłaceniu subskrypcji dostęp zostanie aktywowany dla Twojego"
+            " konta."
+        )
+
+    with tab3:
       st.subheader("Rejestr Operacji i Działań Systemu SAS")
       if st.session_state.trade_history:
         for hist in reversed(st.session_state.trade_history[-20:]):
@@ -482,7 +598,7 @@ if api_key and api_secret and api_password:
       else:
         st.info("Brak zarejestrowanych zdarzeń w bieżącej sesji.")
 
-    with tab3:
+    with tab4:
       st.subheader("Diagnostyka Połączenia API")
       st.success(
           "Klient CCXT pomyślnie uwierzytelniony i połączony z giełdą Bitget."
@@ -492,6 +608,6 @@ if api_key and api_secret and api_password:
     st.error(f"Krytyczny błąd infrastruktury aplikacji: {e}")
 else:
     st.warning(
-        "👈 Uzupełnij dane dostępowe API w panelu bocznym, aby aktywować"
-        " terminal."
+        "👈 Uzupełnij dane dostępowe API w panelu bocznym lub skonfiguruj"
+        " serwer, aby aktywować terminal."
     )
