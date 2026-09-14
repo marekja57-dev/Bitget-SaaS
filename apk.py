@@ -36,13 +36,11 @@ def init_db():
         )
     ''')
     
-    # Automatyczne nadanie uprawnień Administratora i opłaconej subskrypcji dla Twojego maila
-    cursor.execute("SELECT * FROM users WHERE email = ?", ("marekjas57@wp.pl",))
-    if cursor.fetchone():
-        cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE email = ?", ("marekjas57@wp.pl",))
+    # Automatyczne nadanie uprawnień Administratora i opłaconej subskrypcji dla Twojego maila (zabezpieczenie przed wielkością liter)
+    cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", ("marekjas57@wp.pl",))
     
     # Tworzenie domyślnego konta administratora zapasowego, jeśli nie istnieje
-    cursor.execute("SELECT * FROM users WHERE email = ?", ("admin@bot-bitget.pl",))
+    cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bitget.pl",))
     if not cursor.fetchone():
         admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
         cursor.execute(
@@ -147,16 +145,20 @@ if not st.session_state.logged_in:
         if st.button("ZALOGUJ SIĘ", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE email = ?", (login_email.strip(),))
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
             user_row = cursor.fetchone()
             conn.close()
 
             if user_row and user_row[2] == login_pass:
+                user_email_str = user_row[1].strip().lower()
+                is_admin_flag = True if user_email_str == "marekjas57@wp.pl" else bool(user_row[3])
+                stripe_paid_flag = True if is_admin_flag else bool(user_row[4])
+
                 st.session_state.logged_in = True
                 st.session_state.user_id = user_row[0]
                 st.session_state.user_email = user_row[1]
-                st.session_state.is_admin = bool(user_row[3])
-                st.session_state.stripe_paid = bool(user_row[4])
+                st.session_state.is_admin = is_admin_flag
+                st.session_state.stripe_paid = stripe_paid_flag
                 st.session_state.api_key = user_row[5] or ""
                 st.session_state.secret_key = user_row[6] or ""
                 st.session_state.passphrase = user_row[7] or ""
@@ -175,7 +177,8 @@ if not st.session_state.logged_in:
                 try:
                     conn = sqlite3.connect(DB_FILE)
                     cursor = conn.cursor()
-                    is_adm = 1 if reg_email.strip().lower() == "marekjas57@wp.pl" else 0
+                    clean_reg = reg_email.strip().lower()
+                    is_adm = 1 if clean_reg == "marekjas57@wp.pl" else 0
                     is_paid = 1 if is_adm == 1 else 0
                     cursor.execute(
                         "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, ?, ?)",
@@ -195,6 +198,11 @@ if not st.session_state.logged_in:
 # =====================================================================
 # GŁÓWNA APLIKACJA (PO ZALOGOWANIU)
 # =====================================================================
+# Zabezpieczenie w sesji – jeśli to Twój e-mail, zawsze wymuś admina
+if st.session_state.user_email.strip().lower() == "marekjas57@wp.pl":
+    st.session_state.is_admin = True
+    st.session_state.stripe_paid = True
+
 if "session_start_time" not in st.session_state:
     st.session_state.session_start_time = datetime.now()
 if "trade_history" not in st.session_state:
@@ -301,15 +309,7 @@ if futures_ex and not st.session_state.known_markets:
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
     st.markdown("### 💳 Strefa Subskrypcji")
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT stripe_paid, is_admin FROM users WHERE id = ?", (st.session_state.user_id,))
-    row = cursor.fetchone()
-    is_paid = bool(row[0]) if row else False
-    is_adm = bool(row[1]) if row else False
-    conn.close()
-
-    if is_paid or is_adm:
+    if st.session_state.is_admin or st.session_state.stripe_paid:
         st.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
     else:
         st.warning("⚠️ Brak aktywnej subskrypcji")
