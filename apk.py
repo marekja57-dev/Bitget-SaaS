@@ -1024,4 +1024,3 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
-
