@@ -97,14 +97,17 @@ if "user_id" not in st.session_state:
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
 
-# Bezpieczna inicjalizacja słownika aktywnych pozycji spot
 if "active_spot_trades" not in st.session_state:
     st.session_state.active_spot_trades = {}
 elif isinstance(st.session_state.active_spot_trades, set):
     old_set = st.session_state.active_spot_trades
     st.session_state.active_spot_trades = {sym: {"entry_price": 0.0, "amount": 0.0} for sym in old_set}
 
-# Obsługa powrotu z płatności Stripe
+if "known_spot_markets" not in st.session_state:
+    st.session_state.known_spot_markets = set()
+if "sniped_tokens" not in st.session_state:
+    st.session_state.sniped_tokens = {}
+
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
         st.session_state.stripe_paid = True
@@ -366,6 +369,11 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎯 Skaner Nowych Listingów (Sniper)")
+enable_sniper = st.sidebar.checkbox("Włącz Sniper Nowych Tokenów (Spot)", value=False)
+sniper_allocation_usdt = st.sidebar.number_input("Budżet na 1 nowy listing (USDT)", 5.0, 1000.0, 10.0, 5.0)
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔔 Powiadomienia Telegram")
 enable_notifications = st.sidebar.checkbox("Włącz powiadomienia", value=True)
 telegram_bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
@@ -451,12 +459,31 @@ if emergency_kill:
     time.sleep(2)
     st.rerun()
 
+# =====================================================================
+# PRAWIDŁOWE WYLICZENIE SALDA SPOT (USDT + WARTOŚĆ POSIADANYCH KRYPTO)
+# =====================================================================
 spot_free, spot_total = 0.0, 0.0
 if spot_ex:
     try:
         s_bal = spot_ex.fetch_balance()
         spot_free = float(s_bal.get("free", {}).get("USDT", 0.0))
-        spot_total = float(s_bal.get("total", {}).get("USDT", 0.0))
+        
+        total_spot_val = 0.0
+        try:
+            s_tickers = spot_ex.fetch_tickers()
+            for coin, amount in s_bal.get("total", {}).items():
+                if amount > 0:
+                    if coin == "USDT":
+                        total_spot_val += float(amount)
+                    else:
+                        pair = f"{coin}/USDT"
+                        if pair in s_tickers:
+                            price = float(s_tickers[pair].get("last", 0))
+                            total_spot_val += float(amount) * price
+        except Exception:
+            total_spot_val = float(s_bal.get("total", {}).get("USDT", 0.0))
+            
+        spot_total = total_spot_val if total_spot_val > 0 else spot_free
     except Exception:
         pass
 
@@ -585,6 +612,45 @@ with col_status:
 trusted_base_coins = ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE", "LINK", "SUI", "NEAR", "APT", "RENDER", "INJ", "PEPE", "SHIB", "LTC", "DOT", "UNI", "ZEC", "HYPE", "ATOM"]
 MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
+
+# =====================================================================
+# SNIPER NOWYCH LISTINGÓW (WYKRYWANIE I ZAKUP ŚWIEŻYCH TOKENÓW)
+# =====================================================================
+if spot_ex and enable_sniper:
+    try:
+        spot_ex.load_markets(True)
+        current_spot_symbols = set(spot_ex.symbols)
+        if not st.session_state.known_spot_markets:
+            st.session_state.known_spot_markets = current_spot_symbols
+        else:
+            new_listings = current_spot_symbols - st.session_state.known_spot_markets
+            for sym in new_listings:
+                if sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym:
+                    try:
+                        s_tickers = spot_ex.fetch_tickers([sym])
+                        c_price = float(s_tickers.get(sym, {}).get("last", 0))
+                        if c_price > 0 and spot_free >= sniper_allocation_usdt:
+                            amount = sniper_allocation_usdt / c_price
+                            try:
+                                amount_prec = float(spot_ex.amount_to_precision(sym, amount))
+                                spot_ex.create_order(sym, 'market', 'buy', amount_prec)
+                            except Exception:
+                                spot_ex.create_order(sym, 'market', 'buy', float(amount))
+
+                            st.session_state.sniped_tokens[sym] = {"entry_price": c_price, "amount": amount}
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "🎯 SNIPER NOWY LISTING",
+                                "Para": sym,
+                                "Budżet": f"{sniper_allocation_usdt:.2f} USDT",
+                                "Cena": f"{c_price:.4f}",
+                            })
+                            send_notification(f"🎯 [SNIPER] Wykryto nowy listing! Zakupiono {sym} za {sniper_allocation_usdt} USDT")
+                    except Exception:
+                        pass
+            st.session_state.known_spot_markets = current_spot_symbols
+    except Exception:
+        pass
 
 # =====================================================================
 # AWARYJNA KONTROLA SL / TP DLA AKTYWNYCH POZYCJI FUTURES (W TLE)
