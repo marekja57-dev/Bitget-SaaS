@@ -265,7 +265,7 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
         return 10
 
 # =====================================================================
-# PANEL BOCZNY (SIDEBAR)
+# PANEL BOCZNY (SIDEBAR) - SUBSKRYPCJA I PROFIL NA SAMEJ GÓRZE
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown(f"### 👤 Zalogowany: {st.session_state.user_email}")
@@ -283,6 +283,33 @@ with st.sidebar.container(border=True):
         st.session_state.secret_key = ""
         st.session_state.passphrase = ""
         st.rerun()
+
+st.sidebar.markdown("---")
+with st.sidebar.container(border=True):
+    st.markdown("### 💳 Strefa Subskrypcji")
+    if is_user_admin() or is_user_paid():
+        st.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
+    else:
+        st.warning("⚠️ Brak aktywnej subskrypcji")
+        if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
+            if stripe_sk_val and stripe_price_id_val:
+                try:
+                    checkout_session = stripe.checkout.Session.create(
+                        payment_method_types=['card'],
+                        line_items=[{
+                            'price': stripe_price_id_val,
+                            'quantity': 1,
+                        }],
+                        mode='subscription',
+                        success_url='https://bot-bitget.pl/?success=true',
+                        cancel_url='https://bot-bitget.pl/?canceled=true',
+                        customer_email=st.session_state.user_email,
+                    )
+                    st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Błąd Stripe: {e}")
+            else:
+                st.error("Bramka płatności nie skonfigurowana.")
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -318,33 +345,6 @@ if futures_ex and not st.session_state.known_markets:
         st.session_state.known_markets = set(markets.keys())
     except Exception:
         pass
-
-st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 💳 Strefa Subskrypcji")
-    if is_user_admin() or is_user_paid():
-        st.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
-    else:
-        st.warning("⚠️ Brak aktywnej subskrypcji")
-        if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
-            if stripe_sk_val and stripe_price_id_val:
-                try:
-                    checkout_session = stripe.checkout.Session.create(
-                        payment_method_types=['card'],
-                        line_items=[{
-                            'price': stripe_price_id_val,
-                            'quantity': 1,
-                        }],
-                        mode='subscription',
-                        success_url='https://bot-bitget.pl/?success=true',
-                        cancel_url='https://bot-bitget.pl/?canceled=true',
-                        customer_email=st.session_state.user_email,
-                    )
-                    st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Błąd Stripe: {e}")
-            else:
-                st.error("Bramka płatności nie skonfigurowana.")
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -732,7 +732,6 @@ if spot_ex:
             t_data = s_tickers.get(sym, {})
             is_active_spot = sym in st.session_state.active_spot_trades
             
-            # Dynamiczne sprawdzanie statusu / sygnału dla każdej pary z tabeli
             status_text = "⏳ Oczekująca"
             if is_active_spot:
                 status_text = "🟢 Aktywna (Spot)"
@@ -787,7 +786,6 @@ if futures_ex:
             pnl_val = "-"
             status_desc = "⏳ Oczekująca"
             
-            # Obliczenie domyślnej alokacji (min 5 USDT)
             prop_budget = max(MIN_FUT_TRADE, min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
             
             if pos:
@@ -800,7 +798,6 @@ if futures_ex:
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
                 status_desc = "🟢 Aktywna (Pozycja Otwarta)"
             else:
-                # Sprawdzenie sygnału dla nieotwartych par
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
                     time.sleep(0.01)
