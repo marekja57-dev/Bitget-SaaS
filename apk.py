@@ -181,6 +181,33 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
+# =====================================================================
+# WERYFIKACJA ADMINISTRATORA / SaaS ORAZ KLUCZE API
+# =====================================================================
+my_admin_email = "marekja57@wp.pl"
+
+st.sidebar.markdown("### 💎 Strefa SaaS & Dostęp")
+current_user_email = st.sidebar.text_input(
+    "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
+)
+is_owner = current_user_email == my_admin_email
+
+st.sidebar.markdown("---")
+
+with st.sidebar.container(border=True):
+  st.markdown("### 🔑 Konfiguracja API Bitget")
+  if is_owner:
+    # Administrator: klucze ładowane automatycznie z env (lub wpisz tutaj na stałe jeśli wolisz)
+    api_key_input = os.getenv("BITGET_API_KEY", "TUTAJ_WPISZ_SWOJ_API_KEY")
+    secret_input = os.getenv("BITGET_SECRET_KEY", "TUTAJ_WPISZ_SWOJ_SECRET")
+    password_input = os.getenv("BITGET_PASSPHRASE", "TUTAJ_WPISZ_PASSPHRASE")
+    st.success("✅ Tryb Administratora: Klucze API wczytane automatycznie.")
+  else:
+    # Subskrybent / Klient: musi wpisać własne dane API
+    api_key_input = st.text_input("API Key", type="password")
+    secret_input = st.text_input("Secret Key", type="password")
+    password_input = st.text_input("Passphrase", type="password")
+
 
 def get_exchange(ex_type, api_key="", secret="", password=""):
   try:
@@ -201,12 +228,6 @@ def get_exchange(ex_type, api_key="", secret="", password=""):
   except Exception as e:
     return None
 
-
-with st.sidebar.container(border=True):
-  st.markdown("### 🔑 Konfiguracja API Bitget")
-  api_key_input = st.text_input("API Key", type="password")
-  secret_input = st.text_input("Secret Key", type="password")
-  password_input = st.text_input("Passphrase", type="password")
 
 spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
 futures_ex = get_exchange(
@@ -270,10 +291,16 @@ with st.sidebar.container(border=True):
   max_single_trade_usdt = st.number_input(
       "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 5000.0, 50.0, 5.0
   )
-  # PRZYWRÓCONY SUVAK: Maksymalna liczba aktywnych pozycji Futures
   max_active_futures_positions = st.slider(
       "📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10
   )
+
+  st.markdown("---")
+  st.markdown("### 🛑 Zarządzanie Ryzykiem (Stop Loss / Take Profit)")
+  stop_loss_pct = st.slider(
+      "Stop Loss (Maksymalna strata % ROE)", 1, 50, 10
+  )
+  take_profit_pct = st.slider("Take Profit (Docelowy zysk % ROE)", 5, 200, 30)
 
   st.markdown("---")
   st.markdown("### ⚡ Zarządzanie Dźwignią Futures (Pozostałe)")
@@ -780,7 +807,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
+# SPRAWDZANIE STOP LOSS, TAKE PROFIT ORAZ SYGNAŁÓW WYJŚCIA
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
@@ -808,27 +835,33 @@ if futures_ex and st.session_state.active_trades:
               * trade_info["leverage"]
           )
 
-        try:
-          f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-          f_df = pd.DataFrame(
-              f_ohlcv,
-              columns=["timestamp", "open", "high", "low", "close", "volume"],
-          )
-          f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
-              "close"
-          ].ewm(span=26, adjust=False).mean()
-          f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+        # Sprawdzenie warunków STOP LOSS / TAKE PROFIT
+        hit_stop_loss = pct_change <= -stop_loss_pct
+        hit_take_profit = pct_change >= take_profit_pct
 
-          m_val = f_df["macd"].iloc[-1]
-          s_val = f_df["signal"].iloc[-1]
+        signal_reversed = False
+        if not hit_stop_loss and not hit_take_profit:
+          try:
+            f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+            f_df = pd.DataFrame(
+                f_ohlcv,
+                columns=["timestamp", "open", "high", "low", "close", "volume"],
+            )
+            f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
+                "close"
+            ].ewm(span=26, adjust=False).mean()
+            f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-          signal_reversed = (side == "buy" and m_val < s_val) or (
-              side == "sell" and m_val > s_val
-          )
-        except Exception:
-          signal_reversed = False
+            m_val = f_df["macd"].iloc[-1]
+            s_val = f_df["signal"].iloc[-1]
 
-        if signal_reversed:
+            signal_reversed = (side == "buy" and m_val < s_val) or (
+                side == "sell" and m_val > s_val
+            )
+          except Exception:
+            signal_reversed = False
+
+        if hit_stop_loss or hit_take_profit or signal_reversed:
           close_side = "sell" if side == "buy" else "buy"
           futures_ex.create_market_order(
               sym, close_side, contracts, params={"reduceOnly": True}
@@ -836,10 +869,15 @@ if futures_ex and st.session_state.active_trades:
           trades_to_remove.append(sym)
           st.session_state.signal_cooldown[f"fut_{sym}"] = False
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = False
-          send_notification(
-              f"🔄 [SYGNAŁ WYJŚCIA] Zamknięto {sym} wg sygnału (Wynik:"
-              f" {pct_change:+.2f}%)"
-          )
+
+          if hit_stop_loss:
+            reason = f"🛑 STOP LOSS (Wynik: {pct_change:+.2f}%)"
+          elif hit_take_profit:
+            reason = f"🎯 TAKE PROFIT (Wynik: {pct_change:+.2f}%)"
+          else:
+            reason = f"🔄 SYGNAŁ MACD (Wynik: {pct_change:+.2f}%)"
+
+          send_notification(f"{reason} - Zamknięto pozycję {sym}.")
   except Exception:
     pass
 
@@ -1289,19 +1327,10 @@ if (
 # =====================================================================
 # PANEL SUBSKRYPCJI I ZABEZPIECZENIE SAAS
 # =====================================================================
-my_admin_email = "marekja57@wp.pl"
-
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💎 Strefa SaaS")
 
-current_user_email = st.sidebar.text_input(
-    "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
-)
-
-is_owner = current_user_email == my_admin_email
-user_subscribed = is_owner or False
-
-if not user_subscribed:
+if not is_owner:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
   st.sidebar.markdown(
       f"""
