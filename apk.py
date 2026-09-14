@@ -213,7 +213,6 @@ futures_ex = get_exchange(
     "futures", api_key_input, secret_input, password_input
 )
 
-# Inicjalizacja znanych rynków dla Listing Sniper (Futures)
 if futures_ex and not st.session_state.known_markets:
   try:
     markets = futures_ex.load_markets()
@@ -268,8 +267,9 @@ with st.sidebar.container(border=True):
   base_allocation_pct = st.slider(
       "Bazowy kapitał na 1 pozycję (%)", 1, 50, 10
   )
+  # Zakres od 5.0 do 500.0+ USDT zgodnie z wymaganiem
   max_single_trade_usdt = st.number_input(
-      "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 10000.0, 500.0, 50.0
+      "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 5000.0, 50.0, 5.0
   )
 
   st.markdown("---")
@@ -557,7 +557,6 @@ if futures_ex and st.session_state.listing_sniper_active:
       if new_symbols:
         for sym in new_symbols:
           if fut_free >= MIN_FUT_TRADE:
-            # Sztywny limit dla nowych tokenów: max 100 USDT i dźwignia 2x
             sniper_budget = min(fut_free, 100.0)
             sniper_leverage = 2
             try:
@@ -637,6 +636,13 @@ if spot_ex and st.session_state.trend_bot_spot_active:
         if spot_free >= MIN_SPOT_TRADE:
           prov_budget = spot_free * (base_allocation_pct / 100.0)
           budget = min(prov_budget, max_single_trade_usdt)
+          if (
+              budget < MIN_SPOT_TRADE
+              and spot_free >= MIN_SPOT_TRADE
+              and max_single_trade_usdt >= MIN_SPOT_TRADE
+          ):
+            budget = MIN_SPOT_TRADE
+
           amount = budget / c_price
           spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
           st.session_state.signal_cooldown[t_key] = True
@@ -658,7 +664,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
     pass
 
 # =====================================================================
-# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR (Dynamiczna dźwignia dla pozostałych)
+# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
   try:
@@ -731,6 +737,13 @@ if futures_ex and st.session_state.trend_bot_fut_active:
           if fut_free >= MIN_FUT_TRADE:
             prov_budget = fut_free * (base_allocation_pct / 100.0)
             budget = min(prov_budget, max_single_trade_usdt)
+            if (
+                budget < MIN_FUT_TRADE
+                and fut_free >= MIN_FUT_TRADE
+                and max_single_trade_usdt >= MIN_FUT_TRADE
+            ):
+              budget = MIN_FUT_TRADE
+
             try:
               futures_ex.set_leverage(bot_leverage, sym)
             except Exception:
@@ -916,6 +929,14 @@ if spot_ex:
         prov_budget = spot_free * (calc_pct / 100.0)
         allocated_budget = min(prov_budget, max_single_trade_usdt)
 
+        # Inteligentna korekta dolnego progu (nie blokuje 4.9 USDT, jeśli są środki)
+        if (
+            allocated_budget < MIN_SPOT_TRADE
+            and spot_free >= MIN_SPOT_TRADE
+            and max_single_trade_usdt >= MIN_SPOT_TRADE
+        ):
+          allocated_budget = MIN_SPOT_TRADE
+
         if allocated_budget < MIN_SPOT_TRADE:
           spot_display_str = f"{allocated_budget:.1f} USDT"
           status = f"⚠️ Alokacja za mała (< {MIN_SPOT_TRADE} USDT - pomijam)"
@@ -1089,6 +1110,14 @@ if futures_ex:
 
         prov_budget = fut_free * (calc_pct / 100.0)
         allocated_budget = min(prov_budget, max_single_trade_usdt)
+
+        # Inteligentna korekta dolnego progu (nie blokuje 4.9 USDT, jeśli są środki)
+        if (
+            allocated_budget < MIN_FUT_TRADE
+            and fut_free >= MIN_FUT_TRADE
+            and max_single_trade_usdt >= MIN_FUT_TRADE
+        ):
+          allocated_budget = MIN_FUT_TRADE
 
         if allocated_budget < MIN_FUT_TRADE:
           fut_display_str = f"{allocated_budget:.1f} USDT"
