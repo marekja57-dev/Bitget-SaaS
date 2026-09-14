@@ -20,15 +20,17 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 # =====================================================================
 # FUNKCJE POMOCNICZE (ŻELAZNY NADPIS ADMINISTRATORA)
 # =====================================================================
+ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl"]
+
 def is_user_admin():
     email = str(st.session_state.get("user_email", "")).strip().lower()
-    if email == "marekjas57@wp.pl":
+    if email in ADMIN_EMAILS:
         return True
     return bool(st.session_state.get("is_admin", False))
 
 def is_user_paid():
     email = str(st.session_state.get("user_email", "")).strip().lower()
-    if email == "marekjas57@wp.pl":
+    if email in ADMIN_EMAILS:
         return True
     return bool(st.session_state.get("stripe_paid", False))
 
@@ -51,8 +53,9 @@ def init_db():
         )
     ''')
     
-    # Automatyczne nadanie uprawnień Administratora w bazie
-    cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", ("marekjas57@wp.pl",))
+    # Automatyczne nadanie uprawnień Administratora w bazie dla Twoich wariantów e-maila
+    for adm_email in ADMIN_EMAILS:
+        cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
     # Tworzenie domyślnego konta administratora zapasowego, jeśli nie istnieje
     cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bitget.pl",))
@@ -168,7 +171,7 @@ if not st.session_state.logged_in:
 
             if user_row and user_row[2] == login_pass:
                 user_email_str = user_row[1].strip().lower()
-                is_admin_flag = True if user_email_str == "marekjas57@wp.pl" else bool(user_row[3])
+                is_admin_flag = True if user_email_str in ADMIN_EMAILS else bool(user_row[3])
                 stripe_paid_flag = True if is_admin_flag else bool(user_row[4])
 
                 st.session_state.logged_in = True
@@ -195,7 +198,7 @@ if not st.session_state.logged_in:
                     conn = sqlite3.connect(DB_FILE)
                     cursor = conn.cursor()
                     clean_reg = reg_email.strip().lower()
-                    is_adm = 1 if clean_reg == "marekjas57@wp.pl" else 0
+                    is_adm = 1 if clean_reg in ADMIN_EMAILS else 0
                     is_paid = 1 if is_adm == 1 else 0
                     cursor.execute(
                         "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, ?, ?)",
