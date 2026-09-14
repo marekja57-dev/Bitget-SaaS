@@ -18,6 +18,8 @@ if "logged_in" not in st.session_state:
 # FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (Z POLAMI W PANELU)
 # =====================================================================
 def get_exchange(market_type, api_key, secret, passphrase):
+  if not api_key or not secret or not passphrase:
+    return None
   try:
     ex_type = "spot" if market_type == "spot" else "swap"
     exchange = ccxt.bitget({
@@ -30,18 +32,6 @@ def get_exchange(market_type, api_key, secret, passphrase):
     return exchange
   except Exception:
     return None
-
-# =====================================================================
-# PANEL BOCZNY - KLUCZE API I AUTORYZACJA
-# =====================================================================
-with st.sidebar.container(border=True):
-  st.markdown("### 🔑 Klucze API Bitget")
-  api_key_input = st.text_input("Bitget API Key", type="password", value="")
-  secret_key_input = st.text_input("Bitget Secret Key", type="password", value="")
-  passphrase_input = st.text_input("Bitget Passphrase", type="password", value="")
-
-spot_ex = get_exchange("spot", api_key_input, secret_key_input, passphrase_input)
-futures_ex = get_exchange("futures", api_key_input, secret_key_input, passphrase_input)
 
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
@@ -205,14 +195,16 @@ if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
 # =====================================================================
-# PANEL BOCZNY (BEZ WIDOCZNYCH PÓL KLUCZY API)
+# PANEL BOCZNY (Z POLAMI NA KLUCZE API)
 # =====================================================================
 with st.sidebar.container(border=True):
-  st.markdown("### 💎 Status Administratora")
-  st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
+  st.markdown("### 🔑 Klucze API Bitget")
+  api_key_input = st.text_input("Bitget API Key", type="password", value="")
+  secret_key_input = st.text_input("Bitget Secret Key", type="password", value="")
+  passphrase_input = st.text_input("Bitget Passphrase", type="password", value="")
 
-spot_ex = get_exchange("spot")
-futures_ex = get_exchange("futures")
+spot_ex = get_exchange("spot", api_key_input, secret_key_input, passphrase_input)
+futures_ex = get_exchange("futures", api_key_input, secret_key_input, passphrase_input)
 
 if futures_ex and not st.session_state.known_markets:
   try:
@@ -277,7 +269,9 @@ with st.sidebar.container(border=True):
   st.markdown("### 🛑 Stop Loss & Take Profit (Autonomia)")
   stop_loss_pct = st.slider("Bazowy Stop Loss (%)", 1, 20, 4)
   take_profit_pct = st.slider("Bazowy Take Profit (%)", 2, 50, 8)
-  dynamic_sl_tp = st.checkbox("🤖 Dynamiczny dobór SL/TP (zależny od zmienności rynku)", value=True)
+  dynamic_sl_tp = st.checkbox(
+      "🤖 Dynamiczny dobór SL/TP (zależny od zmienności rynku)", value=True
+  )
 
   st.markdown("---")
   st.markdown("### ⚡ Zarządzanie Dźwignią Futures (Pozostałe)")
@@ -417,7 +411,10 @@ with col3:
   st.metric(
       label="📊 Wyniki Futures (Niezrealizowane)",
       value=f"{total_unrealized_pnl:+.2f} USDT",
-      delta=f"Aktywne pozycje: {active_positions_count} / {max_active_futures_positions} max",
+      delta=(
+          f"Aktywne pozycje: {active_positions_count} /"
+          f" {max_active_futures_positions} max"
+      ),
   )
 
 with col_clock:
@@ -574,9 +571,12 @@ if futures_ex and st.session_state.listing_sniper_active:
                 contracts = (sniper_budget * sniper_leverage) / price
                 futures_ex.create_market_order(sym, "buy", contracts)
 
-                # Wyliczanie poziomów SL i TP dla Snipere'a
-                sl_val = price * (1 - (stop_loss_pct / 100.0) / sniper_leverage)
-                tp_val = price * (1 + (take_profit_pct / 100.0) / sniper_leverage)
+                sl_val = price * (
+                    1 - (stop_loss_pct / 100.0) / sniper_leverage
+                )
+                tp_val = price * (
+                    1 + (take_profit_pct / 100.0) / sniper_leverage
+                )
 
                 st.session_state.active_trades[sym] = {
                     "entry_price": price,
@@ -600,7 +600,8 @@ if futures_ex and st.session_state.listing_sniper_active:
                 )
                 send_notification(
                     f"🎯 [LISTING SNIPER] Wykryto nowy token {sym}! Kupiono za"
-                    f" {sniper_budget:.1f} USDT z dźwignią 2x (SL: {sl_val:.2f}, TP: {tp_val:.2f})."
+                    f" {sniper_budget:.1f} USDT z dźwignią 2x (SL:"
+                    f" {sl_val:.2f}, TP: {tp_val:.2f})."
                 )
             except Exception:
               pass
@@ -746,9 +747,8 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         tf_key = f"trend_bot_fut_{sym}"
         last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
 
-        if (
-            sym not in st.session_state.active_trades
-            and (time.time() - last_action_time > 90)
+        if sym not in st.session_state.active_trades and (
+            time.time() - last_action_time > 90
         ):
           if fut_free >= MIN_FUT_TRADE:
             prov_budget = fut_free * (base_allocation_pct / 100.0)
@@ -768,11 +768,9 @@ if futures_ex and st.session_state.trend_bot_fut_active:
             contracts = (budget * bot_leverage) / f_price
             futures_ex.create_market_order(sym, side, contracts)
 
-            # Wyliczanie dynamicznych cen SL / TP
             effective_sl = stop_loss_pct
             effective_tp = take_profit_pct
             if dynamic_sl_tp:
-              # Dostosowanie SL/TP do dźwigni i zmienności
               effective_sl = max(1.0, stop_loss_pct / (bot_leverage * 0.5))
 
             if side == "buy":
@@ -804,7 +802,8 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 },
             )
             send_notification(
-                f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x) | SL: {sl_price:.2f}, TP: {tp_price:.2f}"
+                f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x) |"
+                f" SL: {sl_price:.2f}, TP: {tp_price:.2f}"
             )
   except Exception:
     pass
@@ -840,7 +839,6 @@ if futures_ex and st.session_state.active_trades:
               * trade_info["leverage"]
           )
 
-        # Sprawdzenie warunków Stop Loss i Take Profit
         hit_sl = False
         hit_tp = False
         close_reason = ""
@@ -852,7 +850,7 @@ if futures_ex and st.session_state.active_trades:
           elif tp_target > 0 and curr_price >= tp_target:
             hit_tp = True
             close_reason = "TAKE PROFIT (Maksimum Zysku)"
-        else: # sell / short
+        else:
           if sl_target > 0 and curr_price >= sl_target:
             hit_sl = True
             close_reason = "STOP LOSS (Ochrona Kapitału)"
@@ -860,7 +858,6 @@ if futures_ex and st.session_state.active_trades:
             hit_tp = True
             close_reason = "TAKE PROFIT (Maksimum Zysku)"
 
-        # Sprawdzenie odwrócenia MACD (standardowy sygnał wyjścia)
         signal_reversed = False
         if not hit_sl and not hit_tp:
           try:
@@ -899,7 +896,8 @@ if futures_ex and st.session_state.active_trades:
           st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
-              f"🔄 [{close_reason}] Zamknięto pozycję na {sym}. Wynik: {pct_change:+.2f}%"
+              f"🔄 [{close_reason}] Zamknięto pozycję na {sym}. Wynik:"
+              f" {pct_change:+.2f}%"
           )
   except Exception:
     pass
@@ -1199,8 +1197,14 @@ if futures_ex:
           is_in_cooldown = time.time() - last_fut_time < 120
 
           if st.session_state.scanner_active and is_futures_signal:
-            if len(st.session_state.active_trades) >= max_active_futures_positions:
-              status = f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń osiągnięty"
+            if (
+                len(st.session_state.active_trades)
+                >= max_active_futures_positions
+            ):
+              status = (
+                  f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń"
+                  " osiągnięty"
+              )
             elif is_in_cooldown or sym in st.session_state.active_trades:
               status = "🛡️ Cooldown / Pozycja aktywna"
             else:
@@ -1218,19 +1222,26 @@ if futures_ex:
                     sym, trade_action, contract_size
                 )
 
-                # Wyliczanie dynamicznego SL i TP w zależności od zmienności rynku i dźwigni
                 effective_sl = stop_loss_pct
                 effective_tp = take_profit_pct
                 if dynamic_sl_tp and current_vol > 3.0:
-                  effective_sl = max(1.0, stop_loss_pct * 0.8) # Ciasniejszy SL przy dużej zmienności
-                  effective_tp = take_profit_pct * 1.25 # Szerszy TP przy silnym ruchu
+                  effective_sl = max(1.0, stop_loss_pct * 0.8)
+                  effective_tp = take_profit_pct * 1.25
 
                 if trade_action == "buy":
-                  sl_price = current_price * (1 - (effective_sl / 100.0) / dyn_leverage)
-                  tp_price = current_price * (1 + (effective_tp / 100.0) / dyn_leverage)
+                  sl_price = current_price * (
+                      1 - (effective_sl / 100.0) / dyn_leverage
+                  )
+                  tp_price = current_price * (
+                      1 + (effective_tp / 100.0) / dyn_leverage
+                  )
                 else:
-                  sl_price = current_price * (1 + (effective_sl / 100.0) / dyn_leverage)
-                  tp_price = current_price * (1 - (effective_tp / 100.0) / dyn_leverage)
+                  sl_price = current_price * (
+                      1 + (effective_sl / 100.0) / dyn_leverage
+                  )
+                  tp_price = current_price * (
+                      1 - (effective_tp / 100.0) / dyn_leverage
+                  )
 
                 st.session_state.signal_cooldown[fut_cooldown_key] = (
                     time.time()
@@ -1257,9 +1268,12 @@ if futures_ex:
                     },
                 )
 
-                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x) | SL/TP gotowe"
+                status = (
+                    f"🚀 OTWARTO {action_label} ({dyn_leverage}x) | SL/TP gotowe"
+                )
                 send_notification(
-                    f"🔵 [FUTURES] Otwarto {action_label} na {sym} (SL: {sl_price:.2f}, TP: {tp_price:.2f})"
+                    f"🔵 [FUTURES] Otwarto {action_label} na {sym} (SL:"
+                    f" {sl_price:.2f}, TP: {tp_price:.2f})"
                 )
               except Exception as ex:
                 status = f"❌ Błąd: {ex}"
