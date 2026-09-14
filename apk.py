@@ -662,57 +662,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         pass
 
 # =====================================================================
-# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (NA ŻYWO)
-# =====================================================================
-st.markdown("---")
-st.subheader("⚡ Aktywne Pozycje i Przypisane Boty (Na Żywo)")
-
-active_pos_list = []
-if futures_ex:
-    try:
-        positions = futures_ex.fetch_positions()
-        for p in positions:
-            contracts = float(p.get("contracts", 0))
-            if contracts > 0:
-                sym = p["symbol"]
-                side = p.get("side", "").upper()
-                entry_p = float(p.get("entryPrice", 0))
-                lev = p.get("leverage", 1)
-                pnl = float(p.get("unrealizedPnl", 0))
-                
-                # Określenie bota / źródła
-                bot_source = "🤖 Bot Futures Trendowy" if sym in st.session_state.active_trades else "👤 Pozycja Ręczna / Inna"
-                
-                active_pos_list.append({
-                    "Para": sym,
-                    "Źródło / Bot": bot_source,
-                    "Strona": side,
-                    "Dźwignia": f"{lev}x",
-                    "Cena Wejścia": f"{entry_p:.4f}",
-                    "Wynik PnL": f"{pnl:+.2f} USDT",
-                    "Status": "🟢 W trakcie realizacji (Aktywna)"
-                })
-    except Exception:
-        pass
-
-for spot_sym in st.session_state.active_spot_trades:
-    active_pos_list.append({
-        "Para": spot_sym,
-        "Źródło / Bot": "🟢 Bot Spot Trendowy",
-        "Strona": "BUY (KUPNO)",
-        "Dźwignia": "1x (Spot)",
-        "Cena Wejścia": "-",
-        "Wynik PnL": "-",
-        "Status": "🟢 W trakcie realizacji (Aktywna)"
-    })
-
-if active_pos_list:
-    st.dataframe(pd.DataFrame(active_pos_list), use_container_width=True)
-else:
-    st.info("Brak aktywnych pozycji w portfelu lub uruchomionych przez boty.")
-
-# =====================================================================
-# WIDOK NA ŻYWO: TOP 8 PAR SPOT I FUTURES (SKANER)
+# WIDOK NA ŻYWO: TOP 8 PAR SPOT I FUTURES (SKANER NA PIERWSZYM PLANIE)
 # =====================================================================
 st.markdown("---")
 col_view1, col_view2 = st.columns(2)
@@ -770,6 +720,56 @@ with col_view2:
             st.info("Błąd pobierania danych rynkowych Futures.")
     else:
         st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
+
+# =====================================================================
+# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (POD SKANEREM)
+# =====================================================================
+st.markdown("---")
+st.subheader("⚡ Aktywne Pozycje, Dźwignia i Przypisane Boty (Na Żywo)")
+
+active_pos_list = []
+if futures_ex:
+    try:
+        positions = futures_ex.fetch_positions()
+        for p in positions:
+            contracts = float(p.get("contracts", 0))
+            if contracts > 0:
+                sym = p["symbol"]
+                side = p.get("side", "").upper()
+                entry_p = float(p.get("entryPrice", 0))
+                lev = p.get("leverage", 1)
+                pnl = float(p.get("unrealizedPnl", 0))
+                
+                # Określenie bota / źródła i statusu
+                bot_source = "🤖 Bot Futures Trendowy" if sym in st.session_state.active_trades else "👤 Pozycja Ręczna / Inna"
+                
+                active_pos_list.append({
+                    "Para": sym,
+                    "Źródło / Bot": bot_source,
+                    "Strona": side,
+                    "Dźwignia": f"{lev}x",
+                    "Cena Wejścia": f"{entry_p:.4f}",
+                    "Wynik PnL": f"{pnl:+.2f} USDT",
+                    "Status": "🟢 W trakcie realizacji (Aktywna)"
+                })
+    except Exception:
+        pass
+
+for spot_sym in st.session_state.active_spot_trades:
+    active_pos_list.append({
+        "Para": spot_sym,
+        "Źródło / Bot": "🟢 Bot Spot Trendowy",
+        "Strona": "BUY (KUPNO)",
+        "Dźwignia": "1x (Spot)",
+        "Cena Wejścia": "-",
+        "Wynik PnL": "-",
+        "Status": "🟢 W trakcie realizacji (Aktywna)"
+    })
+
+if active_pos_list:
+    st.dataframe(pd.DataFrame(active_pos_list), use_container_width=True)
+else:
+    st.info("Brak aktywnych pozycji w portfelu lub uruchomionych przez boty.")
 
 st.markdown("---")
 st.subheader("📜 Dziennik Transakcji")
