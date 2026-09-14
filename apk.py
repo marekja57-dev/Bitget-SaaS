@@ -11,11 +11,48 @@ st.set_page_config(
     layout="wide",
 )
 
+# =====================================================================
+# INICJALIZACIJA STANU SESJI I AUTOMATYCZNEGO LOGOWANIA Z URL
+# =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+# Sprawdzenie, czy komputer jest zapamiętany w parametrach przeglądarki (URL)
+saved_auth = st.query_params.get("auth", None)
+if saved_auth == "marek_trusted_device_2026":
+    st.session_state.logged_in = True
+
+if "session_start_time" not in st.session_state or not isinstance(
+    st.session_state.session_start_time, datetime
+):
+    st.session_state.session_start_time = datetime.now()
+
+if "trade_history" not in st.session_state:
+    st.session_state.trade_history = []
+
+if "signal_cooldown" not in st.session_state:
+    st.session_state.signal_cooldown = {}
+
+if "scanner_active" not in st.session_state:
+    st.session_state.scanner_active = False
+
+if "active_trades" not in st.session_state:
+    st.session_state.active_trades = {}
+
+if "trend_bot_spot_active" not in st.session_state:
+    st.session_state.trend_bot_spot_active = False
+
+if "trend_bot_fut_active" not in st.session_state:
+    st.session_state.trend_bot_fut_active = False
+
+if "known_markets" not in st.session_state:
+    st.session_state.known_markets = set()
+
+if "listing_sniper_active" not in st.session_state:
+    st.session_state.listing_sniper_active = True
+
 # =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (AUTOMATYCZNE KLUCZE)
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
 # =====================================================================
 def get_exchange(market_type):
     try:
@@ -41,7 +78,7 @@ def get_exchange(market_type):
         return None
 
 # =====================================================================
-# STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
+# GLOBALNE STYLE CSS
 # =====================================================================
 st.markdown(
     """
@@ -56,58 +93,6 @@ st.markdown(
         border-right: 2px solid #3d2f1f;
     }
     
-    .hero-wrapper {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        padding-top: 45px;
-        padding-bottom: 20px;
-    }
-    
-    .retro-ornate-frame {
-        position: relative;
-        background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
-        border: 6px double #f3d57a;
-        padding: 40px 30px 50px 30px;
-        border-radius: 16px;
-        box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
-        width: 100%;
-        max-width: 950px;
-        text-align: center;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .retro-ornate-frame::before, .retro-ornate-frame::after {
-        content: "❖ ❖ ❖";
-        position: absolute;
-        color: #f3d57a;
-        font-size: 1rem;
-        letter-spacing: 6px;
-    }
-    .retro-ornate-frame::before { top: 12px; left: 18px; }
-    .retro-ornate-frame::after { top: 12px; right: 18px; }
-
-    .retro-vintage-title {
-        font-family: 'Bungee Inline', cursive, sans-serif;
-        font-size: 4.5rem;
-        color: #f3d57a;
-        letter-spacing: 6px;
-        text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
-        margin: 5px 0 10px 0;
-        line-height: 1.1;
-    }
-
-    .button-spacer {
-        margin-top: 30px;
-        width: 100%;
-        display: flex;
-        justify-content: center;
-    }
-
     div.stButton > button {
         background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
         color: #f3d57a !important;
@@ -144,69 +129,81 @@ st.markdown(
 )
 
 # =====================================================================
-# STRONA POWITALNA
+# EKRAN LOGOWANIA (Z OPCJĄ ZAPAMIĘTANIA URZĄDZENIA)
 # =====================================================================
 if not st.session_state.logged_in:
-    st.markdown(
-        f"""
-            <div class="hero-wrapper">
-                <div class="retro-ornate-frame">
-                    <div class="retro-vintage-title">BITGET SAS</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
-    col_b1, col_b2, col_b3 = st.columns([2, 3, 2])
-    with col_b2:
+    _, col_center, _ = st.columns([1, 2, 1])
+    with col_center:
+        st.markdown(
+            """
+            <div style="
+                background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
+                border: 6px double #f3d57a;
+                padding: 50px 30px;
+                border-radius: 16px;
+                box-shadow: 0 0 50px rgba(243, 213, 122, 0.4);
+                text-align: center;
+                margin-top: 10vh;
+            ">
+                <div style="font-size: 1.2rem; color: #f3d57a; letter-spacing: 6px; margin-bottom: 10px;">❖ ❖ ❖</div>
+                <h1 style="
+                    font-family: 'Bungee Inline', cursive, sans-serif;
+                    font-size: 3.8rem;
+                    color: #f3d57a;
+                    letter-spacing: 6px;
+                    text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
+                    margin: 0 0 20px 0;
+                ">BITGET SAS</h1>
+                <p style="color: #c5a880; font-family: 'Cinzel', serif; font-size: 1.1rem; margin-bottom: 25px;">
+                    Panel Operacyjny • Pełna Autonomia & Listing Sniper
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.write("")
+        remember_device = st.checkbox(
+            "🔒 Zapamiętaj ten komputer (automatyczne logowanie przy kolejnej wizycie)",
+            value=True,
+        )
+        st.write("")
         if st.button("🚀 WEJDŹ DO SYSTEMU", use_container_width=True):
             st.session_state.logged_in = True
+            st.session_state.session_start_time = datetime.now()
+            if remember_device:
+                st.query_params["auth"] = "marek_trusted_device_2026"
             st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
 # =====================================================================
-# INICJALIZACJA CZASU SESJI
-# =====================================================================
-if "session_start_time" not in st.session_state:
-    st.session_state.session_start_time = datetime.now()
-
-# =====================================================================
-# WŁAŚCIWA APLIKACJA (PO WEJŚCIU)
+# WŁAŚCIWA APLIKACJA (PO ZALOGOWANIU)
 # =====================================================================
 st.title("🚀 Bitget SAS - Panel Operacyjny (Pełna Autonomia & Listing Sniper)")
 
-if "trade_history" not in st.session_state:
-    st.session_state.trade_history = []
-
-if "signal_cooldown" not in st.session_state:
-    st.session_state.signal_cooldown = {}
-
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
-
-if "active_trades" not in st.session_state:
-    st.session_state.active_trades = {}
-
-if "trend_bot_spot_active" not in st.session_state:
-    st.session_state.trend_bot_spot_active = False
-
-if "trend_bot_fut_active" not in st.session_state:
-    st.session_state.trend_bot_fut_active = False
-
-if "known_markets" not in st.session_state:
-    st.session_state.known_markets = set()
-
-if "listing_sniper_active" not in st.session_state:
-    st.session_state.listing_sniper_active = True
-
 # =====================================================================
-# PANEL BOCZNY (BEZ WIDOCZNYCH PÓL KLUCZY API)
+# PANEL BOCZNY (W TYM STRIPE & PŁATNOŚCI SUBSRKYPCJI)
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Status Administratora")
     st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
+
+# MODUŁ OPŁAT / SUBSKRYPCJI STRIPE (bot-bitget.pl)
+with st.sidebar.container(border=True):
+    st.markdown("### 💳 Subskrypcje i Płatności (Stripe)")
+    st.markdown(
+        "Zarządzaj abonamentem dostępu do platformy **bot-bitget.pl**."
+    )
+    
+    stripe_link = st.secrets.get(
+        "STRIPE_PAYMENT_LINK", "https://buy.stripe.com/test_placeholder"
+    )
+    st.markdown(
+        f'<a href="{stripe_link}" target="_blank"><button style="background: linear-gradient(135deg, #635bff 0%, #0a2540 100%); color: white; border: 1px solid #796eff; padding: 10px 18px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer; box-shadow: 0 4px 10px rgba(99,91,255,0.3);">⚡ Opłać / Przedłuż Subskrypcję</button></a>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Bezpieczna bramka płatności Stripe. Automatyczna aktywacja po opłaceniu."
+    )
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -219,8 +216,10 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔒 Wróć do ekranu powitalnego"):
+if st.sidebar.button("🔒 Wyloguj i zapomnij ten komputer"):
     st.session_state.logged_in = False
+    if "auth" in st.query_params:
+        del st.query_params["auth"]
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -252,9 +251,9 @@ def send_notification(message):
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
-    st.markdown("### ⚙️ Ustawienia Handlu i Ryzyka (Automatyczne)")
+    st.markdown("### ⚙️ Ustawienia Handlu i Ryzyka")
     allocation_mode = st.radio(
-        "Zarządzanie wielkością pozycji (Pozostałe)",
+        "Zarządzanie wielkością pozycji",
         [
             "🤖 Dynamiczny Auto-Dobór",
             "🎛️ Stały procent portfela",
@@ -264,14 +263,14 @@ with st.sidebar.container(border=True):
         "Bazowy kapitał na 1 pozycję (%)", 1, 50, 10
     )
     max_single_trade_usdt = st.number_input(
-        "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 5000.0, 50.0, 5.0
+        "🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0
     )
     max_active_futures_positions = st.slider(
         "📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10
     )
 
     st.markdown("---")
-    st.markdown("### ⚡ Zarządzanie Dźwignią Futures (Pozostałe)")
+    st.markdown("### ⚡ Zarządzanie Dźwignią Futures")
     leverage_mode = st.radio(
         "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
     )
@@ -1293,32 +1292,3 @@ if (
 ):
     time.sleep(scan_interval)
     st.rerun()
-
-# =====================================================================
-# BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
-# =====================================================================
-user_subscribed = True # Administrator ma stały dostęp
-
-if not user_subscribed:
-    stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 💎 Strefa SaaS")
-    st.sidebar.markdown(
-        f"""
-            <a href="{stripe_payment_link}" target="_blank">
-                <div style="background: linear-gradient(135deg, #635bff 0%, #4338ca 100%);
-                            color: white; padding: 10px 15px; border-radius: 8px;
-                            text-align: center; font-weight: bold; text-decoration: none;">
-                    💳 KUP SUBSKRYPCJĘ (49 PLN)
-                </div>
-            </a>
-            """,
-        unsafe_allow_html=True,
-    )
-    st.warning(
-        "⚠️ Wymagana aktywna subskrypcja SaaS, aby korzystać z panelu handlowego."
-    )
-    st.stop()
-else:
-    st.sidebar.markdown("---")
-    st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
