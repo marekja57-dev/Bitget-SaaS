@@ -14,6 +14,34 @@ st.set_page_config(
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
+
+# =====================================================================
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (AUTOMATYCZNE KLUCZE)
+# =====================================================================
+def get_exchange(market_type):
+  try:
+    api_key = st.secrets.get(
+        "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
+    )
+    secret = st.secrets.get(
+        "BITGET_SECRET_KEY",
+        "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
+    )
+    passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
+
+    ex_type = "spot" if market_type == "spot" else "swap"
+    exchange = ccxt.bitget({
+        "apiKey": api_key,
+        "secret": secret,
+        "password": passphrase,
+        "enableRateLimit": True,
+        "options": {"defaultType": ex_type},
+    })
+    return exchange
+  except Exception:
+    return None
+
+
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
@@ -28,12 +56,6 @@ st.markdown(
     section[data-testid="stSidebar"] {
         background-color: #141110;
         border-right: 2px solid #3d2f1f;
-    }
-    
-    section[data-testid="stSidebar"] input {
-        background-color: #1e1814 !important;
-        color: #f3d57a !important;
-        border: 1px solid #f3d57a !important;
     }
     
     .hero-wrapper {
@@ -147,7 +169,7 @@ if not st.session_state.logged_in:
   st.stop()
 
 # =====================================================================
-# INICJALIZACJA CZASU SESJI (Zegar trwania)
+# INICJALIZACJA CZASU SESJI
 # =====================================================================
 if "session_start_time" not in st.session_state:
   st.session_state.session_start_time = datetime.now()
@@ -181,37 +203,15 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
-
-def get_exchange(ex_type, api_key="", secret="", password=""):
-  try:
-    config = {
-        "apiKey": api_key,
-        "secret": secret,
-        "password": password,
-        "enableRateLimit": True,
-        "headers": {"X-BH-SUBACCOUNT": ""},
-    }
-    if ex_type == "spot":
-      ex = ccxt.bitget(config)
-    else:
-      config["options"] = {"defaultType": "swap"}
-      ex = ccxt.bitget(config)
-    ex.load_markets()
-    return ex
-  except Exception as e:
-    return None
-
-
+# =====================================================================
+# PANEL BOCZNY (BEZ WIDOCZNYCH PÓL KLUCZY API)
+# =====================================================================
 with st.sidebar.container(border=True):
-  st.markdown("### 🔑 Konfiguracja API Bitget")
-  api_key_input = st.text_input("API Key", type="password")
-  secret_input = st.text_input("Secret Key", type="password")
-  password_input = st.text_input("Passphrase", type="password")
+  st.markdown("### 💎 Status Administratora")
+  st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
 
-spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
-futures_ex = get_exchange(
-    "futures", api_key_input, secret_input, password_input
-)
+spot_ex = get_exchange("spot")
+futures_ex = get_exchange("futures")
 
 if futures_ex and not st.session_state.known_markets:
   try:
@@ -279,9 +279,7 @@ with st.sidebar.container(border=True):
   leverage_mode = st.radio(
       "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
   )
-  manual_leverage = st.slider(
-      "Stała dźwignia Futures (Ręczna)", 1, 50, 5
-  )
+  manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 50, 5)
 
   st.markdown("---")
   st.markdown("### 🧠 Inteligentne Wyjście & Sygnały")
@@ -382,7 +380,7 @@ if futures_ex:
     pass
 
 # =====================================================================
-# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI W ZŁOTYCH RAMKACH
+# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI
 # =====================================================================
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -435,7 +433,7 @@ with col_clock:
 st.markdown("---")
 
 # =====================================================================
-# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
+# PANEL STEROWANIA BOTAMI
 # =====================================================================
 st.subheader(
     "🥾 Panel Sterowania Botami Trendowymi i Sniperem Nowych Par"
@@ -501,7 +499,8 @@ col_btn, col_status = st.columns([2, 1])
 with col_btn:
   if not st.session_state.scanner_active:
     if st.button(
-        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures + Sniper)",
+        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures +"
+        " Sniper)",
         type="primary",
         use_container_width=True,
     ):
@@ -550,7 +549,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# MODUŁ: LISTING SNIPER (Nowe tokeny: max 100 USDT, dźwignia dokładnie 2x)
+# MODUŁ: LISTING SNIPER
 # =====================================================================
 if futures_ex and st.session_state.listing_sniper_active:
   try:
@@ -639,7 +638,6 @@ if spot_ex and st.session_state.trend_bot_spot_active:
       c_price = s_df["close"].iloc[-1]
 
       t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
-      # Bezpiecznik czasowy cooldownu (min. 60 sekund między wejściami na tym samym instrumencie)
       last_action = st.session_state.signal_cooldown.get(t_key, 0)
       if c_macd > c_sig and (time.time() - last_action > 60):
         if spot_free >= MIN_SPOT_TRADE:
@@ -742,7 +740,6 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         tf_key = f"trend_bot_fut_{sym}"
         last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
 
-        # Blokada ponownego wejścia przez minimum 90 sekund od ostatniej akcji
         if (
             sym not in st.session_state.active_trades
             and (time.time() - last_action_time > 90)
@@ -790,7 +787,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA (Zabezpieczone przed szybkim pętlami)
+# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
@@ -847,7 +844,6 @@ if futures_ex and st.session_state.active_trades:
           except Exception:
             pass
           trades_to_remove.append(sym)
-          # Ustawiamy czas zamknięcia w cooldownie, aby bot nie otworzył pozycji ponownie natychmiast
           st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
@@ -1309,22 +1305,14 @@ if (
   st.rerun()
 
 # =====================================================================
-# PANEL SUBSKRYPCJI I ZABEZPIECZENIE SAAS
+# BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
 # =====================================================================
-my_admin_email = "marekja57@wp.pl"
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💎 Strefa SaaS")
-
-current_user_email = st.sidebar.text_input(
-    "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
-)
-
-is_owner = current_user_email == my_admin_email
-user_subscribed = is_owner or False
+user_subscribed = True # Administrator ma stały dostęp
 
 if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
+  st.sidebar.markdown("---")
+  st.sidebar.markdown("### 💎 Strefa SaaS")
   st.sidebar.markdown(
       f"""
         <a href="{stripe_payment_link}" target="_blank">
@@ -1342,4 +1330,5 @@ if not user_subscribed:
   )
   st.stop()
 else:
-  st.sidebar.success("✅ Dostęp aktywny (Administrator)")
+  st.sidebar.markdown("---")
+  st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
