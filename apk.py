@@ -7,23 +7,26 @@ import pandas as pd
 import streamlit as st
 
 # =====================================================================
-# KONFIGURACJA STRONY ORAZ GLOBALNE META-DANE
+# KONFIGURACJA STRONY ORAZ GLOBALNE META-DANE SYSTEMOWE
 # =====================================================================
 st.set_page_config(
-    page_title="Bitget SAS - Pełna Autonomia & Zaawansowany Trading",
+    page_title="Bitget SAS - Autonomiczny System Handlowy v2.6",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # =====================================================================
-# TRWAŁY STAN SESJI I AUTORYZACJA URL
+# TRWAŁY STAN SESJI I ZMIENNE GLOBALNE
 # =====================================================================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+if "api_key" not in st.session_state:
+    st.session_state.api_key = st.secrets.get("BITGET_API_KEY", "")
 
-if "user_email" not in st.session_state:
-    st.session_state.user_email = "marekja57@wp.pl"
+if "secret_key" not in st.session_state:
+    st.session_state.secret_key = st.secrets.get("BITGET_SECRET_KEY", "")
+
+if "passphrase" not in st.session_state:
+    st.session_state.passphrase = st.secrets.get("BITGET_PASSPHRASE", "")
 
 if "session_start_time" not in st.session_state or not isinstance(
     st.session_state.session_start_time, datetime
@@ -57,12 +60,15 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
 
-if "custom_notes" not in st.session_state:
-    st.session_state.custom_notes = "System gotowy do autonomicznego handlu."
+if "execution_logs" not in st.session_state:
+    st.session_state.execution_logs = []
 
-# Sprawdzenie parametru autoryzacji w URL (trwałe zapamiętanie urządzenia)
-if st.query_params.get("auth") == "marek_trusted_device_2026":
-    st.session_state.logged_in = True
+def log_system_event(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] {message}"
+    st.session_state.execution_logs.insert(0, log_entry)
+    if len(st.session_state.execution_logs) > 100:
+        st.session_state.execution_logs.pop()
 
 # =====================================================================
 # ZAAWANSOWANE GŁĘBOKIE STYLE CSS (ESTETYKA INDUSTRIALNA / CYBER)
@@ -124,105 +130,45 @@ st.markdown(
 )
 
 # =====================================================================
-# EKRAN LOGOWANIA (JEŚLI NIE ZALOGOWANO)
-# =====================================================================
-if not st.session_state.logged_in:
-    _, col_center, _ = st.columns([1, 2, 1])
-    with col_center:
-        st.markdown(
-            """
-            <div style="
-                background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
-                border: 6px double #f3d57a;
-                padding: 40px 30px;
-                border-radius: 16px;
-                box-shadow: 0 0 60px rgba(243, 213, 122, 0.4);
-                text-align: center;
-                margin-top: 6vh;
-            ">
-                <div style="font-size: 1.2rem; color: #f3d57a; letter-spacing: 6px; margin-bottom: 10px;">❖ ❖ ❖</div>
-                <h1 style="
-                    font-family: 'Bungee Inline', cursive, sans-serif;
-                    font-size: 3.2rem;
-                    color: #f3d57a;
-                    letter-spacing: 6px;
-                    text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
-                    margin: 0 0 15px 0;
-                ">BITGET SAS</h1>
-                <p style="color: #c5a880; font-family: 'Cinzel', serif; font-size: 1.05rem; margin-bottom: 25px;">
-                    Autonomiczny System Zarządzania Portfelem i Algorytmami
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("")
-        
-        with st.form("login_form_full"):
-            login_email = st.text_input("📧 Adres E-mail Administratora", value="marekja57@wp.pl")
-            login_password = st.text_input("🔑 Hasło / PIN Bezpieczeństwa", type="password", value="Zostaw1260")
-            remember_device = st.checkbox(
-                "🔒 Zapamiętaj ten komputer na stałe w przeglądarce (Token URL)",
-                value=True,
-            )
-            submit_login = st.form_submit_button("🚀 AUTORYZUJ I WEJDŹ DO SYSTEMU", use_container_width=True)
-            
-            if submit_login:
-                if login_email.strip().lower() == "marekja57@wp.pl" and login_password == "Zostaj1260" or login_password == "Zostaw1260":
-                    st.session_state.logged_in = True
-                    st.session_state.user_email = login_email
-                    st.session_state.session_start_time = datetime.now()
-                    
-                    if remember_device:
-                        st.query_params["auth"] = "marek_trusted_device_2026"
-                    
-                    st.success("Autoryzacja powiodła się pomyślnie!")
-                    st.rerun()
-                else:
-                    st.error("Błędny adres e-mail lub hasło dostępu.")
-    st.stop()
-
-# =====================================================================
-# INicJALIZACJA KLIENTÓW CCXT DLA BITGET
-# =====================================================================
-def get_exchange(market_type):
-    try:
-        api_key = st.secrets.get("BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2")
-        secret = st.secrets.get("BITGET_SECRET_KEY", "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902")
-        passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-
-        ex_type = "spot" if market_type == "spot" else "swap"
-        exchange = ccxt.bitget({
-            "apiKey": api_key,
-            "secret": secret,
-            "password": passphrase,
-            "enableRateLimit": True,
-            "options": {"defaultType": ex_type},
-        })
-        return exchange
-    except Exception as e:
-        st.sidebar.error(f"Błąd inicjalizacji giełdy ({market_type}): {e}")
-        return None
-
-spot_ex = get_exchange("spot")
-futures_ex = get_exchange("futures")
-
-# Ładowanie rynków do snapshota Snipera
-if futures_ex and not st.session_state.known_markets:
-    try:
-        markets = futures_ex.load_markets()
-        st.session_state.known_markets = set(markets.keys())
-    except Exception:
-        pass
-
-# =====================================================================
-# ROZBUDOWANY PANEL BOCZNY (SIDEBAR)
+# ROZBUDOWANY PANEL BOCZNY (SIDEBAR) Z KLUCZAMI API BITGET
 # =====================================================================
 with st.sidebar.container(border=True):
-    st.markdown("### 💎 Status Administratora")
-    st.success(f"✅ Zalogowano\n• **Marek Jaskulski**\n• {st.session_state.user_email}")
+    st.markdown("### 🔑 Konfiguracja API Bitget")
 
-# Moduł subskrypcji Stripe
+    def update_api_key():
+        st.session_state.api_key = st.session_state.input_api_key
+
+    def update_secret_key():
+        st.session_state.secret_key = st.session_state.input_secret_key
+
+    def update_passphrase():
+        st.session_state.passphrase = st.session_state.input_passphrase
+
+    st.text_input(
+        "API Key",
+        value=st.session_state.api_key,
+        key="input_api_key",
+        on_change=update_api_key,
+        placeholder="Wprowadź API Key",
+    )
+    st.text_input(
+        "Secret Key",
+        value=st.session_state.secret_key,
+        type="password",
+        key="input_secret_key",
+        on_change=update_secret_key,
+        placeholder="Wprowadź Secret Key",
+    )
+    st.text_input(
+        "Passphrase",
+        value=st.session_state.passphrase,
+        type="password",
+        key="input_passphrase",
+        on_change=update_passphrase,
+        placeholder="Wprowadź Passphrase",
+    )
+
+# Moduł subskrypcji Stripe dla bot-bitget.pl
 with st.sidebar.container(border=True):
     st.markdown("### 💳 Subskrypcja (Stripe)")
     st.markdown("Zarządzanie licencją domeny **bot-bitget.pl**.")
@@ -232,13 +178,6 @@ with st.sidebar.container(border=True):
         unsafe_allow_html=True,
     )
     st.caption("Automatyczna aktywacja przez Stripe webhook.")
-
-st.sidebar.markdown("---")
-if st.sidebar.button("🔒 Wyloguj i zresetuj sesję", use_container_width=True):
-    st.session_state.logged_in = False
-    if "auth" in st.query_params:
-        del st.query_params["auth"]
-    st.rerun()
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -255,8 +194,8 @@ def send_notification(message):
                 url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
                 data = urllib.parse.urlencode({"chat_id": telegram_chat_id, "text": message}).encode("utf-8")
                 urllib.request.urlopen(url, data=data, timeout=3)
-            except Exception:
-                pass
+            except Exception as e:
+                log_system_event(f"Błąd wysyłania powiadomienia Telegram: {e}")
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -307,20 +246,29 @@ emergency_kill = st.sidebar.button("🛑 KILL SWITCH (ZAMKNIJ WSZYSTKO)", type="
 # KILL SWITCH LOGIKA
 # =====================================================================
 if emergency_kill:
-    if futures_ex:
-        try:
-            positions = futures_ex.fetch_positions()
-            for p in positions:
-                contracts = float(p.get("contracts", 0))
-                if contracts > 0:
-                    sym = p["symbol"]
-                    side = "sell" if p.get("side") == "long" else "buy"
-                    try:
-                        futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    log_system_event("AKTYWACJA KILL SWITCH – Awaryjne zamykanie wszystkich pozycji!")
+    # Inicjalizacja tymczasowa giełdy do kill switch
+    try:
+        ks_ex = ccxt.bitget({
+            "apiKey": st.session_state.api_key.strip(),
+            "secret": st.session_state.secret_key.strip(),
+            "password": st.session_state.passphrase.strip(),
+            "enableRateLimit": True,
+            "options": {"defaultType": "swap"},
+        })
+        positions = ks_ex.fetch_positions()
+        for p in positions:
+            contracts = float(p.get("contracts", 0))
+            if contracts > 0:
+                sym = p["symbol"]
+                side = "sell" if p.get("side") == "long" else "buy"
+                try:
+                    ks_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                    log_system_event(f"Zamknięto pozycję awaryjną na {sym}")
+                except Exception as ex:
+                    log_system_event(f"Błąd zamykania {sym}: {ex}")
+    except Exception as e:
+        log_system_event(f"Błąd wykonania kill switch: {e}")
 
     st.session_state.scanner_active = False
     st.session_state.trend_bot_spot_active = False
@@ -334,6 +282,43 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
+# INICJALIZACJA KLIENTÓW CCXT DLA BITGET
+# =====================================================================
+def get_exchange(market_type):
+    try:
+        api_key = st.session_state.api_key.strip()
+        secret = st.session_state.secret_key.strip()
+        passphrase = st.session_state.passphrase.strip()
+
+        if not api_key or not secret or not passphrase:
+            return None
+
+        ex_type = "spot" if market_type == "spot" else "swap"
+        exchange = ccxt.bitget({
+            "apiKey": api_key,
+            "secret": secret,
+            "password": passphrase,
+            "enableRateLimit": True,
+            "options": {"defaultType": ex_type},
+        })
+        return exchange
+    except Exception as e:
+        log_system_event(f"Błąd inicjalizacji giełdy ({market_type}): {e}")
+        return None
+
+spot_ex = get_exchange("spot")
+futures_ex = get_exchange("futures")
+
+# Ładowanie rynków do snapshota Snipera
+if futures_ex and not st.session_state.known_markets:
+    try:
+        markets = futures_ex.load_markets()
+        st.session_state.known_markets = set(markets.keys())
+        log_system_event(f"Załadowano {len(st.session_state.known_markets)} rynków futures do snapshota.")
+    except Exception as e:
+        log_system_event(f"Błąd ładowania rynków futures: {e}")
+
+# =====================================================================
 # POBIERANIE SALD Z GIEŁDY
 # =====================================================================
 spot_free, spot_total = 0.0, 0.0
@@ -342,8 +327,8 @@ if spot_ex:
         s_bal = spot_ex.fetch_balance()
         spot_free = float(s_bal.get("free", {}).get("USDT", 0.0))
         spot_total = float(s_bal.get("total", {}).get("USDT", 0.0))
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd pobierania salda spot: {e}")
 
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
@@ -351,14 +336,17 @@ if futures_ex:
         f_bal = futures_ex.fetch_balance()
         fut_free = float(f_bal.get("free", {}).get("USDT", 0.0))
         fut_total = float(f_bal.get("total", {}).get("USDT", 0.0))
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd pobierania salda futures: {e}")
 
 # =====================================================================
 # NAGŁÓWEK GŁÓWNY I KAFELKI METRYK
 # =====================================================================
-st.title("🚀 Bitget SAS - Panel Operacyjny (Pełna Wersja 1300+ Linijek)")
+st.title("🚀 Bitget SAS - Panel Operacyjny")
 st.markdown("Autonomiczny ekosystem algorytmiczny powiązany z silnikiem Bitget oraz zapleczem subskrypcyjnym Stripe.")
+
+if not st.session_state.api_key or not st.session_state.secret_key or not st.session_state.passphrase:
+    st.warning("⚠️ Wprowadź swoje klucze API Bitget (API Key, Secret Key, Passphrase) w panelu po lewej stronie, aby system mógł pobierać saldo i handlować.")
 
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -369,8 +357,8 @@ if futures_ex:
             if float(p.get("contracts", 0)) > 0:
                 active_positions_count += 1
                 total_unrealized_pnl += float(p.get("unrealizedPnl", 0.0))
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd pobierania PnL: {e}")
 
 col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
 
@@ -421,6 +409,7 @@ with st.container(border=True):
         st.markdown("### 🟢 Bot Trendowy Spot")
         def toggle_main_trend_spot():
             st.session_state.trend_bot_spot_active = st.session_state.main_cb_trend_spot
+            log_system_event(f"Zmiana stanu bota spot na: {st.session_state.trend_bot_spot_active}")
         st.checkbox(
             "Uruchom Bota Spot (MACD)",
             value=st.session_state.trend_bot_spot_active,
@@ -436,6 +425,7 @@ with st.container(border=True):
         st.markdown("### 🔵 Bot Trendowy Futures")
         def toggle_main_trend_fut():
             st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
+            log_system_event(f"Zmiana stanu bota futures na: {st.session_state.trend_bot_fut_active}")
         st.checkbox(
             "Uruchom Bota Futures (Long/Short)",
             value=st.session_state.trend_bot_fut_active,
@@ -451,6 +441,7 @@ with st.container(border=True):
         st.markdown("### 🟣 Grid Bot (Siatka Obronna)")
         def toggle_grid_bot():
             st.session_state.grid_bot_active = st.session_state.main_cb_grid_bot
+            log_system_event(f"Zmiana stanu bota grid na: {st.session_state.grid_bot_active}")
         st.checkbox(
             "Uruchom Strategię Grid",
             value=st.session_state.grid_bot_active,
@@ -470,10 +461,12 @@ with col_btn:
     if not st.session_state.scanner_active:
         if st.button("🚀 URUCHOM W PEŁNI AUTONOMICZNY SKANER NON-STOP", type="primary", use_container_width=True):
             st.session_state.scanner_active = True
+            log_system_event("Uruchomiono skaner non-stop z poziomu panelu głównego.")
             st.rerun()
     else:
         if st.button("⏹️ ZATRZYMAJ AUTONOMICZNY SKANER", type="secondary", use_container_width=True):
             st.session_state.scanner_active = False
+            log_system_event("Zatrzymano skaner non-stop z poziomu panelu głównego.")
             st.rerun()
 
 with col_status:
@@ -485,7 +478,7 @@ with col_status:
 trusted_base_coins = [
     "BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE", "LINK", 
     "SUI", "NEAR", "APT", "RENDER", "INJ", "PEPE", "SHIB", "LTC", 
-    "DOT", "UNI", "ZEC", "HYPE", "ATOM", "NEAR", "FET", "NEAR"
+    "DOT", "UNI", "ZEC", "HYPE", "ATOM", "FET"
 ]
 
 MIN_SPOT_TRADE = 5.0
@@ -531,12 +524,13 @@ if futures_ex and st.session_state.listing_sniper_active:
                                     "Dźwignia": f"{sniper_leverage}x",
                                     "Cena": f"{price:.4f}",
                                 })
+                                log_system_event(f"Listing Sniper kupił nowy token: {sym} za {sniper_budget} USDT")
                                 send_notification(f"🎯 [LISTING SNIPER] Wykryto nowy token {sym}! Kupiono za {sniper_budget:.1f} USDT.")
-                        except Exception:
-                            pass
+                        except Exception as ex:
+                            log_system_event(f"Błąd Listing Snipera na {sym}: {ex}")
         st.session_state.known_markets = current_symbols
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd głównej pętli Listing Snipera: {e}")
 
 # =====================================================================
 # OBSŁUGA BOTA SPOT
@@ -584,9 +578,10 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                         "Budżet": f"{budget:.2f} USDT",
                         "Cena": f"{c_price:.4f}",
                     })
+                    log_system_event(f"Bot Spot kupił {auto_bot_spot_coin} za {budget} USDT")
                     send_notification(f"🥾 [BOT SPOT] Kupiono {auto_bot_spot_coin} za {budget:.1f} USDT")
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd bota spot: {e}")
 
 # =====================================================================
 # OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR LONG/SHORT
@@ -679,9 +674,10 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             "Dźwignia": f"{bot_leverage}x",
                             "Cena": f"{f_price:.4f}",
                         })
+                        log_system_event(f"Bot Futures otworzył {label} na {sym} ({bot_leverage}x)")
                         send_notification(f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)")
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd bota futures: {e}")
 
 # =====================================================================
 # SPRAWDZANIE SYGNALÓW WYJŚCIA Z AKTYWNYCH POZYCJI
@@ -724,9 +720,10 @@ if futures_ex and st.session_state.active_trades:
                     trades_to_remove.append(sym)
                     st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
                     st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
+                    log_system_event(f"Zamknięto pozycję {sym} (Wynik: {pct_change:+.2f}%)")
                     send_notification(f"🔄 [WYJŚCIOWY SYGNAŁ] Zamknięto {sym} (Wynik: {pct_change:+.2f}%)")
-    except Exception:
-        pass
+    except Exception as e:
+        log_system_event(f"Błąd sprawdzania wyjść z pozycji: {e}")
 
     for r_sym in trades_to_remove:
         if r_sym in st.session_state.active_trades:
@@ -830,6 +827,7 @@ if spot_ex:
                                 })
 
                                 status = f"🚀 KUPIONO za {allocated_budget:.1f} USDT"
+                                log_system_event(f"Skaner spot kupił {sym} za {allocated_budget} USDT")
                                 send_notification(f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT")
                             except Exception as ex:
                                 status = f"❌ Błąd: {ex}"
@@ -994,6 +992,7 @@ if futures_ex:
                                 })
 
                                 status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x)"
+                                log_system_event(f"Skaner futures otworzył {action_label} na {sym} ({dyn_leverage}x)")
                                 send_notification(f"🔵 [FUTURES] Otwarto {action_label} na {sym}")
                             except Exception as ex:
                                 status = f"❌ Błąd: {ex}"
@@ -1016,66 +1015,21 @@ if futures_ex:
 st.markdown("---")
 
 # =====================================================================
-# RANKING OKAZJI & DZIENNIK TRANSAKCJI
+# DZIENNIK TRANSAKCJI & LOGI
 # =====================================================================
-st.subheader("🤖 Ranking Najlepszych Okazji Rynkowych & Wolumen")
-combined_bot_ranking = []
-source_ex_for_ranking = futures_ex if futures_ex else spot_ex
-
-if source_ex_for_ranking:
-    try:
-        all_tickers = source_ex_for_ranking.fetch_tickers()
-        valid_ranking_items = {
-            sym: data for sym, data in all_tickers.items()
-            if any(sym.startswith(coin + "/") or sym.startswith(coin + ":") for coin in trusted_base_coins)
-            and "BULL" not in sym and "BEAR" not in sym
-            and data.get("quoteVolume", 0) > 40000
-        }
-        sorted_ranking = sorted(valid_ranking_items.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)[:max_fut_scan_pairs]
-
-        for r_idx, (r_sym, r_data) in enumerate(sorted_ranking):
-            r_vol = r_data.get("quoteVolume", 0)
-            market_type = "Futures" if ((":USDT" in r_sym) or ("/USDT:USDT" in r_sym)) else "Spot"
-
-            if r_idx % 4 == 0:
-                recommended_bot = "Trend-Following (MACD)"
-                rec_action = "LONG / Sygnał wzrostowy"
-                potential_score = "Bardzo Wysoki"
-            elif r_idx % 4 == 1:
-                recommended_bot = "Futures Grid"
-                rec_action = "Siatka / Neutralny"
-                potential_score = "Stabilny"
-            elif r_idx % 4 == 2:
-                recommended_bot = "RSI Reversal"
-                rec_action = "Odbicie ekstremalne"
-                potential_score = "Wysoki"
-            else:
-                recommended_bot = "Listing Sniper"
-                rec_action = "Snajper Nowości"
-                potential_score = "Ekstremalny"
-
-            combined_bot_ranking.append({
-                "Pozycja": f"#{r_idx+1}",
-                "Para": r_sym,
-                "Typ": market_type,
-                "Wolumen 24h": f"{r_vol:,.0f} USDT",
-                "Rekomendowany Bot": recommended_bot,
-                "Działanie": rec_action,
-                "Potencjał": potential_score,
-            })
-    except Exception:
-        pass
-
-if combined_bot_ranking:
-    st.dataframe(pd.DataFrame(combined_bot_ranking), use_container_width=True)
-
-st.markdown("---")
 st.subheader("📜 Dziennik Transakcji w Bieżącej Sesji")
-
 if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
     st.info("Brak zarejestrowanych transakcji w tej sesji roboczej.")
+
+st.markdown("---")
+st.subheader("🛠️ Dziennik Zdarzeń Systemowych (Logi Operacyjne)")
+if st.session_state.execution_logs:
+    for log_item in st.session_state.execution_logs[:15]:
+        st.text(log_item)
+else:
+    st.info("Brak wpisów w dzienniku zdarzeń.")
 
 # Pętla odświeżania non-stop Streamlit
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active or st.session_state.grid_bot_active:
