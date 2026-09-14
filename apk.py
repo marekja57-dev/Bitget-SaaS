@@ -46,6 +46,9 @@ if "logged_in" not in st.session_state:
     else:
         st.session_state.logged_in = False
 
+if "show_login_form" not in st.session_state:
+    st.session_state.show_login_form = False
+
 if "api_key" not in st.session_state:
     st.session_state.api_key = saved_api or st.secrets.get(
         "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
@@ -78,7 +81,6 @@ def get_exchange(market_type):
         return None
 
 def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
-    """Autonomiczny dobór dźwigni na podstawie zmienności i typu aktywa"""
     if "Ręczny" in mode:
         return int(manual_lev)
     
@@ -97,7 +99,7 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     return max(2, int(base_lev))
 
 # =====================================================================
-# STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
+# STYLIZACJA CSS
 # =====================================================================
 st.markdown(
     """
@@ -208,44 +210,70 @@ st.markdown(
 )
 
 # =====================================================================
-# PEŁNY EKRAN POWITALNY ORAZ ZINTEGROWANY PANEL LOGOWANIA (API + HASŁO)
+# OBSŁUGA EKRANU STARTOWEGO ORAZ LOGOWANIA
 # =====================================================================
 if not st.session_state.logged_in:
-    st.markdown(
-        f"""
-        <div class="hero-wrapper">
-            <div class="retro-ornate-frame">
-                <div class="retro-vintage-title">BITGET SAS</div>
-                <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY & LISTING SNIPER</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<p style="color: #dcdcdc; font-family: Cinzel, serif; font-size: 1rem; margin-bottom: 20px; line-height: 1.5; text-align: center;">Witaj w zaawansowanym terminalu operacyjnym giełdy Bitget. Wprowadź poniżej swoje klucze autoryzacyjne API oraz hasło dostępu (Passphrase), aby nawiązać bezpieczne połączenie. System zapamięta Twoje dane do kolejnych sesji.</p>',
-        unsafe_allow_html=True,
-    )
-
-    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    with col_l2:
-        input_api = st.text_input("Bitget API Key", value=st.session_state.api_key)
-        input_secret = st.text_input("Bitget Secret Key", type="password", value=st.session_state.secret_key)
-        input_pass = st.text_input("Bitget Passphrase (Hasło / Paszport)", type="password", value=st.session_state.passphrase)
-
-        st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
-        if st.button("🚀 POŁĄCZ Z GIEŁDĄ I URUCHOM PANEL", use_container_width=True):
-            if input_api and input_secret and input_pass:
-                st.session_state.api_key = input_api
-                st.session_state.secret_key = input_secret
-                st.session_state.passphrase = input_pass
-                # Zapisujemy na stałe w pliku lokalnym
-                save_credentials(input_api, input_secret, input_pass)
-                st.session_state.logged_in = True
+    if not st.session_state.show_login_form:
+        # Ekran startowy (tylko przycisk wejścia)
+        st.markdown(
+            """
+            <div class="hero-wrapper">
+                <div class="retro-ornate-frame">
+                    <div class="retro-vintage-title">BITGET SAS</div>
+                    <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY & LISTING SNIPER</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p style="color: #dcdcdc; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 30px; text-align: center;">Terminal operacyjny giełdy Bitget gotowy do uruchomienia.</p>',
+            unsafe_allow_html=True,
+        )
+        
+        col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+        with col_l2:
+            st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
+            if st.button("🚪 WEJDŹ DO APLIKACJI", use_container_width=True):
+                st.session_state.show_login_form = True
                 st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
-    st.stop()
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.stop()
+    else:
+        # Ekran logowania (wprowadzanie kluczy)
+        st.markdown(
+            """
+            <div class="hero-wrapper">
+                <div class="retro-ornate-frame">
+                    <div class="retro-vintage-title" style="font-size: 2.5rem;">LOGOWANIE</div>
+                    <div class="retro-subtitle">AUTORYZACJA DOSTĘPU DO API BITGET</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+        col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+        with col_l2:
+            input_api = st.text_input("Bitget API Key", value=st.session_state.api_key)
+            input_secret = st.text_input("Bitget Secret Key", type="password", value=st.session_state.secret_key)
+            input_pass = st.text_input("Bitget Passphrase (Hasło / Paszport)", type="password", value=st.session_state.passphrase)
+
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("⬅️ WSTECZ", use_container_width=True):
+                    st.session_state.show_login_form = False
+                    st.rerun()
+            with col_b2:
+                if st.button("🚀 POŁĄCZ", use_container_width=True):
+                    if input_api and input_secret and input_pass:
+                        st.session_state.api_key = input_api
+                        st.session_state.secret_key = input_secret
+                        st.session_state.passphrase = input_pass
+                        save_credentials(input_api, input_secret, input_pass)
+                        st.session_state.logged_in = True
+                        st.rerun()
+
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.stop()
 
 # =====================================================================
 # INICJALIZACJA CZASU SESJI
@@ -300,8 +328,9 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔒 Wróć do ekranu powitalnego (Usuń zapisane klucze)"):
+if st.sidebar.button("🔒 Wyloguj (Usuń zapisane klucze)"):
     st.session_state.logged_in = False
+    st.session_state.show_login_form = False
     if os.path.exists(CONFIG_FILE):
         try:
             os.remove(CONFIG_FILE)
@@ -747,7 +776,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
         pass
 
 # =====================================================================
-# OBSŁUGA FUTURES: AUTOMATYCZNY WYBÓR I AUTONOMICZNA DŹWIGNIA
+# OBSŁUGA FUTURES
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
