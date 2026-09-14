@@ -661,11 +661,21 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     except Exception:
         pass
 
+# Pobranie pozycji z giełdy raz do wykorzystania w skanerach górnych
+exchange_positions = {}
+if futures_ex:
+    try:
+        for p in futures_ex.fetch_positions():
+            if float(p.get("contracts", 0)) > 0:
+                exchange_positions[p["symbol"]] = p
+    except Exception:
+        pass
+
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES (JEDEN POD DRUGIM)
+# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES Z DANYMI O DŹWIGNI I KASIE
 # =====================================================================
 st.markdown("---")
-st.subheader("🔥 Top 8 Par Spot (Skaner)")
+st.subheader("🔥 Top 8 Par Spot (Skaner i Status)")
 if spot_ex:
     try:
         s_tickers = spot_ex.fetch_tickers()
@@ -676,11 +686,13 @@ if spot_ex:
         spot_data_list = []
         for sym in top_spot_view:
             t_data = s_tickers.get(sym, {})
+            is_active_spot = sym in st.session_state.active_spot_trades
             spot_data_list.append({
                 "Para": sym,
                 "Cena": f"{t_data.get('last', 0):.4f}",
                 "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
+                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
+                "Status Pozycji": "🟢 Aktywna (Spot)" if is_active_spot else "-"
             })
         if spot_data_list:
             st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
@@ -692,7 +704,7 @@ else:
     st.info("Skonfiguruj klucze API Spot, aby widzieć skaner.")
 
 st.markdown("---")
-st.subheader("📈 Top 8 Par Futures (Skaner)")
+st.subheader("📈 Top 8 Par Futures (Skaner, Dźwignia i Zaangażowana Kasa)")
 if futures_ex:
     try:
         f_tickers = futures_ex.fetch_tickers()
@@ -703,11 +715,37 @@ if futures_ex:
         fut_data_list = []
         for sym in top_fut_view:
             t_data = f_tickers.get(sym, {})
+            pos = exchange_positions.get(sym)
+            
+            side_val = "-"
+            lev_val = "-"
+            margin_val = "-"
+            pnl_val = "-"
+            
+            if pos:
+                side_val = pos.get("side", "").upper()
+                lev_val = f"{pos.get('leverage', 1)}x"
+                notional = float(pos.get("notional", 0))
+                lev = float(pos.get("leverage", 1))
+                margin = notional / lev if lev > 0 else 0
+                margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
+                pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
+            elif sym in st.session_state.active_trades:
+                trade_info = st.session_state.active_trades[sym]
+                side_val = trade_info.get("side", "").upper()
+                lev_val = f"{trade_info.get('leverage', 1)}x"
+                margin_val = "Zalogowany Bot"
+                pnl_val = "Aktywna"
+
             fut_data_list.append({
                 "Para": sym,
                 "Cena": f"{t_data.get('last', 0):.4f}",
                 "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
+                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
+                "Strona": side_val,
+                "Dźwignia": lev_val,
+                "Zaangażowana Kasa": margin_val,
+                "Wynik PnL": pnl_val
             })
         if fut_data_list:
             st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
@@ -717,55 +755,6 @@ if futures_ex:
         st.info("Błąd pobierania danych rynkowych Futures.")
 else:
     st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
-
-# =====================================================================
-# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (POD SKANERAMI)
-# =====================================================================
-st.markdown("---")
-st.subheader("⚡ Aktywne Pozycje, Dźwignia i Przypisane Boty (Na Żywo)")
-
-active_pos_list = []
-if futures_ex:
-    try:
-        positions = futures_ex.fetch_positions()
-        for p in positions:
-            contracts = float(p.get("contracts", 0))
-            if contracts > 0:
-                sym = p["symbol"]
-                side = p.get("side", "").upper()
-                entry_p = float(p.get("entryPrice", 0))
-                lev = p.get("leverage", 1)
-                pnl = float(p.get("unrealizedPnl", 0))
-                
-                bot_source = "🤖 Bot Futures Trendowy" if sym in st.session_state.active_trades else "👤 Pozycja Ręczna / Inna"
-                
-                active_pos_list.append({
-                    "Para": sym,
-                    "Źródło / Bot": bot_source,
-                    "Strona": side,
-                    "Dźwignia": f"{lev}x",
-                    "Cena Wejścia": f"{entry_p:.4f}",
-                    "Wynik PnL": f"{pnl:+.2f} USDT",
-                    "Status": "🟢 W trakcie realizacji (Aktywna)"
-                })
-    except Exception:
-        pass
-
-for spot_sym in st.session_state.active_spot_trades:
-    active_pos_list.append({
-        "Para": spot_sym,
-        "Źródło / Bot": "🟢 Bot Spot Trendowy",
-        "Strona": "BUY (KUPNO)",
-        "Dźwignia": "1x (Spot)",
-        "Cena Wejścia": "-",
-        "Wynik PnL": "-",
-        "Status": "🟢 W trakcie realizacji (Aktywna)"
-    })
-
-if active_pos_list:
-    st.dataframe(pd.DataFrame(active_pos_list), use_container_width=True)
-else:
-    st.info("Brak aktywnych pozycji w portfelu lub uruchomionych przez boty.")
 
 st.markdown("---")
 st.subheader("📜 Dziennik Transakcji")
