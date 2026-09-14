@@ -52,15 +52,16 @@ saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credential
 if "page" not in st.session_state:
     st.session_state.page = "welcome"
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = bool(saved_api and saved_secret and saved_pass)
+if "admin_unlocked" not in st.session_state:
+    st.session_state.admin_unlocked = False
 
+# Klucze domyślnie są puste, aby obcy użytkownik ich nie odziedziczył!
 if "api_key" not in st.session_state:
-    st.session_state.api_key = saved_api or st.secrets.get("BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2")
+    st.session_state.api_key = ""
 if "secret_key" not in st.session_state:
-    st.session_state.secret_key = saved_secret or st.secrets.get("BITGET_SECRET_KEY", "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902")
+    st.session_state.secret_key = ""
 if "passphrase" not in st.session_state:
-    st.session_state.passphrase = saved_pass or st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
+    st.session_state.passphrase = ""
 
 stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
 stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
@@ -70,6 +71,8 @@ if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 def get_exchange(market_type):
+    if not st.session_state.admin_unlocked or not st.session_state.api_key:
+        return None
     try:
         ex_type = "spot" if market_type == "spot" else "swap"
         exchange = ccxt.bitget({
@@ -174,8 +177,6 @@ if "known_markets" not in st.session_state:
     st.session_state.known_markets = set()
 if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
-if "admin_unlocked" not in st.session_state:
-    st.session_state.admin_unlocked = False
 
 # =====================================================================
 # BEZPIECZNY PANEL ADMINISTRATORA (CHRONIONY HASŁEM)
@@ -183,14 +184,19 @@ if "admin_unlocked" not in st.session_state:
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Strefa Administratora")
     if not st.session_state.admin_unlocked:
-        admin_pin = st.text_input("Podaj PIN Administratora", type="password")
-        if st.button("🔓 ODBLOKUJ KLUCZE API", use_container_width=True):
-            if admin_pin == st.session_state.passphrase:
+        admin_password_input = st.text_input("Podaj hasło administratora", type="password")
+        if st.button("🔓 ZALOGUJ JAKO ADMIN", use_container_width=True):
+            correct_password = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
+            if admin_password_input == correct_password:
                 st.session_state.admin_unlocked = True
-                st.success("Odblokowano panel administratora!")
+                # Wczytaj klucze dopiero po poprawnym zalogowaniu
+                st.session_state.api_key = saved_api or st.secrets.get("BITGET_API_KEY", "")
+                st.session_state.secret_key = saved_secret or st.secrets.get("BITGET_SECRET_KEY", "")
+                st.session_state.passphrase = saved_pass or st.secrets.get("BITGET_PASSPHRASE", "")
+                st.success("Zalogowano jako Administrator!")
                 st.rerun()
             else:
-                st.error("Nieprawidłowy PIN.")
+                st.error("Nieprawidłowe hasło administratora.")
     else:
         st.success("🔓 Panel Admina Odblokowany")
         input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
@@ -203,14 +209,19 @@ with st.sidebar.container(border=True):
                 st.session_state.secret_key = input_secret
                 st.session_state.passphrase = input_pass
                 save_credentials(input_api, input_secret, input_pass)
-                st.session_state.logged_in = True
                 st.success("✅ Zapisano klucze pomyślnie")
                 st.rerun()
             else:
                 st.error("Wypełnij wszystkie pola.")
         
-        if st.button("🔒 ZABLOKUJ WIDOK", use_container_width=True):
+        if st.button("🔒 WYLOGUJ ADMINA", use_container_width=True):
             st.session_state.admin_unlocked = False
+            st.session_state.api_key = ""
+            st.session_state.secret_key = ""
+            st.session_state.passphrase = ""
+            st.session_state.scanner_active = False
+            st.session_state.trend_bot_spot_active = False
+            st.session_state.trend_bot_fut_active = False
             st.rerun()
 
 spot_ex = get_exchange("spot")
@@ -255,7 +266,6 @@ with st.sidebar.container(border=True):
     base_allocation_pct = st.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
     max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
     
-    # Limity liczby pozycji dla Spot oraz Futures
     max_active_spot_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Spot", 1, 20, 5)
     max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 5)
 
@@ -494,7 +504,7 @@ if futures_ex and st.session_state.listing_sniper_active:
         pass
 
 # =====================================================================
-# OBSŁUGA BOTA SPOT (Z UWZGLĘDNIENIEM LIMITU POZYCJI)
+# OBSŁUGA BOTA SPOT
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -624,7 +634,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNAŁÓW DO ZAMKNIĘCIA (FUTURES) + OPCJONALNY SL/TP
+# SPRAWDZANIE SYGNAŁÓW DO ZAMKNIĘCIA (FUTURES) + SL/TP
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
     trades_to_remove = []
@@ -678,7 +688,7 @@ if futures_ex and st.session_state.active_trades:
             del st.session_state.active_trades[r_sym]
 
 # =====================================================================
-# SKANER SPOT (Z UWZGLĘDNIENIEM LIMITU POZYCJI)
+# SKANER SPOT
 # =====================================================================
 st.subheader("📊 Skaner Spot (Wyświetlane Top 8)")
 spot_results = []
