@@ -544,19 +544,17 @@ if enable_custom_sl_tp and futures_ex:
             contracts = float(pos.get("contracts", 0))
             if contracts > 0:
                 sym = pos["symbol"]
-                side = pos.get("side", "") # "long" lub "short"
+                side = pos.get("side", "")
                 entry_price = float(pos.get("entryPrice", 0))
                 mark_price = float(pos.get("markPrice", 0))
                 leverage = float(pos.get("leverage", 1))
                 
                 if entry_price > 0 and mark_price > 0:
-                    # Obliczenie ROE / procentowej zmiany zysku/straty z uwzględnieniem dźwigni
                     if side == "long":
                         pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
                     else:
                         pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
                     
-                    # Sprawdzenie Stop-Loss (strata >= zadany próg procentowy)
                     if pnl_pct <= -float(custom_stop_loss_pct):
                         close_side = "sell" if side == "long" else "buy"
                         futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
@@ -568,7 +566,6 @@ if enable_custom_sl_tp and futures_ex:
                         })
                         send_notification(f"🛑 [STOP-LOSS] Zamknięto {sym} przy stracie {pnl_pct:.2f}%")
                     
-                    # Sprawdzenie Take-Profit (zysk >= zadany próg procentowy)
                     elif pnl_pct >= float(custom_take_profit_pct):
                         close_side = "sell" if side == "long" else "buy"
                         futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
@@ -579,7 +576,7 @@ if enable_custom_sl_tp and futures_ex:
                             "Cena": f"{mark_price:.4f}",
                         })
                         send_notification(f"🎯 [TAKE-PROFIT] Zamknięto {sym} przy zysku {pnl_pct:.2f}%")
-    except Exception as e:
+    except Exception:
         pass
 
 # =====================================================================
@@ -709,7 +706,6 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     except Exception:
         pass
 
-# Pobranie pozycji z giełdy raz do wykorzystania w skanerach górnych
 exchange_positions = {}
 if futures_ex:
     try:
@@ -720,10 +716,10 @@ if futures_ex:
         pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES Z DANYMI O DŹWIGNI I KASIE
+# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES (PEŁNE STATUSY)
 # =====================================================================
 st.markdown("---")
-st.subheader("🔥 Top 8 Par Spot (Skaner i Status)")
+st.subheader("🔥 Top 8 Par Spot (Skaner i Status Strategii)")
 if spot_ex:
     try:
         s_tickers = spot_ex.fetch_tickers()
@@ -735,12 +731,32 @@ if spot_ex:
         for sym in top_spot_view:
             t_data = s_tickers.get(sym, {})
             is_active_spot = sym in st.session_state.active_spot_trades
+            
+            # Dynamiczne sprawdzanie statusu / sygnału dla każdej pary z tabeli
+            status_text = "⏳ Oczekująca"
+            if is_active_spot:
+                status_text = "🟢 Aktywna (Spot)"
+            else:
+                try:
+                    s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+                    s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
+                    s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
+                    if s_df["macd"].iloc[-1] > s_df["signal"].iloc[-1]:
+                        status_text = "⚡ Sygnał MACD (Kupno)"
+                except Exception:
+                    pass
+
+            budget_val = max(MIN_SPOT_TRADE, min(spot_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
+
             spot_data_list.append({
                 "Para": sym,
                 "Cena": f"{t_data.get('last', 0):.4f}",
                 "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
                 "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
-                "Status Pozycji": "🟢 Aktywna (Spot)" if is_active_spot else "-"
+                "Strategia": "Spot Trend-Following (MACD)",
+                "Alokacja": f"{budget_val:.2f} USDT",
+                "Status Pozycji": status_text
             })
         if spot_data_list:
             st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
@@ -752,7 +768,7 @@ else:
     st.info("Skonfiguruj klucze API Spot, aby widzieć skaner.")
 
 st.markdown("---")
-st.subheader("📈 Top 8 Par Futures (Skaner, Dźwignia i Zaangażowana Kasa)")
+st.subheader("📈 Top 8 Par Futures (Strategia, Alokacja Min. 5 USDT, Dźwignia i PnL)")
 if futures_ex:
     try:
         f_tickers = futures_ex.fetch_tickers()
@@ -769,6 +785,10 @@ if futures_ex:
             lev_val = "-"
             margin_val = "-"
             pnl_val = "-"
+            status_desc = "⏳ Oczekująca"
+            
+            # Obliczenie domyślnej alokacji (min 5 USDT)
+            prop_budget = max(MIN_FUT_TRADE, min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
             
             if pos:
                 side_val = pos.get("side", "").upper()
@@ -778,22 +798,43 @@ if futures_ex:
                 margin = notional / lev if lev > 0 else 0
                 margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
-            elif sym in st.session_state.active_trades:
-                trade_info = st.session_state.active_trades[sym]
-                side_val = trade_info.get("side", "").upper()
-                lev_val = f"{trade_info.get('leverage', 1)}x"
-                margin_val = "Zalogowany Bot"
-                pnl_val = "Aktywna"
+                status_desc = "🟢 Aktywna (Pozycja Otwarta)"
+            else:
+                # Sprawdzenie sygnału dla nieotwartych par
+                try:
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+                    time.sleep(0.01)
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
+                    f_vol = f_df["volatility_pct"].iloc[-1] if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
+                    
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    
+                    f_macd = f_df["macd"].iloc[-1]
+                    f_sig = f_df["signal"].iloc[-1]
+                    
+                    side_val = "LONG" if f_macd > f_sig else "SHORT"
+                    lev_num = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
+                    lev_val = f"{lev_num}x"
+                    margin_val = f"{prop_budget:.2f} USDT"
+                    pnl_val = "Oczekiwanie na warunek"
+                    status_desc = "⚡ Sygnał Gotowy"
+                except Exception:
+                    lev_val = f"{manual_leverage}x"
+                    margin_val = f"{prop_budget:.2f} USDT"
 
             fut_data_list.append({
                 "Para": sym,
                 "Cena": f"{t_data.get('last', 0):.4f}",
                 "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
                 "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
+                "Strategia": "Futures Trend-Following (MACD + EMA)",
                 "Strona": side_val,
                 "Dźwignia": lev_val,
-                "Zaangażowana Kasa": margin_val,
-                "Wynik PnL": pnl_val
+                "Alokacja / Kasa": margin_val,
+                "Wynik PnL": pnl_val,
+                "Status Pozycji": status_desc
             })
         if fut_data_list:
             st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
