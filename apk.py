@@ -1,6 +1,8 @@
 from datetime import datetime
+import hashlib
 import json
 import os
+import sqlite3
 import time
 import ccxt
 import pandas as pd
@@ -8,33 +10,43 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget SAS - Autonomia i Panel Subskrybenta",
+    page_title="Bitget SAS - System Wieloużytkownikowy SaaS",
     layout="wide",
 )
 
-CONFIG_FILE = "bitget_config.json"
+DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
-def load_saved_credentials():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                data = json.load(f)
-                return data.get("api_key"), data.get("secret_key"), data.get("passphrase")
-        except Exception:
-            pass
-    return None, None, None
+# =====================================================================
+# INICJALIZACJA BAZY DANYCH SQLITE
+# =====================================================================
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            password TEXT,
+            is_admin INTEGER DEFAULT 0,
+            stripe_paid INTEGER DEFAULT 0,
+            api_key TEXT,
+            secret_key TEXT,
+            passphrase TEXT
+        )
+    ''')
+    # Tworzenie domyślnego konta administratora, jeśli nie istnieje
+    cursor.execute("SELECT * FROM users WHERE email = ?", ("admin@bot-bitget.pl",))
+    if not cursor.fetchone():
+        admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
+        cursor.execute(
+            "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, 1, 1)",
+            ("admin@bot-bitget.pl", admin_pass)
+        )
+    conn.commit()
+    conn.close()
 
-def save_credentials(api_key, secret_key, passphrase):
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump({
-                "api_key": api_key,
-                "secret_key": secret_key,
-                "passphrase": passphrase
-            }, f)
-    except Exception:
-        pass
+init_db()
 
 def load_stripe_credentials():
     if os.path.exists(STRIPE_CONFIG_FILE):
@@ -46,23 +58,7 @@ def load_stripe_credentials():
             pass
     return "", "", ""
 
-saved_api, saved_secret, saved_pass = load_saved_credentials()
 saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credentials()
-
-if "page" not in st.session_state:
-    st.session_state.page = "welcome"
-
-if "admin_unlocked" not in st.session_state:
-    st.session_state.admin_unlocked = False
-
-# Klucze domyślnie są puste, aby obcy użytkownik ich nie odziedziczył!
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
-if "secret_key" not in st.session_state:
-    st.session_state.secret_key = ""
-if "passphrase" not in st.session_state:
-    st.session_state.passphrase = ""
-
 stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
 stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
 stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "price_1RxSubscriptionMock")
@@ -70,8 +66,150 @@ stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID",
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
+# Sesja użytkownika
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = ""
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+# =====================================================================
+# STYLIZACJA WYGLĄDU (RETRO / DARK)
+# =====================================================================
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
+    .stApp { background-color: #0d0b0a; }
+    section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
+    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
+    .retro-ornate-frame {
+        position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
+        border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px;
+        box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
+        width: 100%; max-width: 600px; text-align: center;
+    }
+    .retro-vintage-title {
+        font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a;
+        letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px;
+    }
+    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
+    div.stButton > button {
+        background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important;
+        border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important;
+        font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important;
+        color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px);
+    }
+    div[data-testid="stMetric"] {
+        border: 2px solid #f3d57a; border-radius: 10px; padding: 10px 12px;
+        background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    div[data-testid="stMetric"] label { color: #f3d57a !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =====================================================================
+# EKRAN LOGOWANIA / REJESTRACJI (JEŚLI NIE ZALOGOWANY)
+# =====================================================================
+if not st.session_state.logged_in:
+    st.markdown(
+        """
+        <div class="hero-wrapper">
+            <div class="retro-ornate-frame">
+                <div class="retro-vintage-title">BITGET SAS</div>
+                <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab_login, tab_register = st.tabs(["🔑 Zaloguj się", "📝 Załóż konto"])
+
+    with tab_login:
+        st.markdown("<p style='color: #f3d57a; font-family: Cinzel, serif;'>Logowanie do Panelu Klienta</p>", unsafe_allow_html=True)
+        login_email = st.text_input("Adres e-mail", key="log_email")
+        login_pass = st.text_input("Hasło", type="password", key="log_pass")
+
+        if st.button("ZALOGUJ SIĘ", use_container_width=True):
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE email = ?", (login_email.strip(),))
+            user_row = cursor.fetchone()
+            conn.close()
+
+            if user_row and user_row[2] == login_pass:
+                st.session_state.logged_in = True
+                st.session_state.user_id = user_row[0]
+                st.session_state.user_email = user_row[1]
+                st.session_state.is_admin = bool(user_row[3])
+                st.session_state.stripe_paid = bool(user_row[4])
+                st.session_state.api_key = user_row[5] or ""
+                st.session_state.secret_key = user_row[6] or ""
+                st.session_state.passphrase = user_row[7] or ""
+                st.success("Zalogowano pomyślnie!")
+                st.rerun()
+            else:
+                st.error("Nieprawidłowy e-mail lub hasło.")
+
+    with tab_register:
+        st.markdown("<p style='color: #f3d57a; font-family: Cinzel, serif;'>Rejestracja Nowego Konta</p>", unsafe_allow_html=True)
+        reg_email = st.text_input("Twój e-mail", key="reg_email")
+        reg_pass = st.text_input("Utwórz hasło", type="password", key="reg_pass")
+
+        if st.button("ZAREJESTRUJ SIĘ", use_container_width=True):
+            if reg_email and reg_pass:
+                try:
+                    conn = sqlite3.connect(DB_FILE)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, 0, 0)",
+                        (reg_email.strip(), reg_pass)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Konto założone! Przejdź do zakładki logowania.")
+                except sqlite3.IntegrityError:
+                    st.error("Ten e-mail jest już zarejestrowany.")
+            else:
+                st.error("Wypełnij wszystkie pola.")
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.stop()
+
+# =====================================================================
+# GŁÓWNA APLIKACIJA (PO ZALOGOWANIU)
+# =====================================================================
+if "session_start_time" not in st.session_state:
+    st.session_state.session_start_time = datetime.now()
+if "trade_history" not in st.session_state:
+    st.session_state.trade_history = []
+if "signal_cooldown" not in st.session_state:
+    st.session_state.signal_cooldown = {}
+if "scanner_active" not in st.session_state:
+    st.session_state.scanner_active = False
+if "active_trades" not in st.session_state:
+    st.session_state.active_trades = {}
+if "active_spot_trades" not in st.session_state:
+    st.session_state.active_spot_trades = set()
+if "trend_bot_spot_active" not in st.session_state:
+    st.session_state.trend_bot_spot_active = False
+if "trend_bot_fut_active" not in st.session_state:
+    st.session_state.trend_bot_fut_active = False
+if "known_markets" not in st.session_state:
+    st.session_state.known_markets = set()
+if "listing_sniper_active" not in st.session_state:
+    st.session_state.listing_sniper_active = False
+
 def get_exchange(market_type):
-    if not st.session_state.admin_unlocked or not st.session_state.api_key:
+    if not st.session_state.api_key:
         return None
     try:
         ex_type = "spot" if market_type == "spot" else "swap"
@@ -98,131 +236,50 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     else:
         return 10
 
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
-    .stApp { background-color: #0d0b0a; }
-    section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
-    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
-    .retro-ornate-frame {
-        position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
-        border: 6px double #f3d57a; padding: 50px 40px; border-radius: 16px;
-        box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
-        width: 100%; max-width: 900px; text-align: center;
-    }
-    .retro-vintage-title {
-        font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3.5rem; color: #f3d57a;
-        letter-spacing: 6px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px;
-    }
-    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.2rem; letter-spacing: 2px; margin-bottom: 30px; }
-    div.stButton > button {
-        background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important;
-        border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important;
-        font-size: 1rem !important; padding: 12px 28px !important; border-radius: 8px !important;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important;
-    }
-    div.stButton > button:hover {
-        background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important;
-        color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px);
-    }
-    div[data-testid="stMetric"] {
-        border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 15px;
-        background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-    div[data-testid="stMetric"] label { color: #f3d57a !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-if st.session_state.page == "welcome":
-    st.markdown(
-        """
-        <div class="hero-wrapper">
-            <div class="retro-ornate-frame">
-                <div class="retro-vintage-title">BITGET SAS</div>
-                <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY & PANEL SUBSKRYPCJI</div>
-                <p style="color: #dcdcdc; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 30px;">
-                    Profesjonalny terminal operacyjny zintegrowany ze Stripe oraz zaawansowanym zarządzaniem ryzykiem.
-                </p>
-        """,
-        unsafe_allow_html=True,
-    )
-    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    with col_l2:
-        if st.button("🚪 PRZEJDŹ DO TERMINARZA", use_container_width=True):
-            st.session_state.page = "main"
-            st.rerun()
-    st.markdown("</div></div>", unsafe_allow_html=True)
-    st.stop()
-
-if "session_start_time" not in st.session_state:
-    st.session_state.session_start_time = datetime.now()
-if "trade_history" not in st.session_state:
-    st.session_state.trade_history = []
-if "signal_cooldown" not in st.session_state:
-    st.session_state.signal_cooldown = {}
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
-if "active_trades" not in st.session_state:
-    st.session_state.active_trades = {}
-if "active_spot_trades" not in st.session_state:
-    st.session_state.active_spot_trades = set()
-if "trend_bot_spot_active" not in st.session_state:
-    st.session_state.trend_bot_spot_active = False
-if "trend_bot_fut_active" not in st.session_state:
-    st.session_state.trend_bot_fut_active = False
-if "known_markets" not in st.session_state:
-    st.session_state.known_markets = set()
-if "listing_sniper_active" not in st.session_state:
-    st.session_state.listing_sniper_active = True
-
 # =====================================================================
-# BEZPIECZNY PANEL ADMINISTRATORA (CHRONIONY HASŁEM)
+# PANEL BOCZNY (SIDEBAR)
 # =====================================================================
 with st.sidebar.container(border=True):
-    st.markdown("### 💎 Strefa Administratora")
-    if not st.session_state.admin_unlocked:
-        admin_password_input = st.text_input("Podaj hasło administratora", type="password")
-        if st.button("🔓 ZALOGUJ JAKO ADMIN", use_container_width=True):
-            correct_password = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
-            if admin_password_input == correct_password:
-                st.session_state.admin_unlocked = True
-                # Wczytaj klucze dopiero po poprawnym zalogowaniu
-                st.session_state.api_key = saved_api or st.secrets.get("BITGET_API_KEY", "")
-                st.session_state.secret_key = saved_secret or st.secrets.get("BITGET_SECRET_KEY", "")
-                st.session_state.passphrase = saved_pass or st.secrets.get("BITGET_PASSPHRASE", "")
-                st.success("Zalogowano jako Administrator!")
-                st.rerun()
-            else:
-                st.error("Nieprawidłowe hasło administratora.")
+    st.markdown(f"### 👤 Zalogowany: {st.session_state.user_email}")
+    if st.session_state.is_admin:
+        st.markdown("🔴 **Rola: Administrator**")
     else:
-        st.success("🔓 Panel Admina Odblokowany")
-        input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
-        input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
-        input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
+        st.markdown("🟢 **Rola: Klient SaaS**")
 
-        if st.button("🚀 ZAPISZ KLUCZE", use_container_width=True):
-            if input_api and input_secret and input_pass:
-                st.session_state.api_key = input_api
-                st.session_state.secret_key = input_secret
-                st.session_state.passphrase = input_pass
-                save_credentials(input_api, input_secret, input_pass)
-                st.success("✅ Zapisano klucze pomyślnie")
-                st.rerun()
-            else:
-                st.error("Wypełnij wszystkie pola.")
-        
-        if st.button("🔒 WYLOGUJ ADMINA", use_container_width=True):
-            st.session_state.admin_unlocked = False
-            st.session_state.api_key = ""
-            st.session_state.secret_key = ""
-            st.session_state.passphrase = ""
-            st.session_state.scanner_active = False
-            st.session_state.trend_bot_spot_active = False
-            st.session_state.trend_bot_fut_active = False
+    if st.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.user_email = ""
+        st.session_state.is_admin = False
+        st.session_state.api_key = ""
+        st.session_state.secret_key = ""
+        st.session_state.passphrase = ""
+        st.rerun()
+
+st.sidebar.markdown("---")
+with st.sidebar.container(border=True):
+    st.markdown("### 🔑 Twoje Klucze API Bitget")
+    input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
+    input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
+    input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
+
+    if st.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
+        if input_api and input_secret and input_pass:
+            st.session_state.api_key = input_api
+            st.session_state.secret_key = input_secret
+            st.session_state.passphrase = input_pass
+            # Zapisz w bazie danych dla tego użytkownika
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
+                (input_api, input_secret, input_pass, st.session_state.user_id)
+            )
+            conn.commit()
+            conn.close()
+            st.success("✅ Klucze zapisane w bazie!")
             st.rerun()
+        else:
+            st.error("Wypełnij wszystkie pola kluczy.")
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -235,13 +292,42 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-if st.sidebar.button("⬅️ Powrót do ekranu powitalnego", use_container_width=True):
-    st.session_state.page = "welcome"
-    st.rerun()
+with st.sidebar.container(border=True):
+    st.markdown("### 💳 Strefa Subskrypcji")
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT stripe_paid FROM users WHERE id = ?", (st.session_state.user_id,))
+    row = cursor.fetchone()
+    is_paid = bool(row[0]) if row else False
+    conn.close()
+
+    if is_paid:
+        st.success("✅ Subskrypcja aktywna")
+    else:
+        st.warning("⚠️ Brak aktywnej subskrypcji")
+        if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
+            if stripe_sk_val and stripe_price_id_val:
+                try:
+                    checkout_session = stripe.checkout.Session.create(
+                        payment_method_types=['card'],
+                        line_items=[{
+                            'price': stripe_price_id_val,
+                            'quantity': 1,
+                        }],
+                        mode='subscription',
+                        success_url='https://bot-bitget.pl/?success=true',
+                        cancel_url='https://bot-bitget.pl/?canceled=true',
+                        customer_email=st.session_state.user_email,
+                    )
+                    st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Błąd Stripe: {e}")
+            else:
+                st.error("Bramka płatności nie skonfigurowana.")
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
-    st.markdown("### 🔔 Powiadomienia")
+    st.markdown("### 🔔 Powiadomienia Telegram")
     enable_notifications = st.checkbox("Włącz powiadomienia", value=True)
     telegram_bot_token = st.text_input("Telegram Bot Token", type="password")
     telegram_chat_id = st.text_input("Telegram Chat ID")
@@ -276,9 +362,9 @@ with st.sidebar.container(border=True):
     custom_take_profit_pct = st.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15, disabled=not enable_custom_sl_tp)
 
     st.markdown("---")
-    st.markdown("### ⚡ Zarządzanie Dźwignią (Bezpieczne)")
-    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Autonomiczny (Bezpieczny, max 10x)", "🎛️ Ręczny"])
-    manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 10, 3)
+    st.markdown("### ⚡ Zarządzanie Dźwignią")
+    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🎛️ Ręczny"])
+    manual_leverage = st.slider("Stała dźwignia Futures", 1, 10, 3)
 
     st.markdown("---")
     st.markdown("### 🧠 Timeframe Analizy")
@@ -286,7 +372,7 @@ with st.sidebar.container(border=True):
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
-    st.markdown("### 🔄 Pętla Główna Skanera")
+    st.markdown("### 🔄 Pętla Skanera")
     if "sidebar_auto_scan_cb" not in st.session_state:
         st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
 
@@ -295,45 +381,8 @@ with st.sidebar.container(border=True):
 
     auto_scan_enabled = st.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
     scan_interval = st.slider("Interwał odświeżania (s)", 1, 300, 3)
-
-    st.markdown("---")
-    if "listing_sniper_cb" not in st.session_state:
-        st.session_state.listing_sniper_cb = st.session_state.listing_sniper_active
-
-    def toggle_listing_sniper():
-        st.session_state.listing_sniper_active = st.session_state.listing_sniper_cb
-
-    st.checkbox("🎯 Listing Sniper (Max 50 USDT, lewar 2x)", key="listing_sniper_cb", on_change=toggle_listing_sniper)
-
-    st.markdown("---")
-    max_spot_scan_pairs = st.slider("🔍 Liczba par Spot do skanowania", 5, 50, 15, 5)
-    max_fut_scan_pairs = st.slider("📈 Liczba par Futures do skanowania", 5, 50, 15, 5)
-
-st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 💳 Strefa Klienta / Subskrypcja")
-    client_email = st.text_input("Twój adres e-mail", value="klient@domena.pl")
-    
-    if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
-        if stripe_sk_val and stripe_price_id_val:
-            try:
-                checkout_session = stripe.checkout.Session.create(
-                    payment_method_types=['card'],
-                    line_items=[{
-                        'price': stripe_price_id_val,
-                        'quantity': 1,
-                    }],
-                    mode='subscription',
-                    success_url='https://bot-bitget.pl/?success=true',
-                    cancel_url='https://bot-bitget.pl/?canceled=true',
-                    customer_email=client_email,
-                )
-                st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj, aby opłacić]({checkout_session.url})", unsafe_allow_html=True)
-                st.success("Wygenerowano bezpieczny link płatności!")
-            except Exception as e:
-                st.error(f"Błąd płatności: {e}")
-        else:
-            st.error("Bramka płatności nie jest skonfigurowana przez administratora.")
+    max_spot_scan_pairs = st.slider("🔍 Liczba par Spot", 5, 50, 15, 5)
+    max_fut_scan_pairs = st.slider("📈 Liczba par Futures", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
@@ -430,7 +479,7 @@ with st.container(border=True):
             st.info("🔴 Bot Spot Zatrzymany")
 
     with col_tb2:
-        st.markdown("### 🔵 Bot Futures (Inteligentny Long/Short)")
+        st.markdown("### 🔵 Bot Futures")
         if "main_cb_trend_fut" not in st.session_state:
             st.session_state.main_cb_trend_fut = st.session_state.trend_bot_fut_active
 
@@ -465,46 +514,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# MODUŁ: LISTING SNIPER
-# =====================================================================
-if futures_ex and st.session_state.listing_sniper_active:
-    try:
-        current_markets = futures_ex.fetch_markets()
-        current_symbols = {m["symbol"] for m in current_markets if (m["quote"] == "USDT" or m["settle"] == "USDT") and m["active"]}
-
-        if st.session_state.known_markets:
-            new_symbols = current_symbols - st.session_state.known_markets
-            if new_symbols:
-                for sym in new_symbols:
-                    if fut_free >= MIN_FUT_TRADE and sym not in st.session_state.active_trades:
-                        sniper_budget = max(MIN_FUT_TRADE, min(fut_free, 50.0))
-                        if sniper_budget <= fut_free:
-                            sniper_leverage = 2
-                            try:
-                                futures_ex.set_leverage(sniper_leverage, sym)
-                                ticker = futures_ex.fetch_ticker(sym)
-                                price = ticker.get("ask", ticker.get("last", 0))
-                                if price > 0:
-                                    contracts = (sniper_budget * sniper_leverage) / price
-                                    futures_ex.create_market_order(sym, "buy", contracts)
-                                    st.session_state.active_trades[sym] = {"entry_price": price, "side": "buy", "contracts": contracts, "leverage": sniper_leverage}
-                                    st.session_state.trade_history.insert(0, {
-                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Typ": "🎯 LISTING SNIPER LONG (2x)",
-                                        "Para": sym,
-                                        "Budżet": f"{sniper_budget:.2f} USDT",
-                                        "Dźwignia": f"{sniper_leverage}x",
-                                        "Cena": f"{price:.4f}",
-                                    })
-                                    send_notification(f"🎯 [SNIPER] Nowy token {sym}! Zakup za {sniper_budget:.1f} USDT (2x).")
-                            except Exception:
-                                pass
-        st.session_state.known_markets = current_symbols
-    except Exception:
-        pass
-
-# =====================================================================
-# OBSŁUGA BOTA SPOT
+# BOTS & LOGIC EXECUTION
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -544,9 +554,6 @@ if spot_ex and st.session_state.trend_bot_spot_active:
     except Exception:
         pass
 
-# =====================================================================
-# OBSŁUGA FUTURES
-# =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
         if len(st.session_state.active_trades) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
@@ -629,208 +636,9 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             "Dźwignia": f"{bot_leverage}x",
                             "Cena": f"{f_price:.4f}",
                         })
-                        send_notification(f"🥾 [BOT] Otwarto {label} na {sym} ({bot_leverage}x, budżet: {budget:.1f} USDT)")
+                        send_notification(f"🥾 [BOT] Otwarto {label} na {sym} ({bot_leverage}x)")
     except Exception:
         pass
-
-# =====================================================================
-# SPRAWDZANIE SYGNAŁÓW DO ZAMKNIĘCIA (FUTURES) + SL/TP
-# =====================================================================
-if futures_ex and st.session_state.active_trades:
-    trades_to_remove = []
-    try:
-        current_tickers = futures_ex.fetch_tickers()
-        for sym, trade_info in list(st.session_state.active_trades.items()):
-            if sym in current_tickers:
-                curr_price = float(current_tickers[sym].get("last", trade_info["entry_price"]))
-                entry_price = trade_info["entry_price"]
-                side = trade_info["side"]
-                contracts = trade_info["contracts"]
-
-                if side == "buy":
-                    pct_change = ((curr_price - entry_price) / entry_price) * 100 * trade_info["leverage"]
-                else:
-                    pct_change = ((entry_price - curr_price) / entry_price) * 100 * trade_info["leverage"]
-
-                sl_triggered = False
-                tp_triggered = False
-                if enable_custom_sl_tp:
-                    if pct_change <= -custom_stop_loss_pct:
-                        sl_triggered = True
-                    elif pct_change >= custom_take_profit_pct:
-                        tp_triggered = True
-
-                try:
-                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
-                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                    signal_reversed = (side == "buy" and f_df["macd"].iloc[-1] < f_df["signal"].iloc[-1]) or (side == "sell" and f_df["macd"].iloc[-1] > f_df["signal"].iloc[-1])
-                except Exception:
-                    signal_reversed = False
-
-                if sl_triggered or tp_triggered or signal_reversed:
-                    close_side = "sell" if side == "buy" else "buy"
-                    try:
-                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                    except Exception:
-                        pass
-                    trades_to_remove.append(sym)
-                    st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
-                    
-                    reason = "SL/TP" if (sl_triggered or tp_triggered) else "Sygnał Trendu"
-                    send_notification(f"🔄 [WYJŚCIE - {reason}] Zamknięto {sym} (Wynik: {pct_change:+.2f}%)")
-    except Exception:
-        pass
-
-    for r_sym in trades_to_remove:
-        if r_sym in st.session_state.active_trades:
-            del st.session_state.active_trades[r_sym]
-
-# =====================================================================
-# SKANER SPOT
-# =====================================================================
-st.subheader("📊 Skaner Spot (Wyświetlane Top 8)")
-spot_results = []
-if spot_ex:
-    try:
-        s_tickers = spot_ex.fetch_tickers()
-        valid_s = {sym: data for sym, data in s_tickers.items() if any(sym.startswith(coin + "/") for coin in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym and data.get("quoteVolume", 0) > 50000}
-        top_spot_symbols = [item[0] for item in sorted(valid_s.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)[:max_spot_scan_pairs]]
-    except Exception:
-        top_spot_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-
-    for idx, sym in enumerate(top_spot_symbols):
-        try:
-            ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
-            time.sleep(0.02)
-            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df["volatility_pct"] = ((df["high"] - df["low"]) / df["close"]).rolling(14).mean() * 100
-            current_vol = df["volatility_pct"].iloc[-1] if not pd.isna(df["volatility_pct"].iloc[-1]) else 2.0
-
-            delta = df["close"].diff()
-            rs = (delta.where(delta > 0, 0)).rolling(14).mean() / (-delta.where(delta < 0, 0)).rolling(14).mean()
-            current_rsi = (100 - (100 / (1 + rs))).iloc[-1]
-
-            strat_type = idx % 3
-            is_spot_signal = (current_rsi < 38) if strat_type == 0 else (df["close"].iloc[-1] < df["close"].rolling(20).mean().iloc[-1] * 0.985 if strat_type == 1 else current_vol > 2.5 and current_rsi > 52)
-            strat_name = "RSI Oversold" if strat_type == 0 else ("Dip Buy" if strat_type == 1 else "Momentum Breakout")
-
-            if spot_free < MIN_SPOT_TRADE:
-                spot_display_str = "0.0 USDT"
-                status = "⚠️ Za mało środków (< 5 USDT)"
-            elif sym in st.session_state.active_spot_trades:
-                spot_display_str = f"{MIN_SPOT_TRADE:.1f} USDT"
-                status = "🛡️ Pozycja spot aktywna"
-            elif len(st.session_state.active_spot_trades) >= max_active_spot_positions:
-                spot_display_str = "0.0 USDT"
-                status = "🛡️ Limit pozycji Spot osiągnięty"
-            else:
-                risk_mult = 0.5 if current_vol > 3.5 else 1.0
-                allocated_budget = max(MIN_SPOT_TRADE, min(spot_free * ((base_allocation_pct * risk_mult) / 100.0), max_single_trade_usdt))
-                if allocated_budget > spot_free:
-                    allocated_budget = spot_free
-
-                if allocated_budget < MIN_SPOT_TRADE:
-                    spot_display_str = f"{allocated_budget:.1f} USDT"
-                    status = "⚠️ Alokacja za mała (< 5 USDT)"
-                else:
-                    spot_display_str = f"{allocated_budget:.1f} USDT"
-                    status = "⏳ Oczekiwanie"
-                    if st.session_state.scanner_active and is_spot_signal:
-                        if len(st.session_state.active_spot_trades) >= max_active_spot_positions:
-                            status = "🛡️ Limit pozycji osiągnięty"
-                        else:
-                            try:
-                                current_price = df["close"].iloc[-1]
-                                spot_ex.create_market_buy_order(sym, allocated_budget / current_price)
-                                st.session_state.active_spot_trades.add(sym)
-                                st.session_state.trade_history.insert(0, {"Czas": time.strftime("%Y-%m-%d %H:%M:%S"), "Typ": "SPOT BUY", "Para": sym, "Budżet": f"{allocated_budget:.2f} USDT", "Cena": f"{current_price:.4f}"})
-                                status = "🚀 KUPIONO"
-                                send_notification(f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT")
-                            except Exception as ex:
-                                status = f"❌ Błąd: {ex}"
-
-            spot_results.append({"Para": sym, "Cena": f"{df['close'].iloc[-1]:.4f}", "Strategia": strat_name, "Alokacja": spot_display_str, "Status": status})
-        except Exception:
-            continue
-    if spot_results:
-        st.dataframe(pd.DataFrame(spot_results[:8]), use_container_width=True)
-
-st.markdown("---")
-
-# =====================================================================
-# SKANER FUTURES
-# =====================================================================
-st.subheader("📈 Skaner Futures (Wyświetlane Top 8)")
-fut_results = []
-if futures_ex:
-    try:
-        f_tickers = futures_ex.fetch_tickers()
-        valid_f = {sym: data for sym, data in f_tickers.items() if any(sym.startswith(coin + "/") or sym.startswith(coin + ":") for coin in trusted_base_coins) and (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym and data.get("quoteVolume", 0) > 100000}
-        top_fut_symbols = [item[0] for item in sorted(valid_f.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)[:max_fut_scan_pairs]]
-    except Exception:
-        top_fut_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT"]
-
-    for idx, sym in enumerate(top_fut_symbols):
-        try:
-            ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
-            time.sleep(0.02)
-            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df["volatility_pct"] = ((df["high"] - df["low"]) / df["close"]).rolling(14).mean() * 100
-            current_vol = df["volatility_pct"].iloc[-1] if not pd.isna(df["volatility_pct"].iloc[-1]) else 2.0
-
-            df["macd"] = df["close"].ewm(span=12, adjust=False).mean() - df["close"].ewm(span=26, adjust=False).mean()
-            df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-
-            dyn_leverage = calculate_dynamic_leverage(sym, current_vol, leverage_mode, manual_leverage)
-            is_futures_signal = (df["macd"].iloc[-1] > df["signal"].iloc[-1])
-            trade_action = "buy" if is_futures_signal else "sell"
-            action_label = "LONG" if is_futures_signal else "SHORT"
-            strat_name = "Trend-Following (MACD)"
-
-            if fut_free < MIN_FUT_TRADE:
-                fut_display_str = "0.0 USDT"
-                status = "⚠️ Za mało środków (< 5 USDT)"
-            elif sym in st.session_state.active_trades:
-                fut_display_str = f"{MIN_FUT_TRADE:.1f} USDT"
-                status = "🛡️ Pozycja aktywna"
-            elif len(st.session_state.active_trades) >= max_active_futures_positions:
-                fut_display_str = "0.0 USDT"
-                status = "🛡️ Limit pozycji Futures osiągnięty"
-            else:
-                risk_mult = 0.5 if current_vol > 3.5 else 1.0
-                allocated_budget = max(MIN_FUT_TRADE, min(fut_free * ((base_allocation_pct * risk_mult) / 100.0), max_single_trade_usdt))
-                if allocated_budget > fut_free:
-                    allocated_budget = fut_free
-
-                if allocated_budget < MIN_FUT_TRADE:
-                    fut_display_str = f"{allocated_budget:.1f} USDT"
-                    status = "⚠️ Alokacja za mała (< 5 USDT)"
-                else:
-                    fut_display_str = f"{allocated_budget:.1f} USDT"
-                    status = "⏳ Oczekiwanie"
-                    if st.session_state.scanner_active and is_futures_signal:
-                        if len(st.session_state.active_trades) >= max_active_futures_positions:
-                            status = "🛡️ Limit pozycji osiągnięty"
-                        else:
-                            try:
-                                current_price = df["close"].iloc[-1]
-                                futures_ex.set_leverage(dyn_leverage, sym)
-                                contract_size = (allocated_budget * dyn_leverage) / current_price
-                                futures_ex.create_market_order(sym, trade_action, contract_size)
-                                st.session_state.active_trades[sym] = {"entry_price": current_price, "side": trade_action, "contracts": contract_size, "leverage": dyn_leverage}
-                                st.session_state.trade_history.insert(0, {"Czas": time.strftime("%Y-%m-%d %H:%M:%S"), "Typ": f"FUTURES {action_label}", "Para": sym, "Budżet": f"{allocated_budget:.2f} USDT", "Dźwignia": f"{dyn_leverage}x", "Cena": f"{current_price:.4f}"})
-                                status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x)"
-                                send_notification(f"🔵 [FUTURES] Otwarto {action_label} na {sym} ({dyn_leverage}x)")
-                            except Exception as ex:
-                                status = f"❌ Błąd: {ex}"
-
-            fut_results.append({"Kontrakt": sym, "Cena": f"{df['close'].iloc[-1]:.4f}", "Strategia": strat_name, "Alokacja": fut_display_str, "Dźwignia": f"{dyn_leverage}x", "Status": status})
-        except Exception:
-            continue
-    if fut_results:
-        st.dataframe(pd.DataFrame(fut_results[:8]), use_container_width=True)
 
 st.markdown("---")
 st.subheader("📜 Dziennik Transakcji")
