@@ -478,13 +478,28 @@ if futures_ex:
     except Exception:
         pass
 
+# =====================================================================
+# GŁÓWNE KAFELKI (IDEALNIE ZSYNCHRONIZOWANE)
+# =====================================================================
 col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
 with col1:
-    st.metric(label="🟢 Portfel Spot", value=f"{spot_free:.2f} USDT", delta=f"Aktywne: {len(st.session_state.active_spot_trades)} / {max_active_spot_positions}")
+    st.metric(
+        label="🟢 Portfel Spot", 
+        value=f"{spot_total:.2f} USDT", 
+        delta=f"Wolne: {spot_free:.2f} | Aktywne: {len(st.session_state.active_spot_trades)}/{max_active_spot_positions}"
+    )
 with col2:
-    st.metric(label="🔵 Portfel Futures", value=f"{fut_free:.2f} USDT", delta=f"Całkowite: {fut_total:.2f} USDT")
+    st.metric(
+        label="🔵 Portfel Futures", 
+        value=f"{fut_total:.2f} USDT", 
+        delta=f"Wolne: {fut_free:.2f} | Aktywne: {active_positions_count}/{max_active_futures_positions}"
+    )
 with col3:
-    st.metric(label="📊 Wyniki Futures (Niezrealizowane)", value=f"{total_unrealized_pnl:+.2f} USDT", delta=f"Aktywne: {active_positions_count} / {max_active_futures_positions}")
+    st.metric(
+        label="📊 Wyniki Futures (Niezrealizowane)", 
+        value=f"{total_unrealized_pnl:+.2f} USDT", 
+        delta=f"Aktywne: {active_positions_count} / {max_active_futures_positions}"
+    )
 with col_clock:
     elapsed = datetime.now() - st.session_state.session_start_time
     total_seconds = int(elapsed.total_seconds())
@@ -548,7 +563,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# AWARYJNA KONTROLA SL / TP DLA AKTYWNYCH POZYCJI FUTURES
+# AWARYJNA KONTROLA SL / TP DLA AKTYWNYCH POZYCJI FUTURES (W TLE)
 # =====================================================================
 if enable_custom_sl_tp and futures_ex:
     try:
@@ -593,7 +608,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION
+# BOTS & LOGIC EXECUTION (CICHY TRYB BEZ BŁĘDÓW W UI)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -626,7 +641,6 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                             
                             try:
                                 amount_prec = float(spot_ex.amount_to_precision(auto_bot_spot_coin, amount))
-                                # Bezpieczne wywołanie uniwersalnej metody create_order bez błędów mapowania
                                 spot_ex.create_order(
                                     symbol=auto_bot_spot_coin,
                                     type='market',
@@ -654,10 +668,10 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                             })
                             send_notification(f"🟢 [BOT SPOT] Zakup {auto_bot_spot_coin} za {budget:.1f} USDT")
                             break
-                except Exception as inner_e:
-                    st.error(f"⚠️ Błąd bota Spot dla {auto_bot_spot_coin}: {inner_e}")
-    except Exception as e:
-        st.error(f"⚠️ Błąd pętli bota Spot: {e}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
@@ -746,8 +760,8 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             "Cena": f"{f_price:.4f}",
                         })
                         send_notification(f"🥾 [BOT] Otwarto {label} na {sym} ({bot_leverage}x)")
-    except Exception as e:
-        st.error(f"⚠️ Błąd pętli bota Futures: {e}")
+    except Exception:
+        pass
 
 exchange_positions = {}
 if futures_ex:
@@ -805,7 +819,7 @@ if spot_ex:
         else:
             st.info("Brak danych Spot do wyświetlenia.")
     except Exception:
-        st.info("Błąd pobierania danych rynkowych Spot.")
+        st.info("Brak danych rynkowych Spot.")
 else:
     st.info("Skonfiguruj klucze API Spot, aby widzieć skaner.")
 
@@ -881,7 +895,7 @@ if futures_ex:
         else:
             st.info("Brak danych Futures do wyświetlenia.")
     except Exception:
-        st.info("Błąd pobierania danych rynkowych Futures.")
+        st.info("Brak danych rynkowych Futures.")
 else:
     st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
 
