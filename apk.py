@@ -379,8 +379,8 @@ with st.sidebar.container(border=True):
     st.markdown("---")
     st.markdown("### 🛡️ Opcjonalne Limity SL / TP")
     enable_custom_sl_tp = st.checkbox("Włącz awaryjne limity SL / TP (%)", value=False)
-    custom_stop_loss_pct = st.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5, disabled=not enable_custom_sl_tp)
-    custom_take_profit_pct = st.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15, disabled=not enable_custom_sl_tp)
+    custom_stop_loss_pct = st.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5)
+    custom_take_profit_pct = st.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15)
 
     st.markdown("---")
     st.markdown("### ⚡ Zarządzanie Dźwignią")
@@ -533,6 +533,54 @@ with col_status:
 trusted_base_coins = ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE", "LINK", "SUI", "NEAR", "APT", "RENDER", "INJ", "PEPE", "SHIB", "LTC", "DOT", "UNI", "ZEC", "HYPE", "ATOM"]
 MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
+
+# =====================================================================
+# AWARYJNA KONTROLA SL / TP DLA AKTYWNYCH POZYCJI FUTURES
+# =====================================================================
+if enable_custom_sl_tp and futures_ex:
+    try:
+        current_positions = futures_ex.fetch_positions()
+        for pos in current_positions:
+            contracts = float(pos.get("contracts", 0))
+            if contracts > 0:
+                sym = pos["symbol"]
+                side = pos.get("side", "") # "long" lub "short"
+                entry_price = float(pos.get("entryPrice", 0))
+                mark_price = float(pos.get("markPrice", 0))
+                leverage = float(pos.get("leverage", 1))
+                
+                if entry_price > 0 and mark_price > 0:
+                    # Obliczenie ROE / procentowej zmiany zysku/straty z uwzględnieniem dźwigni
+                    if side == "long":
+                        pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
+                    else:
+                        pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
+                    
+                    # Sprawdzenie Stop-Loss (strata >= zadany próg procentowy)
+                    if pnl_pct <= -float(custom_stop_loss_pct):
+                        close_side = "sell" if side == "long" else "buy"
+                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": f"STOP-LOSS ({pnl_pct:.2f}%)",
+                            "Para": sym,
+                            "Cena": f"{mark_price:.4f}",
+                        })
+                        send_notification(f"🛑 [STOP-LOSS] Zamknięto {sym} przy stracie {pnl_pct:.2f}%")
+                    
+                    # Sprawdzenie Take-Profit (zysk >= zadany próg procentowy)
+                    elif pnl_pct >= float(custom_take_profit_pct):
+                        close_side = "sell" if side == "long" else "buy"
+                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": f"TAKE-PROFIT ({pnl_pct:.2f}%)",
+                            "Para": sym,
+                            "Cena": f"{mark_price:.4f}",
+                        })
+                        send_notification(f"🎯 [TAKE-PROFIT] Zamknięto {sym} przy zysku {pnl_pct:.2f}%")
+    except Exception as e:
+        pass
 
 # =====================================================================
 # BOTS & LOGIC EXECUTION
