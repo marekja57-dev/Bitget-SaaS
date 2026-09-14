@@ -12,10 +12,13 @@ st.set_page_config(
 )
 
 # =====================================================================
-# INICJALIZACIJA STANU SESJI I AUTOMATYCZNEGO LOGOWANIA Z URL
+# INICJALIZACJA STANU SESJI I AUTOMATYCZNEGO LOGOWANIA Z URL
 # =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+
+if "user_email" not in st.session_state:
+    st.session_state.user_email = "marekja57@wp.pl"
 
 # Sprawdzenie, czy komputer jest zapamiętany w parametrach przeglądarki (URL)
 saved_auth = st.query_params.get("auth", None)
@@ -129,7 +132,7 @@ st.markdown(
 )
 
 # =====================================================================
-# EKRAN LOGOWANIA (Z OPCJĄ ZAPAMIĘTANIA URZĄDZENIA)
+# EKRAN LOGOWANIA (PEŁNY FORMULARZ Z EMAIL I HASŁEM)
 # =====================================================================
 if not st.session_state.logged_in:
     _, col_center, _ = st.columns([1, 2, 1])
@@ -139,40 +142,50 @@ if not st.session_state.logged_in:
             <div style="
                 background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
                 border: 6px double #f3d57a;
-                padding: 50px 30px;
+                padding: 40px 30px;
                 border-radius: 16px;
                 box-shadow: 0 0 50px rgba(243, 213, 122, 0.4);
                 text-align: center;
-                margin-top: 10vh;
+                margin-top: 5vh;
             ">
                 <div style="font-size: 1.2rem; color: #f3d57a; letter-spacing: 6px; margin-bottom: 10px;">❖ ❖ ❖</div>
                 <h1 style="
                     font-family: 'Bungee Inline', cursive, sans-serif;
-                    font-size: 3.8rem;
+                    font-size: 3.2rem;
                     color: #f3d57a;
                     letter-spacing: 6px;
                     text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
-                    margin: 0 0 20px 0;
+                    margin: 0 0 15px 0;
                 ">BITGET SAS</h1>
-                <p style="color: #c5a880; font-family: 'Cinzel', serif; font-size: 1.1rem; margin-bottom: 25px;">
-                    Panel Operacyjny • Pełna Autonomia & Listing Sniper
+                <p style="color: #c5a880; font-family: 'Cinzel', serif; font-size: 1rem; margin-bottom: 20px;">
+                    Logowanie do Panelu Operacyjnego
                 </p>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.write("")
-        remember_device = st.checkbox(
-            "🔒 Zapamiętaj ten komputer (automatyczne logowanie przy kolejnej wizycie)",
-            value=True,
-        )
-        st.write("")
-        if st.button("🚀 WEJDŹ DO SYSTEMU", use_container_width=True):
-            st.session_state.logged_in = True
-            st.session_state.session_start_time = datetime.now()
-            if remember_device:
-                st.query_params["auth"] = "marek_trusted_device_2026"
-            st.rerun()
+        
+        with st.form("login_form"):
+            login_email = st.text_input("📧 Adres E-mail", value="marekja57@wp.pl")
+            login_password = st.text_input("🔑 Hasło / PIN", type="password", value="Zostaw1260")
+            remember_device = st.checkbox(
+                "🔒 Zapamiętaj ten komputer (automatyczne logowanie przy kolejnej wizycie)",
+                value=True,
+            )
+            submit_login = st.form_submit_button("🚀 ZALOGUJ SIĘ DO SYSTEMU", use_container_width=True)
+            
+            if submit_login:
+                if login_email.strip().lower() == "marekja57@wp.pl":
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = login_email
+                    st.session_state.session_start_time = datetime.now()
+                    if remember_device:
+                        st.query_params["auth"] = "marek_trusted_device_2026"
+                    st.success("Zalogowano pomyślnie!")
+                    st.rerun()
+                else:
+                    st.error("Nieprawidłowy adres e-mail.")
     st.stop()
 
 # =====================================================================
@@ -181,11 +194,11 @@ if not st.session_state.logged_in:
 st.title("🚀 Bitget SAS - Panel Operacyjny (Pełna Autonomia & Listing Sniper)")
 
 # =====================================================================
-# PANEL BOCZNY (W TYM STRIPE & PŁATNOŚCI SUBSRKYPCJI)
+# PANEL BOCZNY (W TYM STRIPE & PŁATNOŚCI SUBSRYPCJI)
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Status Administratora")
-    st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
+    st.success(f"✅ Autoryzacja aktywna ({st.session_state.user_email})")
 
 # MODUŁ OPŁAT / SUBSKRYPCJI STRIPE (bot-bitget.pl)
 with st.sidebar.container(border=True):
