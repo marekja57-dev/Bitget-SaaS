@@ -18,6 +18,21 @@ DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
 # =====================================================================
+# FUNKCJE POMOCNICZE (ŻELAZNY NADPIS ADMINISTRATORA)
+# =====================================================================
+def is_user_admin():
+    email = str(st.session_state.get("user_email", "")).strip().lower()
+    if email == "marekjas57@wp.pl":
+        return True
+    return bool(st.session_state.get("is_admin", False))
+
+def is_user_paid():
+    email = str(st.session_state.get("user_email", "")).strip().lower()
+    if email == "marekjas57@wp.pl":
+        return True
+    return bool(st.session_state.get("stripe_paid", False))
+
+# =====================================================================
 # INICJALIZACJA BAZY DANYCH SQLITE
 # =====================================================================
 def init_db():
@@ -81,11 +96,6 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = None
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
-
-# BEZWZGLĘDNY NADPIS SESJI DLA ADMINISTRATORA
-if st.session_state.user_email and st.session_state.user_email.strip().lower() == "marekjas57@wp.pl":
-    st.session_state.is_admin = True
-    st.session_state.stripe_paid = True
 
 # =====================================================================
 # STYLIZACJA WYGLĄDU (RETRO / DARK)
@@ -202,11 +212,6 @@ if not st.session_state.logged_in:
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
-# Ostateczne wymuszenie po załadowaniu sesji
-if st.session_state.user_email.strip().lower() == "marekjas57@wp.pl":
-    st.session_state.is_admin = True
-    st.session_state.stripe_paid = True
-
 # =====================================================================
 # GŁÓWNA APLIKACJA (PO ZALOGOWANIU)
 # =====================================================================
@@ -264,7 +269,7 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown(f"### 👤 Zalogowany: {st.session_state.user_email}")
-    if st.session_state.is_admin:
+    if is_user_admin():
         st.markdown("🔴 **Rola: Administrator**")
     else:
         st.markdown("🟢 **Rola: Klient SaaS**")
@@ -273,6 +278,7 @@ with st.sidebar.container(border=True):
         st.session_state.logged_in = False
         st.session_state.user_email = ""
         st.session_state.is_admin = False
+        st.session_state.stripe_paid = False
         st.session_state.api_key = ""
         st.session_state.secret_key = ""
         st.session_state.passphrase = ""
@@ -316,7 +322,7 @@ if futures_ex and not st.session_state.known_markets:
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
     st.markdown("### 💳 Strefa Subskrypcji")
-    if st.session_state.is_admin or st.session_state.stripe_paid:
+    if is_user_admin() or is_user_paid():
         st.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
     else:
         st.warning("⚠️ Brak aktywnej subskrypcji")
