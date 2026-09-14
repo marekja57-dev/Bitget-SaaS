@@ -36,7 +36,7 @@ def init_db():
         )
     ''')
     
-    # Automatyczne nadanie uprawnień Administratora i opłaconej subskrypcji dla Twojego maila (zabezpieczenie przed wielkością liter)
+    # Automatyczne nadanie uprawnień Administratora w bazie
     cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", ("marekjas57@wp.pl",))
     
     # Tworzenie domyślnego konta administratora zapasowego, jeśli nie istnieje
@@ -79,6 +79,13 @@ if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
+if "stripe_paid" not in st.session_state:
+    st.session_state.stripe_paid = False
+
+# BEZWZGLĘDNY NADPIS SESJI DLA ADMINISTRATORA
+if st.session_state.user_email and st.session_state.user_email.strip().lower() == "marekjas57@wp.pl":
+    st.session_state.is_admin = True
+    st.session_state.stripe_paid = True
 
 # =====================================================================
 # STYLIZACJA WYGLĄDU (RETRO / DARK)
@@ -195,14 +202,14 @@ if not st.session_state.logged_in:
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
-# =====================================================================
-# GŁÓWNA APLIKACJA (PO ZALOGOWANIU)
-# =====================================================================
-# Zabezpieczenie w sesji – jeśli to Twój e-mail, zawsze wymuś admina
+# Ostateczne wymuszenie po załadowaniu sesji
 if st.session_state.user_email.strip().lower() == "marekjas57@wp.pl":
     st.session_state.is_admin = True
     st.session_state.stripe_paid = True
 
+# =====================================================================
+# GŁÓWNA APLIKACJA (PO ZALOGOWANIU)
+# =====================================================================
 if "session_start_time" not in st.session_state:
     st.session_state.session_start_time = datetime.now()
 if "trade_history" not in st.session_state:
