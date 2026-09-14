@@ -1,5 +1,6 @@
 from datetime import datetime
 import glob
+import json
 import os
 import time
 import ccxt
@@ -11,20 +12,51 @@ st.set_page_config(
     layout="wide",
 )
 
+# =====================================================================
+# OBSŁUGA LOKALNEGO ZAPISU KLUCZY (ZAPAMIĘTYWANIE NA KOMPUTERZE/SERWERZE)
+# =====================================================================
+CONFIG_FILE = "bitget_config.json"
+
+def load_saved_credentials():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("api_key"), data.get("secret_key"), data.get("passphrase")
+        except Exception:
+            pass
+    return None, None, None
+
+def save_credentials(api_key, secret_key, passphrase):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump({
+                "api_key": api_key,
+                "secret_key": secret_key,
+                "passphrase": passphrase
+            }, f)
+    except Exception:
+        pass
+
+saved_api, saved_secret, saved_pass = load_saved_credentials()
+
 if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+    if saved_api and saved_secret and saved_pass:
+        st.session_state.logged_in = True
+    else:
+        st.session_state.logged_in = False
 
 if "api_key" not in st.session_state:
-    st.session_state.api_key = st.secrets.get(
+    st.session_state.api_key = saved_api or st.secrets.get(
         "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
     )
 if "secret_key" not in st.session_state:
-    st.session_state.secret_key = st.secrets.get(
+    st.session_state.secret_key = saved_secret or st.secrets.get(
         "BITGET_SECRET_KEY",
         "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
     )
 if "passphrase" not in st.session_state:
-    st.session_state.passphrase = st.secrets.get(
+    st.session_state.passphrase = saved_pass or st.secrets.get(
         "BITGET_PASSPHRASE", "Zostaw1260"
     )
 
@@ -85,7 +117,7 @@ st.markdown(
         align-items: center;
         justify-content: center;
         width: 100%;
-        padding-top: 45px;
+        padding-top: 30px;
         padding-bottom: 20px;
     }
     
@@ -93,7 +125,7 @@ st.markdown(
         position: relative;
         background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
         border: 6px double #f3d57a;
-        padding: 40px 30px 50px 30px;
+        padding: 40px 30px 45px 30px;
         border-radius: 16px;
         box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9);
         width: 100%;
@@ -117,7 +149,7 @@ st.markdown(
 
     .retro-vintage-title {
         font-family: 'Bungee Inline', cursive, sans-serif;
-        font-size: 4.5rem;
+        font-size: 4rem;
         color: #f3d57a;
         letter-spacing: 6px;
         text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95);
@@ -125,8 +157,16 @@ st.markdown(
         line-height: 1.1;
     }
 
+    .retro-subtitle {
+        font-family: 'Cinzel', serif;
+        color: #e6c687;
+        font-size: 1.2rem;
+        letter-spacing: 2px;
+        margin-bottom: 25px;
+    }
+
     .button-spacer {
-        margin-top: 25px;
+        margin-top: 20px;
         width: 100%;
         display: flex;
         justify-content: center;
@@ -168,7 +208,7 @@ st.markdown(
 )
 
 # =====================================================================
-# STRONA POWITALNA - DANE DOSTĘPOWE BITGET (API + HASŁO/PASZPORT)
+# PEŁNY EKRAN POWITALNY ORAZ ZINTEGROWANY PANEL LOGOWANIA (API + HASŁO)
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
@@ -176,12 +216,13 @@ if not st.session_state.logged_in:
         <div class="hero-wrapper">
             <div class="retro-ornate-frame">
                 <div class="retro-vintage-title">BITGET SAS</div>
+                <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY & LISTING SNIPER</div>
         """,
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        '<p style="color: #f3d57a; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 1px;">Wprowadź klucze API oraz hasło (passphrase) do giełdy Bitget</p>',
+        '<p style="color: #dcdcdc; font-family: Cinzel, serif; font-size: 1rem; margin-bottom: 20px; line-height: 1.5; text-align: center;">Witaj w zaawansowanym terminalu operacyjnym giełdy Bitget. Wprowadź poniżej swoje klucze autoryzacyjne API oraz hasło dostępu (Passphrase), aby nawiązać bezpieczne połączenie. System zapamięta Twoje dane do kolejnych sesji.</p>',
         unsafe_allow_html=True,
     )
 
@@ -189,14 +230,16 @@ if not st.session_state.logged_in:
     with col_l2:
         input_api = st.text_input("Bitget API Key", value=st.session_state.api_key)
         input_secret = st.text_input("Bitget Secret Key", type="password", value=st.session_state.secret_key)
-        input_pass = st.text_input("Bitget Passphrase (Hasło)", type="password", value=st.session_state.passphrase)
+        input_pass = st.text_input("Bitget Passphrase (Hasło / Paszport)", type="password", value=st.session_state.passphrase)
 
         st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
-        if st.button("🚀 POŁĄCZ Z GIEŁDĄ I ZALOGUJ", use_container_width=True):
+        if st.button("🚀 POŁĄCZ Z GIEŁDĄ I URUCHOM PANEL", use_container_width=True):
             if input_api and input_secret and input_pass:
                 st.session_state.api_key = input_api
                 st.session_state.secret_key = input_secret
                 st.session_state.passphrase = input_pass
+                # Zapisujemy na stałe w pliku lokalnym
+                save_credentials(input_api, input_secret, input_pass)
                 st.session_state.logged_in = True
                 st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -257,8 +300,13 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔒 Wróć do ekranu powitalnego (Klucze API)"):
+if st.sidebar.button("🔒 Wróć do ekranu powitalnego (Usuń zapisane klucze)"):
     st.session_state.logged_in = False
+    if os.path.exists(CONFIG_FILE):
+        try:
+            os.remove(CONFIG_FILE)
+        except Exception:
+            pass
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -1365,4 +1413,3 @@ if not user_subscribed:
 else:
     st.sidebar.markdown("---")
     st.sidebar.success("✅ Połączono z Bitget (Pełny dostęp API)")
-
