@@ -1,8 +1,7 @@
 from datetime import datetime
-import glob
-import os
 import time
 import ccxt
+import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
 
@@ -12,19 +11,31 @@ st.set_page_config(
 )
 
 # =====================================================================
-# INICJALIZACJA STANU SESJI I AUTOMATYCZNEGO LOGOWANIA Z URL
+# INICJALIZACJA MENEDŻERA CIASTECZEK (Trwałe zapamiętywanie komputera)
 # =====================================================================
+cookie_manager = stx.CookieManager(key="cookie_manager_bitget")
+
+if "cookies_loaded" not in st.session_state:
+    st.session_state.cookies_loaded = False
+
+if not st.session_state.cookies_loaded:
+    st.session_state.cookies_loaded = True
+    st.rerun()
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if "user_email" not in st.session_state:
     st.session_state.user_email = "marekja57@wp.pl"
 
-# Sprawdzenie, czy komputer jest zapamiętany w parametrach przeglądarki (URL)
-saved_auth = st.query_params.get("auth", None)
-if saved_auth == "marek_trusted_device_2026":
+# Sprawdzenie, czy przeglądarka ma zapisane ciasteczko zaufanego komputera
+saved_device = cookie_manager.get(cookie="bitget_trusted_device")
+if saved_device == "marek_trusted_device_2026":
     st.session_state.logged_in = True
 
+# =====================================================================
+# INICJALIZACJA POZOSTAŁEGO STANU SESJI
+# =====================================================================
 if "session_start_time" not in st.session_state or not isinstance(
     st.session_state.session_start_time, datetime
 ):
@@ -55,7 +66,7 @@ if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
 
 # =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
+# FUNKCJA POMOCNICZA DO CCXT
 # =====================================================================
 def get_exchange(market_type):
     try:
@@ -132,7 +143,7 @@ st.markdown(
 )
 
 # =====================================================================
-# EKRAN LOGOWANIA (PEŁNY FORMULARZ Z EMAIL I HASŁEM)
+# EKRAN LOGOWANIA (JEŚLI NIE ZALOGOWANO)
 # =====================================================================
 if not st.session_state.logged_in:
     _, col_center, _ = st.columns([1, 2, 1])
@@ -158,7 +169,7 @@ if not st.session_state.logged_in:
                     margin: 0 0 15px 0;
                 ">BITGET SAS</h1>
                 <p style="color: #c5a880; font-family: 'Cinzel', serif; font-size: 1rem; margin-bottom: 20px;">
-                    Logowanie do Panelu Operacyjnego
+                    Panel Operacyjny • Autoryzacja Dostępu
                 </p>
             </div>
             """,
@@ -170,22 +181,25 @@ if not st.session_state.logged_in:
             login_email = st.text_input("📧 Adres E-mail", value="marekja57@wp.pl")
             login_password = st.text_input("🔑 Hasło / PIN", type="password", value="Zostaw1260")
             remember_device = st.checkbox(
-                "🔒 Zapamiętaj ten komputer (automatyczne logowanie przy kolejnej wizycie)",
+                "🔒 Zapamiętaj ten komputer na stałe (automatyczne logowanie przy kolejnych wizytach)",
                 value=True,
             )
-            submit_login = st.form_submit_button("🚀 ZALOGUJ SIĘ DO SYSTEMU", use_container_width=True)
+            submit_login = st.form_submit_button("🚀 WEJDŹ DO SYSTEMU", use_container_width=True)
             
             if submit_login:
-                if login_email.strip().lower() == "marekja57@wp.pl":
+                if login_email.strip().lower() == "marekja57@wp.pl" and login_password == "Zostaw1260":
                     st.session_state.logged_in = True
                     st.session_state.user_email = login_email
                     st.session_state.session_start_time = datetime.now()
+                    
                     if remember_device:
-                        st.query_params["auth"] = "marek_trusted_device_2026"
+                        # Zapis ciasteczka w przeglądarce na rok (31536000 sekund)
+                        cookie_manager.set("bitget_trusted_device", "marek_trusted_device_2026", max_age=31536000)
+                    
                     st.success("Zalogowano pomyślnie!")
                     st.rerun()
                 else:
-                    st.error("Nieprawidłowy adres e-mail.")
+                    st.error("Nieprawidłowy adres e-mail lub hasło.")
     st.stop()
 
 # =====================================================================
@@ -194,29 +208,23 @@ if not st.session_state.logged_in:
 st.title("🚀 Bitget SAS - Panel Operacyjny (Pełna Autonomia & Listing Sniper)")
 
 # =====================================================================
-# PANEL BOCZNY (W TYM STRIPE & PŁATNOŚCI SUBSRYPCJI)
+# PANEL BOCZNY
 # =====================================================================
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Status Administratora")
-    st.success(f"✅ Autoryzacja aktywna ({st.session_state.user_email})")
+    st.success(f"✅ Autoryzacja aktywna\n({st.session_state.user_email})")
 
-# MODUŁ OPŁAT / SUBSKRYPCJI STRIPE (bot-bitget.pl)
+# MODUŁ PŁATNOŚCI STRIPE
 with st.sidebar.container(border=True):
     st.markdown("### 💳 Subskrypcje i Płatności (Stripe)")
-    st.markdown(
-        "Zarządzaj abonamentem dostępu do platformy **bot-bitget.pl**."
-    )
+    st.markdown("Zarządzaj abonamentem dostępu do platformy **bot-bitget.pl**.")
     
-    stripe_link = st.secrets.get(
-        "STRIPE_PAYMENT_LINK", "https://buy.stripe.com/test_placeholder"
-    )
+    stripe_link = st.secrets.get("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/test_placeholder")
     st.markdown(
         f'<a href="{stripe_link}" target="_blank"><button style="background: linear-gradient(135deg, #635bff 0%, #0a2540 100%); color: white; border: 1px solid #796eff; padding: 10px 18px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer; box-shadow: 0 4px 10px rgba(99,91,255,0.3);">⚡ Opłać / Przedłuż Subskrypcję</button></a>',
         unsafe_allow_html=True,
     )
-    st.caption(
-        "Bezpieczna bramka płatności Stripe. Automatyczna aktywacja po opłaceniu."
-    )
+    st.caption("Bezpieczna bramka płatności Stripe. Automatyczna aktywacja po opłaceniu.")
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -231,19 +239,17 @@ if futures_ex and not st.session_state.known_markets:
 st.sidebar.markdown("---")
 if st.sidebar.button("🔒 Wyloguj i zapomnij ten komputer"):
     st.session_state.logged_in = False
-    if "auth" in st.query_params:
-        del st.query_params["auth"]
+    try:
+        cookie_manager.delete("bitget_trusted_device")
+    except Exception:
+        pass
     st.rerun()
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
     st.markdown("### 🔔 Powiadomienia")
-    enable_notifications = st.checkbox(
-        "Włącz powiadomienia o transakcjach", value=True
-    )
-    telegram_bot_token = st.text_input(
-        "Telegram Bot Token (opcjonalnie)", type="password"
-    )
+    enable_notifications = st.checkbox("Włącz powiadomienia o transakcjach", value=True)
+    telegram_bot_token = st.text_input("Telegram Bot Token (opcjonalnie)", type="password")
     telegram_chat_id = st.text_input("Telegram Chat ID (opcjonalnie)")
 
 def send_notification(message):
@@ -253,11 +259,8 @@ def send_notification(message):
             try:
                 import urllib.parse
                 import urllib.request
-
                 url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-                data = urllib.parse.urlencode(
-                    {"chat_id": telegram_chat_id, "text": message}
-                ).encode("utf-8")
+                data = urllib.parse.urlencode({"chat_id": telegram_chat_id, "text": message}).encode("utf-8")
                 urllib.request.urlopen(url, data=data, timeout=3)
             except Exception:
                 pass
@@ -265,35 +268,19 @@ def send_notification(message):
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
     st.markdown("### ⚙️ Ustawienia Handlu i Ryzyka")
-    allocation_mode = st.radio(
-        "Zarządzanie wielkością pozycji",
-        [
-            "🤖 Dynamiczny Auto-Dobór",
-            "🎛️ Stały procent portfela",
-        ],
-    )
-    base_allocation_pct = st.slider(
-        "Bazowy kapitał na 1 pozycję (%)", 1, 50, 10
-    )
-    max_single_trade_usdt = st.number_input(
-        "🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0
-    )
-    max_active_futures_positions = st.slider(
-        "📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10
-    )
+    allocation_mode = st.radio("Zarządzanie wielkością pozycji", ["🤖 Dynamiczny Auto-Dobór", "🎛️ Stały procent portfela"])
+    base_allocation_pct = st.slider("Bazowy kapitał na 1 pozycję (%)", 1, 50, 10)
+    max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
+    max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10)
 
     st.markdown("---")
     st.markdown("### ⚡ Zarządzanie Dźwignią Futures")
-    leverage_mode = st.radio(
-        "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
-    )
+    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"])
     manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 50, 5)
 
     st.markdown("---")
     st.markdown("### 🧠 Inteligentne Wyjście & Sygnały")
-    spot_tf = st.selectbox(
-        "Timeframe analizy", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4
-    )
+    spot_tf = st.selectbox("Timeframe analizy", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4)
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -317,17 +304,11 @@ with st.sidebar.container(border=True):
     )
 
     st.markdown("---")
-    max_spot_scan_pairs = st.slider(
-        "🔍 Liczba par do przeskanowania (Spot)", 5, 50, 15, 5
-    )
-    max_fut_scan_pairs = st.slider(
-        "📈 Liczba par do przeskanowania (Futures)", 5, 50, 15, 5
-    )
+    max_spot_scan_pairs = st.slider("🔍 Liczba par do przeskanowania (Spot)", 5, 50, 15, 5)
+    max_fut_scan_pairs = st.slider("📈 Liczba par do przeskanowania (Futures)", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
-emergency_kill = st.sidebar.button(
-    "🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary"
-)
+emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary")
 
 # =====================================================================
 # KILL SWITCH DLA FUTURES
@@ -342,9 +323,7 @@ if emergency_kill:
                     sym = p["symbol"]
                     side = "sell" if p.get("side") == "long" else "buy"
                     try:
-                        futures_ex.create_market_order(
-                            sym, side, contracts, params={"reduceOnly": True}
-                        )
+                        futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
                     except Exception:
                         pass
         except Exception:
@@ -355,12 +334,8 @@ if emergency_kill:
     st.session_state.trend_bot_fut_active = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
-    send_notification(
-        "🚨 [KILL SWITCH] Awaryjnie zamknięto aktywne kontrakty i wyłączono boty!"
-    )
-    st.success(
-        "🚨 KILL SWITCH WYKONANY: Pozycje Futures i boty zostały zatrzymane."
-    )
+    send_notification("🚨 [KILL SWITCH] Awaryjnie zamknięto aktywne kontrakty i wyłączono boty!")
+    st.success("🚨 KILL SWITCH WYKONANY: Pozycje Futures i boty zostały zatrzymane.")
     time.sleep(2)
     st.rerun()
 
@@ -441,23 +416,16 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTAMI
 # =====================================================================
-st.subheader(
-    "🥾 Panel Sterowania Botami Trendowymi i Sniperem Nowych Par"
-)
+st.subheader("🥾 Panel Sterowania Botami Trendowymi i Sniperem Nowych Par")
 with st.container(border=True):
     col_tb1, col_tb2 = st.columns(2)
 
     with col_tb1:
         st.markdown("### 🟢 Bot Trendowy Spot (Auto-Wybór)")
-        st.info(
-            "💡 Bot samoczynnie przeskanuje rynek i wybierze aktywo o najwyższym"
-            " potencjale zysku wg sygnałów."
-        )
+        st.info("💡 Bot samoczynnie przeskanuje rynek i wybierze aktywo o najwyższym potencjale zysku wg sygnałów.")
 
         def toggle_main_trend_spot():
-            st.session_state.trend_bot_spot_active = (
-                st.session_state.main_cb_trend_spot
-            )
+            st.session_state.trend_bot_spot_active = st.session_state.main_cb_trend_spot
 
         st.checkbox(
             "🟢 Uruchom Bota Spot Trendowego",
@@ -500,20 +468,11 @@ col_btn, col_status = st.columns([2, 1])
 
 with col_btn:
     if not st.session_state.scanner_active:
-        if st.button(
-            "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures +"
-            " Sniper)",
-            type="primary",
-            use_container_width=True,
-        ):
+        if st.button("🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures + Sniper)", type="primary", use_container_width=True):
             st.session_state.scanner_active = True
             st.rerun()
     else:
-        if st.button(
-            "⏹️ ZATRZYMAJ AUTOMATYCZNY SKANER",
-            type="secondary",
-            use_container_width=True,
-        ):
+        if st.button("⏹️ ZATRZYMAJ AUTOMATYCZNY SKANER", type="secondary", use_container_width=True):
             st.session_state.scanner_active = False
             st.rerun()
 
@@ -524,27 +483,9 @@ with col_status:
         st.error("🔴 STATUS: ZATRZYMANY")
 
 trusted_base_coins = [
-    "BTC",
-    "ETH",
-    "SOL",
-    "XRP",
-    "ADA",
-    "AVAX",
-    "DOGE",
-    "LINK",
-    "SUI",
-    "NEAR",
-    "APT",
-    "RENDER",
-    "INJ",
-    "PEPE",
-    "SHIB",
-    "LTC",
-    "DOT",
-    "UNI",
-    "ZEC",
-    "HYPE",
-    "ATOM",
+    "BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE", "LINK", 
+    "SUI", "NEAR", "APT", "RENDER", "INJ", "PEPE", "SHIB", "LTC", 
+    "DOT", "UNI", "ZEC", "HYPE", "ATOM"
 ]
 
 MIN_SPOT_TRADE = 5.0
@@ -557,8 +498,7 @@ if futures_ex and st.session_state.listing_sniper_active:
     try:
         current_markets = futures_ex.fetch_markets()
         current_symbols = {
-            m["symbol"]
-            for m in current_markets
+            m["symbol"] for m in current_markets 
             if (m["quote"] == "USDT" or m["settle"] == "USDT") and m["active"]
         }
 
@@ -583,21 +523,15 @@ if futures_ex and st.session_state.listing_sniper_active:
                                     "contracts": contracts,
                                     "leverage": sniper_leverage,
                                 }
-                                st.session_state.trade_history.insert(
-                                    0,
-                                    {
-                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Typ": "🚀 LISTING SNIPER LONG (2x)",
-                                        "Para": sym,
-                                        "Budżet": f"{sniper_budget:.2f} USDT",
-                                        "Dźwignia": f"{sniper_leverage}x",
-                                        "Cena": f"{price:.4f}",
-                                    },
-                                )
-                                send_notification(
-                                    f"🎯 [LISTING SNIPER] Wykryto nowy token {sym}! Kupiono za"
-                                    f" {sniper_budget:.1f} USDT z dźwignią 2x."
-                                )
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Typ": "🚀 LISTING SNIPER LONG (2x)",
+                                    "Para": sym,
+                                    "Budżet": f"{sniper_budget:.2f} USDT",
+                                    "Dźwignia": f"{sniper_leverage}x",
+                                    "Cena": f"{price:.4f}",
+                                })
+                                send_notification(f"🎯 [LISTING SNIPER] Wykryto nowy token {sym}! Kupiono za {sniper_budget:.1f} USDT z dźwignią 2x.")
                         except Exception:
                             pass
         st.session_state.known_markets = current_symbols
@@ -612,27 +546,19 @@ if spot_ex and st.session_state.trend_bot_spot_active:
         s_tickers = spot_ex.fetch_tickers()
         best_spot_candidates = sorted(
             [
-                sym
-                for sym, data in s_tickers.items()
+                sym for sym, data in s_tickers.items()
                 if any(sym.startswith(c + "/") for c in trusted_base_coins)
                 and sym.endswith("/USDT")
-                and "BULL" not in sym
-                and "BEAR" not in sym
+                and "BULL" not in sym and "BEAR" not in sym
             ],
             key=lambda x: s_tickers[x].get("quoteVolume", 0),
             reverse=True,
         )[:max_spot_scan_pairs]
         if best_spot_candidates:
             auto_bot_spot_coin = best_spot_candidates[0]
-            s_ohlcv = spot_ex.fetch_ohlcv(
-                auto_bot_spot_coin, timeframe=spot_tf, limit=50
-            )
-            s_df = pd.DataFrame(
-                s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
-            s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df[
-                "close"
-            ].ewm(span=26, adjust=False).mean()
+            s_ohlcv = spot_ex.fetch_ohlcv(auto_bot_spot_coin, timeframe=spot_tf, limit=50)
+            s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
             s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
 
             c_macd = s_df["macd"].iloc[-1]
@@ -645,30 +571,20 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                 if spot_free >= MIN_SPOT_TRADE:
                     prov_budget = spot_free * (base_allocation_pct / 100.0)
                     budget = min(prov_budget, max_single_trade_usdt)
-                    if (
-                        budget < MIN_SPOT_TRADE
-                        and spot_free >= MIN_SPOT_TRADE
-                        and max_single_trade_usdt >= MIN_SPOT_TRADE
-                    ):
+                    if budget < MIN_SPOT_TRADE and spot_free >= MIN_SPOT_TRADE and max_single_trade_usdt >= MIN_SPOT_TRADE:
                         budget = MIN_SPOT_TRADE
 
                     amount = budget / c_price
                     spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
                     st.session_state.signal_cooldown[t_key] = time.time()
-                    st.session_state.trade_history.insert(
-                        0,
-                        {
-                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": "BOT SPOT TREND BUY (Auto)",
-                            "Para": auto_bot_spot_coin,
-                            "Budżet": f"{budget:.2f} USDT",
-                            "Cena": f"{c_price:.4f}",
-                        },
-                    )
-                    send_notification(
-                        f"🥾 [BOT SPOT AUTO] Kupiono {auto_bot_spot_coin} wg trendu MACD za"
-                        f" {budget:.1f} USDT"
-                    )
+                    st.session_state.trade_history.insert(0, {
+                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Typ": "BOT SPOT TREND BUY (Auto)",
+                        "Para": auto_bot_spot_coin,
+                        "Budżet": f"{budget:.2f} USDT",
+                        "Cena": f"{c_price:.4f}",
+                    })
+                    send_notification(f"🥾 [BOT SPOT AUTO] Kupiono {auto_bot_spot_coin} wg trendu MACD za {budget:.1f} USDT")
     except Exception:
         pass
 
@@ -681,11 +597,9 @@ if futures_ex and st.session_state.trend_bot_fut_active:
             f_tickers = futures_ex.fetch_tickers()
             best_fut_candidates = sorted(
                 [
-                    sym
-                    for sym, data in f_tickers.items()
+                    sym for sym, data in f_tickers.items()
                     if (sym.endswith(":USDT") or "/USDT:USDT" in sym)
-                    and "BULL" not in sym
-                    and "BEAR" not in sym
+                    and "BULL" not in sym and "BEAR" not in sym
                 ],
                 key=lambda x: f_tickers[x].get("quoteVolume", 0),
                 reverse=True,
@@ -696,13 +610,8 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
                     time.sleep(0.02)
-                    f_df = pd.DataFrame(
-                        f_ohlcv,
-                        columns=["timestamp", "open", "high", "low", "close", "volume"],
-                    )
-                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
-                        "close"
-                    ].ewm(span=26, adjust=False).mean()
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
                     f_macd = f_df["macd"].iloc[-1]
@@ -721,9 +630,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 except Exception:
                     continue
 
-            top_signal_pairs = sorted(
-                evaluated_pairs, key=lambda x: x["strength"], reverse=True
-            )[:max_active_futures_positions]
+            top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)[:max_active_futures_positions]
 
             for item in top_signal_pairs:
                 if len(st.session_state.active_trades) >= max_active_futures_positions:
@@ -742,18 +649,11 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 tf_key = f"trend_bot_fut_{sym}"
                 last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
 
-                if (
-                    sym not in st.session_state.active_trades
-                    and (time.time() - last_action_time > 90)
-                ):
+                if sym not in st.session_state.active_trades and (time.time() - last_action_time > 90):
                     if fut_free >= MIN_FUT_TRADE:
                         prov_budget = fut_free * (base_allocation_pct / 100.0)
                         budget = min(prov_budget, max_single_trade_usdt)
-                        if (
-                            budget < MIN_FUT_TRADE
-                            and fut_free >= MIN_FUT_TRADE
-                            and max_single_trade_usdt >= MIN_FUT_TRADE
-                        ):
+                        if budget < MIN_FUT_TRADE and fut_free >= MIN_FUT_TRADE and max_single_trade_usdt >= MIN_FUT_TRADE:
                             budget = MIN_FUT_TRADE
 
                         try:
@@ -771,20 +671,15 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             "contracts": contracts,
                             "leverage": bot_leverage,
                         }
-                        st.session_state.trade_history.insert(
-                            0,
-                            {
-                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": f"BOT FUTURES {label}",
-                                "Para": sym,
-                                "Budżet": f"{budget:.2f} USDT",
-                                "Dźwignia": f"{bot_leverage}x",
-                                "Cena": f"{f_price:.4f}",
-                            },
-                        )
-                        send_notification(
-                            f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)"
-                        )
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": f"BOT FUTURES {label}",
+                            "Para": sym,
+                            "Budżet": f"{budget:.2f} USDT",
+                            "Dźwignia": f"{bot_leverage}x",
+                            "Cena": f"{f_price:.4f}",
+                        })
+                        send_notification(f"🥾 [BOT FUTURES] Otwarto {label} na {sym} ({bot_leverage}x)")
     except Exception:
         pass
 
@@ -797,61 +692,39 @@ if futures_ex and st.session_state.active_trades:
         current_tickers = futures_ex.fetch_tickers()
         for sym, trade_info in list(st.session_state.active_trades.items()):
             if sym in current_tickers:
-                curr_price = float(
-                    current_tickers[sym].get("last", trade_info["entry_price"])
-                )
+                curr_price = float(current_tickers[sym].get("last", trade_info["entry_price"]))
                 entry_price = trade_info["entry_price"]
                 side = trade_info["side"]
                 contracts = trade_info["contracts"]
 
                 if side == "buy":
-                    pct_change = (
-                        ((curr_price - entry_price) / entry_price)
-                        * 100
-                        * trade_info["leverage"]
-                    )
+                    pct_change = ((curr_price - entry_price) / entry_price) * 100 * trade_info["leverage"]
                 else:
-                    pct_change = (
-                        ((entry_price - curr_price) / entry_price)
-                        * 100
-                        * trade_info["leverage"]
-                    )
+                    pct_change = ((entry_price - curr_price) / entry_price) * 100 * trade_info["leverage"]
 
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-                    f_df = pd.DataFrame(
-                        f_ohlcv,
-                        columns=["timestamp", "open", "high", "low", "close", "volume"],
-                    )
-                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df[
-                        "close"
-                    ].ewm(span=26, adjust=False).mean()
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
                     m_val = f_df["macd"].iloc[-1]
                     s_val = f_df["signal"].iloc[-1]
 
-                    signal_reversed = (side == "buy" and m_val < s_val) or (
-                        side == "sell" and m_val > s_val
-                    )
+                    signal_reversed = (side == "buy" and m_val < s_val) or (side == "sell" and m_val > s_val)
                 except Exception:
                     signal_reversed = False
 
                 if signal_reversed:
                     close_side = "sell" if side == "buy" else "buy"
                     try:
-                        futures_ex.create_market_order(
-                            sym, close_side, contracts, params={"reduceOnly": True}
-                        )
+                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
                     except Exception:
                         pass
                     trades_to_remove.append(sym)
                     st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
                     st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
-                    send_notification(
-                        f"🔄 [SYGNAŁ WYJŚCIA] Zamknięto {sym} wg sygnału (Wynik:"
-                        f" {pct_change:+.2f}%)"
-                    )
+                    send_notification(f"🔄 [SYGNAŁ WYJŚCIA] Zamknięto {sym} wg sygnału (Wynik: {pct_change:+.2f}%)")
     except Exception:
         pass
 
@@ -869,17 +742,13 @@ if spot_ex:
     try:
         s_tickers = spot_ex.fetch_tickers()
         valid_s = {
-            sym: data
-            for sym, data in s_tickers.items()
+            sym: data for sym, data in s_tickers.items()
             if any(sym.startswith(coin + "/") for coin in trusted_base_coins)
             and sym.endswith("/USDT")
-            and "BULL" not in sym
-            and "BEAR" not in sym
+            and "BULL" not in sym and "BEAR" not in sym
             and data.get("quoteVolume", 0) > 50000
         }
-        sorted_s = sorted(
-            valid_s.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True
-        )
+        sorted_s = sorted(valid_s.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)
         top_spot_symbols = [item[0] for item in sorted_s[:max_spot_scan_pairs]]
     except Exception:
         top_spot_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
@@ -888,27 +757,17 @@ if spot_ex:
         try:
             ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
             time.sleep(0.02)
-            df = pd.DataFrame(
-                ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
+            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
 
-            df["volatility_pct"] = (
-                (df["high"] - df["low"]) / df["close"]
-            ).rolling(14).mean() * 100
-            current_vol = (
-                df["volatility_pct"].iloc[-1]
-                if not pd.isna(df["volatility_pct"].iloc[-1])
-                else 2.0
-            )
+            df["volatility_pct"] = ((df["high"] - df["low"]) / df["close"]).rolling(14).mean() * 100
+            current_vol = df["volatility_pct"].iloc[-1] if not pd.isna(df["volatility_pct"].iloc[-1]) else 2.0
 
             delta = df["close"].diff()
             gain = (delta.where(delta > 0, 0)).rolling(14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
             rs = gain / loss
             df["rsi"] = 100 - (100 / (1 + rs))
-            current_rsi = (
-                df["rsi"].iloc[-1] if not pd.isna(df["rsi"].iloc[-1]) else 50
-            )
+            current_rsi = df["rsi"].iloc[-1] if not pd.isna(df["rsi"].iloc[-1]) else 50
 
             strat_type = idx % 3
             is_spot_signal = False
@@ -931,25 +790,15 @@ if spot_ex:
                 status = f"⚠️ Za mało środków (Mam: {spot_free:.2f} USDT)"
             else:
                 if "Dynamiczny" in allocation_mode:
-                    risk_multiplier = (
-                        0.5
-                        if current_vol > 4.0
-                        else (0.8 if current_vol > 2.0 else 1.0)
-                    )
-                    calc_pct = max(
-                        1.0, min(30.0, base_allocation_pct * risk_multiplier)
-                    )
+                    risk_multiplier = 0.5 if current_vol > 4.0 else (0.8 if current_vol > 2.0 else 1.0)
+                    calc_pct = max(1.0, min(30.0, base_allocation_pct * risk_multiplier))
                 else:
                     calc_pct = float(base_allocation_pct)
 
                 prov_budget = spot_free * (calc_pct / 100.0)
                 allocated_budget = min(prov_budget, max_single_trade_usdt)
 
-                if (
-                    allocated_budget < MIN_SPOT_TRADE
-                    and spot_free >= MIN_SPOT_TRADE
-                    and max_single_trade_usdt >= MIN_SPOT_TRADE
-                ):
+                if allocated_budget < MIN_SPOT_TRADE and spot_free >= MIN_SPOT_TRADE and max_single_trade_usdt >= MIN_SPOT_TRADE:
                     allocated_budget = MIN_SPOT_TRADE
 
                 if allocated_budget < MIN_SPOT_TRADE:
@@ -959,9 +808,7 @@ if spot_ex:
                     spot_display_str = f"{allocated_budget:.1f} USDT"
                     status = "⏳ Oczekiwanie na sygnał"
                     spot_cooldown_key = f"spot_{sym}"
-                    last_spot_time = st.session_state.signal_cooldown.get(
-                        spot_cooldown_key, 0
-                    )
+                    last_spot_time = st.session_state.signal_cooldown.get(spot_cooldown_key, 0)
                     is_in_cooldown = time.time() - last_spot_time < 120
 
                     if st.session_state.scanner_active and is_spot_signal:
@@ -973,24 +820,17 @@ if spot_ex:
                                 base_amount = allocated_budget / current_price
                                 spot_ex.create_market_buy_order(sym, base_amount)
 
-                                st.session_state.signal_cooldown[spot_cooldown_key] = (
-                                    time.time()
-                                )
-                                st.session_state.trade_history.insert(
-                                    0,
-                                    {
-                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Typ": "SPOT BUY (Sygnał)",
-                                        "Para": sym,
-                                        "Budżet": f"{allocated_budget:.2f} USDT",
-                                        "Cena": f"{current_price:.4f}",
-                                    },
-                                )
+                                st.session_state.signal_cooldown[spot_cooldown_key] = time.time()
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Typ": "SPOT BUY (Sygnał)",
+                                    "Para": sym,
+                                    "Budżet": f"{allocated_budget:.2f} USDT",
+                                    "Cena": f"{current_price:.4f}",
+                                })
 
                                 status = f"🚀 KUPIONO za {allocated_budget:.1f} USDT"
-                                send_notification(
-                                    f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT"
-                                )
+                                send_notification(f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT")
                             except Exception as ex:
                                 status = f"❌ Błąd: {ex}"
 
@@ -1019,22 +859,16 @@ if futures_ex:
     try:
         f_tickers = futures_ex.fetch_tickers()
         valid_f = {
-            sym: data
-            for sym, data in f_tickers.items()
+            sym: data for sym, data in f_tickers.items()
             if any(
-                sym.startswith(coin + "/")
-                or sym.startswith(coin + ":")
-                or sym == (coin + "/USDT:USDT")
+                sym.startswith(coin + "/") or sym.startswith(coin + ":") or sym == (coin + "/USDT:USDT")
                 for coin in trusted_base_coins
             )
             and (sym.endswith(":USDT") or "/USDT:USDT" in sym)
-            and "BULL" not in sym
-            and "BEAR" not in sym
+            and "BULL" not in sym and "BEAR" not in sym
             and data.get("quoteVolume", 0) > 100000
         }
-        sorted_f = sorted(
-            valid_f.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True
-        )
+        sorted_f = sorted(valid_f.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)
         top_fut_symbols = [item[0] for item in sorted_f[:max_fut_scan_pairs]]
     except Exception:
         top_fut_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
@@ -1043,31 +877,19 @@ if futures_ex:
         try:
             ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=50)
             time.sleep(0.02)
-            df = pd.DataFrame(
-                ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
+            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
 
-            df["volatility_pct"] = (
-                (df["high"] - df["low"]) / df["close"]
-            ).rolling(14).mean() * 100
-            current_vol = (
-                df["volatility_pct"].iloc[-1]
-                if not pd.isna(df["volatility_pct"].iloc[-1])
-                else 2.0
-            )
+            df["volatility_pct"] = ((df["high"] - df["low"]) / df["close"]).rolling(14).mean() * 100
+            current_vol = df["volatility_pct"].iloc[-1] if not pd.isna(df["volatility_pct"].iloc[-1]) else 2.0
 
             delta = df["close"].diff()
             gain = (delta.where(delta > 0, 0)).rolling(14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
             rs = gain / loss
             df["rsi"] = 100 - (100 / (1 + rs))
-            current_rsi = (
-                df["rsi"].iloc[-1] if not pd.isna(df["rsi"].iloc[-1]) else 50
-            )
+            current_rsi = df["rsi"].iloc[-1] if not pd.isna(df["rsi"].iloc[-1]) else 50
 
-            df["macd"] = df["close"].ewm(span=12, adjust=False).mean() - df[
-                "close"
-            ].ewm(span=26, adjust=False).mean()
+            df["macd"] = df["close"].ewm(span=12, adjust=False).mean() - df["close"].ewm(span=26, adjust=False).mean()
             df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 
             strat_type = idx % 3
@@ -1116,25 +938,15 @@ if futures_ex:
                 status = f"⚠️ Za mało środków (Mam: {fut_free:.2f} USDT)"
             else:
                 if "Dynamiczny" in allocation_mode:
-                    risk_multiplier = (
-                        0.5
-                        if current_vol > 4.0
-                        else (0.8 if current_vol > 2.0 else 1.0)
-                    )
-                    calc_pct = max(
-                        1.0, min(30.0, base_allocation_pct * risk_multiplier)
-                    )
+                    risk_multiplier = 0.5 if current_vol > 4.0 else (0.8 if current_vol > 2.0 else 1.0)
+                    calc_pct = max(1.0, min(30.0, base_allocation_pct * risk_multiplier))
                 else:
                     calc_pct = float(base_allocation_pct)
 
                 prov_budget = fut_free * (calc_pct / 100.0)
                 allocated_budget = min(prov_budget, max_single_trade_usdt)
 
-                if (
-                    allocated_budget < MIN_FUT_TRADE
-                    and fut_free >= MIN_FUT_TRADE
-                    and max_single_trade_usdt >= MIN_FUT_TRADE
-                ):
+                if allocated_budget < MIN_FUT_TRADE and fut_free >= MIN_FUT_TRADE and max_single_trade_usdt >= MIN_FUT_TRADE:
                     allocated_budget = MIN_FUT_TRADE
 
                 if allocated_budget < MIN_FUT_TRADE:
@@ -1144,9 +956,7 @@ if futures_ex:
                     fut_display_str = f"{allocated_budget:.1f} USDT"
                     status = "⏳ Oczekiwanie na sygnał"
                     fut_cooldown_key = f"fut_{sym}"
-                    last_fut_time = st.session_state.signal_cooldown.get(
-                        fut_cooldown_key, 0
-                    )
+                    last_fut_time = st.session_state.signal_cooldown.get(fut_cooldown_key, 0)
                     is_in_cooldown = time.time() - last_fut_time < 120
 
                     if st.session_state.scanner_active and is_futures_signal:
@@ -1162,16 +972,10 @@ if futures_ex:
                                 except Exception:
                                     pass
 
-                                contract_size = (
-                                    allocated_budget * dyn_leverage
-                                ) / current_price
-                                futures_ex.create_market_order(
-                                    sym, trade_action, contract_size
-                                )
+                                contract_size = (allocated_budget * dyn_leverage) / current_price
+                                futures_ex.create_market_order(sym, trade_action, contract_size)
 
-                                st.session_state.signal_cooldown[fut_cooldown_key] = (
-                                    time.time()
-                                )
+                                st.session_state.signal_cooldown[fut_cooldown_key] = time.time()
                                 st.session_state.active_trades[sym] = {
                                     "entry_price": current_price,
                                     "side": trade_action,
@@ -1179,22 +983,17 @@ if futures_ex:
                                     "leverage": dyn_leverage,
                                 }
 
-                                st.session_state.trade_history.insert(
-                                    0,
-                                    {
-                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Typ": f"FUTURES {action_label} (Sygnał)",
-                                        "Para": sym,
-                                        "Budżet": f"{allocated_budget:.2f} USDT",
-                                        "Dźwignia": f"{dyn_leverage}x",
-                                        "Cena": f"{current_price:.4f}",
-                                    },
-                                )
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Typ": f"FUTURES {action_label} (Sygnał)",
+                                    "Para": sym,
+                                    "Budżet": f"{allocated_budget:.2f} USDT",
+                                    "Dźwignia": f"{dyn_leverage}x",
+                                    "Cena": f"{current_price:.4f}",
+                                })
 
                                 status = f"🚀 OTWARTO {action_label} ({dyn_leverage}x)"
-                                send_notification(
-                                    f"🔵 [FUTURES] Otwarto {action_label} na {sym}"
-                                )
+                                send_notification(f"🔵 [FUTURES] Otwarto {action_label} na {sym}")
                             except Exception as ex:
                                 status = f"❌ Błąd: {ex}"
 
@@ -1218,10 +1017,7 @@ st.markdown("---")
 # RANKING I SKANER NAJLEPSZYCH OKAZJI DLA BOTÓW
 # =====================================================================
 st.subheader("🤖 Skaner Najlepszych Okazji dla Botów & Listing Sniper")
-st.markdown(
-    "Poniższa tabela zbiera rynki z najwyższym wolumenem oraz monitoruje nowe"
-    " listingi w tle."
-)
+st.markdown("Poniższa tabela zbiera rynki z najwyższym wolumenem oraz monitoruje nowe listingi w tle.")
 
 combined_bot_ranking = []
 source_ex_for_ranking = futures_ex if futures_ex else spot_ex
@@ -1230,29 +1026,16 @@ if source_ex_for_ranking:
     try:
         all_tickers = source_ex_for_ranking.fetch_tickers()
         valid_ranking_items = {
-            sym: data
-            for sym, data in all_tickers.items()
-            if any(
-                sym.startswith(coin + "/") or sym.startswith(coin + ":")
-                for coin in trusted_base_coins
-            )
-            and "BULL" not in sym
-            and "BEAR" not in sym
+            sym: data for sym, data in all_tickers.items()
+            if any(sym.startswith(coin + "/") or sym.startswith(coin + ":") for coin in trusted_base_coins)
+            and "BULL" not in sym and "BEAR" not in sym
             and data.get("quoteVolume", 0) > 50000
         }
-        sorted_ranking = sorted(
-            valid_ranking_items.items(),
-            key=lambda x: x[1].get("quoteVolume", 0),
-            reverse=True,
-        )[:max_fut_scan_pairs]
+        sorted_ranking = sorted(valid_ranking_items.items(), key=lambda x: x[1].get("quoteVolume", 0), reverse=True)[:max_fut_scan_pairs]
 
         for r_idx, (r_sym, r_data) in enumerate(sorted_ranking):
             r_vol = r_data.get("quoteVolume", 0)
-            market_type = (
-                "Futures"
-                if ((":USDT" in r_sym) or ("/USDT:USDT" in r_sym))
-                else "Spot"
-            )
+            market_type = "Futures" if ((":USDT" in r_sym) or ("/USDT:USDT" in r_sym)) else "Spot"
 
             if r_idx % 4 == 0:
                 recommended_bot = "Trend-Following (MACD)"
@@ -1281,9 +1064,7 @@ if source_ex_for_ranking:
                 "Potencjał zysku": potential_score,
             })
     except Exception as e:
-        combined_bot_ranking.append(
-            {"Błąd": f"Nie udało się pobrać danych rankingowych: {e}"}
-        )
+        combined_bot_ranking.append({"Błąd": f"Nie udało się pobrać danych rankingowych: {e}"})
 
 if combined_bot_ranking:
     st.dataframe(pd.DataFrame(combined_bot_ranking), use_container_width=True)
@@ -1292,16 +1073,10 @@ st.markdown("---")
 st.subheader("📜 Dziennik Transakcji w Bieżącej Sesji")
 
 if st.session_state.trade_history:
-    st.dataframe(
-        pd.DataFrame(st.session_state.trade_history), use_container_width=True
-    )
+    st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
     st.info("Brak zarejestratowanych transakcji w tej sesji.")
 
-if (
-    st.session_state.scanner_active
-    or st.session_state.trend_bot_spot_active
-    or st.session_state.trend_bot_fut_active
-):
+if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
