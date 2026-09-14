@@ -270,7 +270,6 @@ with st.sidebar.container(border=True):
   max_single_trade_usdt = st.number_input(
       "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 5000.0, 50.0, 5.0
   )
-  # PRZYWRÓCONY SUVAK: Maksymalna liczba aktywnych pozycji Futures
   max_active_futures_positions = st.slider(
       "📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10
   )
@@ -294,8 +293,10 @@ st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
   st.markdown("### 🔄 Pętla Główna Skanera i Nowe Pary")
 
+
   def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
+
 
   auto_scan_enabled = st.checkbox(
       "Włącz auto-skanowanie w tle (Non-stop)",
@@ -349,6 +350,7 @@ if emergency_kill:
   st.session_state.trend_bot_spot_active = False
   st.session_state.trend_bot_fut_active = False
   st.session_state.active_trades = {}
+  st.session_state.signal_cooldown = {}
   send_notification(
       "🚨 [KILL SWITCH] Awaryjnie zamknięto aktywne kontrakty i wyłączono boty!"
   )
@@ -448,10 +450,12 @@ with st.container(border=True):
         " potencjale zysku wg sygnałów."
     )
 
+
     def toggle_main_trend_spot():
       st.session_state.trend_bot_spot_active = (
           st.session_state.main_cb_trend_spot
       )
+
 
     st.checkbox(
         "🟢 Uruchom Bota Spot Trendowego",
@@ -473,8 +477,10 @@ with st.container(border=True):
         key="main_bot_f_lmode",
     )
 
+
     def toggle_main_trend_fut():
       st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
+
 
     st.checkbox(
         "🔵 Uruchom Bota Futures (Autonomiczny)",
@@ -633,9 +639,9 @@ if spot_ex and st.session_state.trend_bot_spot_active:
       c_price = s_df["close"].iloc[-1]
 
       t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
-      if c_macd > c_sig and not st.session_state.signal_cooldown.get(
-          t_key, False
-      ):
+      # Bezpiecznik czasowy cooldownu (min. 60 sekund między wejściami na tym samym instrumencie)
+      last_action = st.session_state.signal_cooldown.get(t_key, 0)
+      if c_macd > c_sig and (time.time() - last_action > 60):
         if spot_free >= MIN_SPOT_TRADE:
           prov_budget = spot_free * (base_allocation_pct / 100.0)
           budget = min(prov_budget, max_single_trade_usdt)
@@ -648,7 +654,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
 
           amount = budget / c_price
           spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
-          st.session_state.signal_cooldown[t_key] = True
+          st.session_state.signal_cooldown[t_key] = time.time()
           st.session_state.trade_history.insert(
               0,
               {
@@ -734,8 +740,12 @@ if futures_ex and st.session_state.trend_bot_fut_active:
           bot_leverage = manual_leverage
 
         tf_key = f"trend_bot_fut_{sym}"
-        if sym not in st.session_state.active_trades and not st.session_state.signal_cooldown.get(
-            tf_key, False
+        last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
+
+        # Blokada ponownego wejścia przez minimum 90 sekund od ostatniej akcji
+        if (
+            sym not in st.session_state.active_trades
+            and (time.time() - last_action_time > 90)
         ):
           if fut_free >= MIN_FUT_TRADE:
             prov_budget = fut_free * (base_allocation_pct / 100.0)
@@ -755,7 +765,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
             contracts = (budget * bot_leverage) / f_price
             futures_ex.create_market_order(sym, side, contracts)
 
-            st.session_state.signal_cooldown[tf_key] = True
+            st.session_state.signal_cooldown[tf_key] = time.time()
             st.session_state.active_trades[sym] = {
                 "entry_price": f_price,
                 "side": side,
@@ -780,13 +790,13 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
+# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA (Zabezpieczone przed szybkim pętlami)
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
   try:
     current_tickers = futures_ex.fetch_tickers()
-    for sym, trade_info in st.session_state.active_trades.items():
+    for sym, trade_info in list(st.session_state.active_trades.items()):
       if sym in current_tickers:
         curr_price = float(
             current_tickers[sym].get("last", trade_info["entry_price"])
@@ -830,12 +840,16 @@ if futures_ex and st.session_state.active_trades:
 
         if signal_reversed:
           close_side = "sell" if side == "buy" else "buy"
-          futures_ex.create_market_order(
-              sym, close_side, contracts, params={"reduceOnly": True}
-          )
+          try:
+            futures_ex.create_market_order(
+                sym, close_side, contracts, params={"reduceOnly": True}
+            )
+          except Exception:
+            pass
           trades_to_remove.append(sym)
-          st.session_state.signal_cooldown[f"fut_{sym}"] = False
-          st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = False
+          # Ustawiamy czas zamknięcia w cooldownie, aby bot nie otworzył pozycji ponownie natychmiast
+          st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
+          st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
               f"🔄 [SYGNAŁ WYJŚCIA] Zamknięto {sym} wg sygnału (Wynik:"
               f" {pct_change:+.2f}%)"
@@ -852,6 +866,7 @@ if futures_ex and st.session_state.active_trades:
 # =====================================================================
 st.subheader("📊 Autonomiczny Skaner Spot (Składanie Zleceń Zakupu)")
 spot_results = []
+
 if spot_ex:
   try:
     s_tickers = spot_ex.fetch_tickers()
@@ -946,20 +961,23 @@ if spot_ex:
           spot_display_str = f"{allocated_budget:.1f} USDT"
           status = "⏳ Oczekiwanie na sygnał"
           spot_cooldown_key = f"spot_{sym}"
-          already_processed_spot = st.session_state.signal_cooldown.get(
-              spot_cooldown_key, False
+          last_spot_time = st.session_state.signal_cooldown.get(
+              spot_cooldown_key, 0
           )
+          is_in_cooldown = time.time() - last_spot_time < 120
 
           if st.session_state.scanner_active and is_spot_signal:
-            if already_processed_spot:
-              status = "🛡️ Sygnał obsłużony"
+            if is_in_cooldown:
+              status = "🛡️ Cooldown aktywny"
             else:
               try:
                 current_price = df["close"].iloc[-1]
                 base_amount = allocated_budget / current_price
                 spot_ex.create_market_buy_order(sym, base_amount)
 
-                st.session_state.signal_cooldown[spot_cooldown_key] = True
+                st.session_state.signal_cooldown[spot_cooldown_key] = (
+                    time.time()
+                )
                 st.session_state.trade_history.insert(
                     0,
                     {
@@ -998,6 +1016,7 @@ st.markdown("---")
 # =====================================================================
 st.subheader("📈 Autonomiczny Skaner Futures (Long & Short wg Sygnałów)")
 fut_results = []
+
 if futures_ex:
   try:
     f_tickers = futures_ex.fetch_tickers()
@@ -1127,15 +1146,16 @@ if futures_ex:
           fut_display_str = f"{allocated_budget:.1f} USDT"
           status = "⏳ Oczekiwanie na sygnał"
           fut_cooldown_key = f"fut_{sym}"
-          already_processed_fut = st.session_state.signal_cooldown.get(
-              fut_cooldown_key, False
+          last_fut_time = st.session_state.signal_cooldown.get(
+              fut_cooldown_key, 0
           )
+          is_in_cooldown = time.time() - last_fut_time < 120
 
           if st.session_state.scanner_active and is_futures_signal:
             if len(st.session_state.active_trades) >= max_active_futures_positions:
               status = f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń osiągnięty"
-            elif already_processed_fut or sym in st.session_state.active_trades:
-              status = "🛡️ Sygnał obsłużony"
+            elif is_in_cooldown or sym in st.session_state.active_trades:
+              status = "🛡️ Cooldown / Pozycja aktywna"
             else:
               try:
                 current_price = df["close"].iloc[-1]
@@ -1151,7 +1171,9 @@ if futures_ex:
                     sym, trade_action, contract_size
                 )
 
-                st.session_state.signal_cooldown[fut_cooldown_key] = True
+                st.session_state.signal_cooldown[fut_cooldown_key] = (
+                    time.time()
+                )
                 st.session_state.active_trades[sym] = {
                     "entry_price": current_price,
                     "side": trade_action,
