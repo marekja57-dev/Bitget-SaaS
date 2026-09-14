@@ -197,11 +197,13 @@ st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
   st.markdown("### 🔑 Konfiguracja API Bitget")
   if is_owner:
-    # Administrator: klucze ładowane automatycznie z env (lub wpisz tutaj na stałe jeśli wolisz)
-    api_key_input = os.getenv("BITGET_API_KEY", "TUTAJ_WPISZ_SWOJ_API_KEY")
-    secret_input = os.getenv("BITGET_SECRET_KEY", "TUTAJ_WPISZ_SWOJ_SECRET")
-    password_input = os.getenv("BITGET_PASSPHRASE", "TUTAJ_WPISZ_PASSPHRASE")
-    st.success("✅ Tryb Administratora: Klucze API wczytane automatycznie.")
+    # Twoje klucze wstawione na stałe dla Administratora
+    api_key_input = "bg_bad3414dc389df75aadc77945100d5c2"
+    secret_input = (
+        "14829c31563785108f3c20f7963d431bdbeb80bcb8222340b6134bf5a4a2e902"
+    )
+    password_input = "Zostaw1260"
+    st.success("✅ Tryb Administratora: Twoje klucze API zostały wczytane!")
   else:
     # Subskrybent / Klient: musi wpisać własne dane API
     api_key_input = st.text_input("API Key", type="password")
@@ -835,7 +837,6 @@ if futures_ex and st.session_state.active_trades:
               * trade_info["leverage"]
           )
 
-        # Sprawdzenie warunków STOP LOSS / TAKE PROFIT
         hit_stop_loss = pct_change <= -stop_loss_pct
         hit_take_profit = pct_change >= take_profit_pct
 
