@@ -53,11 +53,9 @@ def init_db():
         )
     ''')
     
-    # Automatyczne nadanie uprawnień Administratora w bazie dla Twoich wariantów e-maila
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
-    # Tworzenie domyślnego konta administratora zapasowego, jeśli nie istnieje
     cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bitget.pl",))
     if not cursor.fetchone():
         admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
@@ -88,7 +86,6 @@ stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID",
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
-# Sesja użytkownika
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_email" not in st.session_state:
@@ -142,7 +139,7 @@ st.markdown(
 )
 
 # =====================================================================
-# EKRAN LOGOWANIA / REJESTRACJI (JEŚLI NIE ZALOGOWANY)
+# EKRAN LOGOWANIA / REJESTRACJI
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
@@ -665,7 +662,57 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: TOP 8 PAR SPOT I FUTURES
+# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (NA ŻYWO)
+# =====================================================================
+st.markdown("---")
+st.subheader("⚡ Aktywne Pozycje i Przypisane Boty (Na Żywo)")
+
+active_pos_list = []
+if futures_ex:
+    try:
+        positions = futures_ex.fetch_positions()
+        for p in positions:
+            contracts = float(p.get("contracts", 0))
+            if contracts > 0:
+                sym = p["symbol"]
+                side = p.get("side", "").upper()
+                entry_p = float(p.get("entryPrice", 0))
+                lev = p.get("leverage", 1)
+                pnl = float(p.get("unrealizedPnl", 0))
+                
+                # Określenie bota / źródła
+                bot_source = "🤖 Bot Futures Trendowy" if sym in st.session_state.active_trades else "👤 Pozycja Ręczna / Inna"
+                
+                active_pos_list.append({
+                    "Para": sym,
+                    "Źródło / Bot": bot_source,
+                    "Strona": side,
+                    "Dźwignia": f"{lev}x",
+                    "Cena Wejścia": f"{entry_p:.4f}",
+                    "Wynik PnL": f"{pnl:+.2f} USDT",
+                    "Status": "🟢 W trakcie realizacji (Aktywna)"
+                })
+    except Exception:
+        pass
+
+for spot_sym in st.session_state.active_spot_trades:
+    active_pos_list.append({
+        "Para": spot_sym,
+        "Źródło / Bot": "🟢 Bot Spot Trendowy",
+        "Strona": "BUY (KUPNO)",
+        "Dźwignia": "1x (Spot)",
+        "Cena Wejścia": "-",
+        "Wynik PnL": "-",
+        "Status": "🟢 W trakcie realizacji (Aktywna)"
+    })
+
+if active_pos_list:
+    st.dataframe(pd.DataFrame(active_pos_list), use_container_width=True)
+else:
+    st.info("Brak aktywnych pozycji w portfelu lub uruchomionych przez boty.")
+
+# =====================================================================
+# WIDOK NA ŻYWO: TOP 8 PAR SPOT I FUTURES (SKANER)
 # =====================================================================
 st.markdown("---")
 col_view1, col_view2 = st.columns(2)
