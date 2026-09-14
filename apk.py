@@ -496,7 +496,6 @@ if futures_ex:
     except Exception:
         pass
 
-# Obliczanie niezrealizowanego PnL Spot
 total_spot_unrealized_pnl = 0.0
 if spot_ex and st.session_state.active_spot_trades:
     try:
@@ -614,7 +613,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# SNIPER NOWYCH LISTINGÓW (WYKRYWANIE I ZAKUP ŚWIEŻYCH TOKENÓW)
+# SNIPER NOWYCH LISTINGÓW
 # =====================================================================
 if spot_ex and enable_sniper:
     try:
@@ -653,7 +652,7 @@ if spot_ex and enable_sniper:
         pass
 
 # =====================================================================
-# AWARYJNA KONTROLA SL / TP DLA AKTYWNYCH POZYCJI FUTURES (W TLE)
+# AWARYJNA KONTROLA SL / TP DLA FUTURES
 # =====================================================================
 if enable_custom_sl_tp and futures_ex:
     try:
@@ -863,7 +862,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES
+# WIDOK NA ŻYWO: SKANER SPOT I FUTURES
 # =====================================================================
 st.markdown("---")
 st.subheader("🔥 Top 8 Par Spot (Skaner i Status Strategii)")
