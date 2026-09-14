@@ -97,6 +97,20 @@ if "user_id" not in st.session_state:
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
 
+# Obsługa powrotu z płatności Stripe
+if st.query_params.get("success") == "true":
+    if st.session_state.logged_in and st.session_state.user_id:
+        st.session_state.stripe_paid = True
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.user_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        st.success("🎉 Płatność zakończona sukcesem! Twoja subskrypcja została aktywowana.")
+
 # =====================================================================
 # STYLIZACJA WYGLĄDU (RETRO / DARK)
 # =====================================================================
@@ -265,76 +279,73 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
         return 10
 
 # =====================================================================
-# PANEL BOCZNY (SIDEBAR) - SUBSKRYPCJA I PROFIL NA SAMEJ GÓRZE
+# PANEL BOCZNY (SIDEBAR)
 # =====================================================================
-with st.sidebar.container(border=True):
-    st.markdown(f"### 👤 Zalogowany: {st.session_state.user_email}")
-    if is_user_admin():
-        st.markdown("🔴 **Rola: Administrator**")
-    else:
-        st.markdown("🟢 **Rola: Klient SaaS**")
+st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
+if is_user_admin():
+    st.sidebar.markdown("🔴 **Rola: Administrator**")
+else:
+    st.sidebar.markdown("🟢 **Rola: Klient SaaS**")
 
-    if st.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
-        st.session_state.logged_in = False
-        st.session_state.user_email = ""
-        st.session_state.is_admin = False
-        st.session_state.stripe_paid = False
-        st.session_state.api_key = ""
-        st.session_state.secret_key = ""
-        st.session_state.passphrase = ""
-        st.rerun()
-
-st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 💳 Strefa Subskrypcji")
-    if is_user_admin() or is_user_paid():
-        st.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
-    else:
-        st.warning("⚠️ Brak aktywnej subskrypcji")
-        if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
-            if stripe_sk_val and stripe_price_id_val:
-                try:
-                    checkout_session = stripe.checkout.Session.create(
-                        payment_method_types=['card'],
-                        line_items=[{
-                            'price': stripe_price_id_val,
-                            'quantity': 1,
-                        }],
-                        mode='subscription',
-                        success_url='https://bot-bitget.pl/?success=true',
-                        cancel_url='https://bot-bitget.pl/?canceled=true',
-                        customer_email=st.session_state.user_email,
-                    )
-                    st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Błąd Stripe: {e}")
-            else:
-                st.error("Bramka płatności nie skonfigurowana.")
+if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
+    st.session_state.logged_in = False
+    st.session_state.user_email = ""
+    st.session_state.is_admin = False
+    st.session_state.stripe_paid = False
+    st.session_state.api_key = ""
+    st.session_state.secret_key = ""
+    st.session_state.passphrase = ""
+    st.rerun()
 
 st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 🔑 Twoje Klucze API Bitget")
-    input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
-    input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
-    input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
-
-    if st.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
-        if input_api and input_secret and input_pass:
-            st.session_state.api_key = input_api
-            st.session_state.secret_key = input_secret
-            st.session_state.passphrase = input_pass
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
-                (input_api, input_secret, input_pass, st.session_state.user_id)
-            )
-            conn.commit()
-            conn.close()
-            st.success("✅ Klucze zapisane w bazie!")
-            st.rerun()
+st.sidebar.markdown("### 💳 Strefa Subskrypcji")
+if is_user_admin() or is_user_paid():
+    st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
+else:
+    st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
+    if st.sidebar.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
+        if stripe_sk_val and stripe_price_id_val:
+            try:
+                checkout_session = stripe.checkout.Session.create(
+                    payment_method_types=['card'],
+                    line_items=[{
+                        'price': stripe_price_id_val,
+                        'quantity': 1,
+                    }],
+                    mode='subscription',
+                    success_url='https://bot-bitget.pl/?success=true',
+                    cancel_url='https://bot-bitget.pl/?canceled=true',
+                    customer_email=st.session_state.user_email,
+                )
+                st.sidebar.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
+            except Exception as e:
+                st.sidebar.error(f"Błąd Stripe: {e}")
         else:
-            st.error("Wypełnij wszystkie pola kluczy.")
+            st.sidebar.error("Bramka płatności nie skonfigurowana.")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔑 Klucze API Bitget")
+input_api = st.sidebar.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
+input_secret = st.sidebar.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
+input_pass = st.sidebar.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
+
+if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
+    if input_api and input_secret and input_pass:
+        st.session_state.api_key = input_api
+        st.session_state.secret_key = input_secret
+        st.session_state.passphrase = input_pass
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
+            (input_api, input_secret, input_pass, st.session_state.user_id)
+        )
+        conn.commit()
+        conn.close()
+        st.success("✅ Klucze zapisane w bazie!")
+        st.rerun()
+    else:
+        st.error("Wypełnij wszystkie pola kluczy.")
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -347,11 +358,10 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 🔔 Powiadomienia Telegram")
-    enable_notifications = st.checkbox("Włącz powiadomienia", value=True)
-    telegram_bot_token = st.text_input("Telegram Bot Token", type="password")
-    telegram_chat_id = st.text_input("Telegram Chat ID")
+st.sidebar.markdown("### 🔔 Powiadomienia Telegram")
+enable_notifications = st.sidebar.checkbox("Włącz powiadomienia", value=True)
+telegram_bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
+telegram_chat_id = st.sidebar.text_input("Telegram Chat ID")
 
 def send_notification(message):
     if enable_notifications:
@@ -367,43 +377,41 @@ def send_notification(message):
                 pass
 
 st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### ⚙️ Ustawienia Kapitału i Ryzyka")
-    allocation_mode = st.radio("Zarządzanie wielkością pozycji", ["🤖 Inteligentny Auto-Dobór (Zmienność + Siła)", "🎛️ Stały procent portfela"])
-    base_allocation_pct = st.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
-    max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
-    
-    max_active_spot_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Spot", 1, 20, 5)
-    max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 5)
+st.sidebar.markdown("### ⚙️ Kapitał i Ryzyko")
+allocation_mode = st.sidebar.radio("Zarządzanie wielkością pozycji", ["🤖 Inteligentny Auto-Dobór (Zmienność + Siła)", "🎛️ Stały procent portfela"])
+base_allocation_pct = st.sidebar.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
+max_single_trade_usdt = st.sidebar.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
 
-    st.markdown("---")
-    st.markdown("### 🛡️ Opcjonalne Limity SL / TP")
-    enable_custom_sl_tp = st.checkbox("Włącz awaryjne limity SL / TP (%)", value=False)
-    custom_stop_loss_pct = st.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5)
-    custom_take_profit_pct = st.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15)
-
-    st.markdown("---")
-    st.markdown("### ⚡ Zarządzanie Dźwignią")
-    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🎛️ Ręczny"])
-    manual_leverage = st.slider("Stała dźwignia Futures", 1, 10, 3)
-
-    st.markdown("---")
-    st.markdown("### 🧠 Timeframe Analizy")
-    spot_tf = st.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4)
+max_active_spot_positions = st.sidebar.slider("📈 Maks. aktywne pozycje Spot", 1, 20, 5)
+max_active_futures_positions = st.sidebar.slider("📈 Maks. aktywne pozycje Futures", 1, 20, 5)
 
 st.sidebar.markdown("---")
-with st.sidebar.container(border=True):
-    st.markdown("### 🔄 Pętla Skanera")
-    if "sidebar_auto_scan_cb" not in st.session_state:
-        st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
+st.sidebar.markdown("### 🛡️ Opcjonalne Limity SL / TP")
+enable_custom_sl_tp = st.sidebar.checkbox("Włącz awaryjne limity SL / TP (%)", value=False)
+custom_stop_loss_pct = st.sidebar.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5)
+custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15)
 
-    def toggle_scanner_from_sidebar():
-        st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
+leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🎛️ Ręczny"])
+manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3)
 
-    auto_scan_enabled = st.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
-    scan_interval = st.slider("Interwał odświeżania (s)", 1, 300, 3)
-    max_spot_scan_pairs = st.slider("🔍 Liczba par Spot", 5, 50, 15, 5)
-    max_fut_scan_pairs = st.slider("📈 Liczba par Futures", 5, 50, 15, 5)
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🧠 Timeframe Analizy")
+spot_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔄 Pętla Skanera")
+if "sidebar_auto_scan_cb" not in st.session_state:
+    st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
+
+def toggle_scanner_from_sidebar():
+    st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
+
+auto_scan_enabled = st.sidebar.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
+scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 1, 300, 3)
+max_spot_scan_pairs = st.sidebar.slider("🔍 Liczba par Spot", 5, 50, 15, 5)
+max_fut_scan_pairs = st.sidebar.slider("📈 Liczba par Futures", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
@@ -580,7 +588,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION
+# BOTS & LOGIC EXECUTION (POPRAWIONE Z WYŚWIETLANIEM BŁĘDÓW API)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -590,35 +598,49 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                 [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym and sym not in st.session_state.active_spot_trades],
                 key=lambda x: s_tickers[x].get("quoteVolume", 0), reverse=True
             )[:max_spot_scan_pairs]
-            if best_spot_candidates:
-                auto_bot_spot_coin = best_spot_candidates[0]
-                s_ohlcv = spot_ex.fetch_ohlcv(auto_bot_spot_coin, timeframe=spot_tf, limit=50)
-                s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
-                s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
+            
+            for auto_bot_spot_coin in best_spot_candidates:
+                if len(st.session_state.active_spot_trades) >= max_active_spot_positions:
+                    break
+                try:
+                    s_ohlcv = spot_ex.fetch_ohlcv(auto_bot_spot_coin, timeframe=spot_tf, limit=50)
+                    time.sleep(0.02)
+                    s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
+                    s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
 
-                c_macd = s_df["macd"].iloc[-1]
-                c_sig = s_df["signal"].iloc[-1]
-                c_price = s_df["close"].iloc[-1]
+                    c_macd = s_df["macd"].iloc[-1]
+                    c_sig = s_df["signal"].iloc[-1]
+                    c_price = s_df["close"].iloc[-1]
 
-                t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
-                if c_macd > c_sig and (time.time() - st.session_state.signal_cooldown.get(t_key, 0) > 60):
-                    budget = max(MIN_SPOT_TRADE, min(spot_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
-                    if budget >= MIN_SPOT_TRADE and budget <= spot_free:
-                        amount = budget / c_price
-                        spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
-                        st.session_state.active_spot_trades.add(auto_bot_spot_coin)
-                        st.session_state.signal_cooldown[t_key] = time.time()
-                        st.session_state.trade_history.insert(0, {
-                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": "BOT SPOT BUY",
-                            "Para": auto_bot_spot_coin,
-                            "Budżet": f"{budget:.2f} USDT",
-                            "Cena": f"{c_price:.4f}",
-                        })
-                        send_notification(f"🟢 [BOT SPOT] Zakup {auto_bot_spot_coin} za {budget:.1f} USDT")
-    except Exception:
-        pass
+                    t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
+                    if c_macd > c_sig and (time.time() - st.session_state.signal_cooldown.get(t_key, 0) > 60):
+                        budget = max(MIN_SPOT_TRADE, min(spot_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
+                        if budget >= MIN_SPOT_TRADE and budget <= spot_free:
+                            amount = budget / c_price
+                            
+                            # Wykonanie zlecenia z uwzględnieniem precyzji giełdy
+                            try:
+                                amount_prec = spot_ex.amount_to_precision(auto_bot_spot_coin, amount)
+                                spot_ex.create_market_buy_order(auto_bot_spot_coin, float(amount_prec))
+                            except Exception:
+                                spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
+
+                            st.session_state.active_spot_trades.add(auto_bot_spot_coin)
+                            st.session_state.signal_cooldown[t_key] = time.time()
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "BOT SPOT BUY",
+                                "Para": auto_bot_spot_coin,
+                                "Budżet": f"{budget:.2f} USDT",
+                                "Cena": f"{c_price:.4f}",
+                            })
+                            send_notification(f"🟢 [BOT SPOT] Zakup {auto_bot_spot_coin} za {budget:.1f} USDT")
+                            break
+                except Exception as inner_e:
+                    st.error(f"⚠️ Błąd bota Spot dla {auto_bot_spot_coin}: {inner_e}")
+    except Exception as e:
+        st.error(f"⚠️ Błąd pętli bota Spot: {e}")
 
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
@@ -690,7 +712,11 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             pass
 
                         contracts = (budget * bot_leverage) / f_price
-                        futures_ex.create_market_order(sym, side, contracts)
+                        try:
+                            contracts_prec = futures_ex.amount_to_precision(sym, contracts)
+                            futures_ex.create_market_order(sym, side, float(contracts_prec))
+                        except Exception:
+                            futures_ex.create_market_order(sym, side, contracts)
 
                         st.session_state.signal_cooldown[tf_key] = time.time()
                         st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
@@ -703,8 +729,8 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                             "Cena": f"{f_price:.4f}",
                         })
                         send_notification(f"🥾 [BOT] Otwarto {label} na {sym} ({bot_leverage}x)")
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"⚠️ Błąd pętli bota Futures: {e}")
 
 exchange_positions = {}
 if futures_ex:
@@ -716,7 +742,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES (PEŁNE STATUSY)
+# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES
 # =====================================================================
 st.markdown("---")
 st.subheader("🔥 Top 8 Par Spot (Skaner i Status Strategii)")
