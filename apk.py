@@ -614,9 +614,9 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                     s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
                     s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
 
-                    c_macd = s_df["macd"].iloc[-1]
-                    c_sig = s_df["signal"].iloc[-1]
-                    c_price = s_df["close"].iloc[-1]
+                    c_macd = float(s_df["macd"].iloc[-1])
+                    c_sig = float(s_df["signal"].iloc[-1])
+                    c_price = float(s_df["close"].iloc[-1])
 
                     t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
                     if c_macd > c_sig and (time.time() - st.session_state.signal_cooldown.get(t_key, 0) > 60):
@@ -625,11 +625,23 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                             amount = budget / c_price
                             
                             try:
-                                amount_prec = spot_ex.amount_to_precision(auto_bot_spot_coin, amount)
-                                # Przekazanie ceny (c_price) rozwiązuje problem błędu CCXT / Bitget
-                                spot_ex.create_market_buy_order(auto_bot_spot_coin, float(amount_prec), c_price)
+                                amount_prec = float(spot_ex.amount_to_precision(auto_bot_spot_coin, amount))
+                                # Bezpieczne wywołanie uniwersalnej metody create_order bez błędów mapowania
+                                spot_ex.create_order(
+                                    symbol=auto_bot_spot_coin,
+                                    type='market',
+                                    side='buy',
+                                    amount=amount_prec,
+                                    price=c_price
+                                )
                             except Exception:
-                                spot_ex.create_market_buy_order(auto_bot_spot_coin, amount, c_price)
+                                spot_ex.create_order(
+                                    symbol=auto_bot_spot_coin,
+                                    type='market',
+                                    side='buy',
+                                    amount=float(amount),
+                                    price=c_price
+                                )
 
                             st.session_state.active_spot_trades.add(auto_bot_spot_coin)
                             st.session_state.signal_cooldown[t_key] = time.time()
@@ -663,14 +675,14 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                     time.sleep(0.02)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
-                    f_vol = f_df["volatility_pct"].iloc[-1] if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
+                    f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
 
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-                    f_macd = f_df["macd"].iloc[-1]
-                    f_sig = f_df["signal"].iloc[-1]
-                    f_price = f_df["close"].iloc[-1]
+                    f_macd = float(f_df["macd"].iloc[-1])
+                    f_sig = float(f_df["signal"].iloc[-1])
+                    f_price = float(f_df["close"].iloc[-1])
 
                     signal_strength = abs(f_macd - f_sig) / f_price
                     side = "buy" if f_macd > f_sig else "sell"
@@ -718,10 +730,10 @@ if futures_ex and st.session_state.trend_bot_fut_active:
 
                         contracts = (budget * bot_leverage) / f_price
                         try:
-                            contracts_prec = futures_ex.amount_to_precision(sym, contracts)
-                            futures_ex.create_market_order(sym, side, float(contracts_prec))
+                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                            futures_ex.create_order(sym, 'market', side, contracts_prec)
                         except Exception:
-                            futures_ex.create_market_order(sym, side, contracts)
+                            futures_ex.create_order(sym, 'market', side, float(contracts))
 
                         st.session_state.signal_cooldown[tf_key] = time.time()
                         st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
@@ -772,7 +784,7 @@ if spot_ex:
                     s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
                     s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
-                    if s_df["macd"].iloc[-1] > s_df["signal"].iloc[-1]:
+                    if float(s_df["macd"].iloc[-1]) > float(s_df["signal"].iloc[-1]):
                         status_text = "⚡ Sygnał MACD (Kupno)"
                 except Exception:
                     pass
@@ -781,9 +793,9 @@ if spot_ex:
 
             spot_data_list.append({
                 "Para": sym,
-                "Cena": f"{t_data.get('last', 0):.4f}",
-                "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
+                "Cena": f"{float(t_data.get('last', 0)):.4f}",
+                "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
+                "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
                 "Strategia": "Spot Trend-Following (MACD)",
                 "Alokacja": f"{budget_val:.2f} USDT",
                 "Status Pozycji": status_text
@@ -821,7 +833,7 @@ if futures_ex:
             
             if pos:
                 side_val = pos.get("side", "").upper()
-                lev_val = f"{pos.get('leverage', 1)}x"
+                lev_val = f"{float(pos.get('leverage', 1))}x"
                 notional = float(pos.get("notional", 0))
                 lev = float(pos.get("leverage", 1))
                 margin = notional / lev if lev > 0 else 0
@@ -834,13 +846,13 @@ if futures_ex:
                     time.sleep(0.01)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
-                    f_vol = f_df["volatility_pct"].iloc[-1] if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
+                    f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
                     
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
                     
-                    f_macd = f_df["macd"].iloc[-1]
-                    f_sig = f_df["signal"].iloc[-1]
+                    f_macd = float(f_df["macd"].iloc[-1])
+                    f_sig = float(f_df["signal"].iloc[-1])
                     
                     side_val = "LONG" if f_macd > f_sig else "SHORT"
                     lev_num = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
@@ -854,9 +866,9 @@ if futures_ex:
 
             fut_data_list.append({
                 "Para": sym,
-                "Cena": f"{t_data.get('last', 0):.4f}",
-                "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}",
+                "Cena": f"{float(t_data.get('last', 0)):.4f}",
+                "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
+                "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
                 "Strategia": "Futures Trend-Following (MACD + EMA)",
                 "Strona": side_val,
                 "Dźwignia": lev_val,
