@@ -16,19 +16,12 @@ if "logged_in" not in st.session_state:
 
 
 # =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (AUTOMATYCZNE KLUCZE)
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
 # =====================================================================
-def get_exchange(market_type):
+def get_exchange(market_type, api_key, secret, passphrase):
+  if not api_key or not secret:
+    return None
   try:
-    api_key = st.secrets.get(
-        "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
-    )
-    secret = st.secrets.get(
-        "BITGET_SECRET_KEY",
-        "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
-    )
-    passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-
     ex_type = "spot" if market_type == "spot" else "swap"
     exchange = ccxt.bitget({
         "apiKey": api_key,
@@ -56,6 +49,12 @@ st.markdown(
     section[data-testid="stSidebar"] {
         background-color: #141110;
         border-right: 2px solid #3d2f1f;
+    }
+    
+    section[data-testid="stSidebar"] input {
+        background-color: #1e1814 !important;
+        color: #f3d57a !important;
+        border: 1px solid #f3d57a !important;
     }
     
     .hero-wrapper {
@@ -169,7 +168,7 @@ if not st.session_state.logged_in:
   st.stop()
 
 # =====================================================================
-# INICJALIZACJA CZASU SESJI
+# INICJALIZACJA CZASU SESJI (Zegar trwania)
 # =====================================================================
 if "session_start_time" not in st.session_state:
   st.session_state.session_start_time = datetime.now()
@@ -204,14 +203,49 @@ if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
 # =====================================================================
-# PANEL BOCZNY (BEZ WIDOCZNYCH PÓL KLUCZY API)
+# AUTORYZACIJA ADMINISTRATORA ORAZ UKRYWANIE PÓL API
 # =====================================================================
-with st.sidebar.container(border=True):
-  st.markdown("### 💎 Status Administratora")
-  st.success("✅ Autoryzacja aktywna (marekja57@wp.pl)")
+try:
+  admin_key_env = st.secrets.get(
+      "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
+  )
+  admin_sec_env = st.secrets.get(
+      "BITGET_SECRET_KEY",
+      "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
+  )
+  admin_passphrase_env = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
+except Exception:
+  admin_key_env = "bg_bad3414dc389df75aadc7794100d5c2"
+  admin_sec_env = (
+      "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
+  )
+  admin_passphrase_env = "Zostaw1260"
 
-spot_ex = get_exchange("spot")
-futures_ex = get_exchange("futures")
+with st.sidebar.container(border=True):
+  st.markdown("### 💎 Autoryzacja Administratora")
+  admin_input = st.text_input("Hasło dostępu / Administratora:")
+
+# Sprawdzamy czy wpisano Twój e-mail lub hasło administratora
+is_admin = admin_input.strip() in ["marekja57@wp.pl", "Zostaw1260"]
+
+if is_admin:
+  st.sidebar.success("✅ Autoryzacja administratora aktywna")
+  api_key_input = admin_key_env
+  secret_input = admin_sec_env
+  password_input = admin_passphrase_env
+else:
+  if admin_input:
+    st.sidebar.error("❌ Nieprawidłowy e-mail lub hasło administratora")
+  with st.sidebar.container(border=True):
+    st.markdown("### 🔑 Konfiguracja API Bitget")
+    api_key_input = st.text_input("API Key", type="password")
+    secret_input = st.text_input("Secret Key", type="password")
+    password_input = st.text_input("Passphrase", type="password")
+
+spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
+futures_ex = get_exchange(
+    "futures", api_key_input, secret_input, password_input
+)
 
 if futures_ex and not st.session_state.known_markets:
   try:
@@ -380,7 +414,7 @@ if futures_ex:
     pass
 
 # =====================================================================
-# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI
+# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI W ZŁOTYCH RAMKACH
 # =====================================================================
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -433,7 +467,7 @@ with col_clock:
 st.markdown("---")
 
 # =====================================================================
-# PANEL STEROWANIA BOTAMI
+# 🥾 GŁÓWNY PANEL STEROWANIA BOTAMI HANDLOWYMI
 # =====================================================================
 st.subheader(
     "🥾 Panel Sterowania Botami Trendowymi i Sniperem Nowych Par"
@@ -499,8 +533,7 @@ col_btn, col_status = st.columns([2, 1])
 with col_btn:
   if not st.session_state.scanner_active:
     if st.button(
-        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures +"
-        " Sniper)",
+        "🚀 Uruchom w pełni autonomiczny skaner non-stop (Spot + Futures + Sniper)",
         type="primary",
         use_container_width=True,
     ):
@@ -549,7 +582,7 @@ MIN_SPOT_TRADE = 5.0
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# MODUŁ: LISTING SNIPER
+# MODUŁ: LISTING SNIPER (Nowe tokeny: max 100 USDT, dźwignia dokładnie 2x)
 # =====================================================================
 if futures_ex and st.session_state.listing_sniper_active:
   try:
@@ -1307,7 +1340,7 @@ if (
 # =====================================================================
 # BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
 # =====================================================================
-user_subscribed = True # Administrator ma stały dostęp
+user_subscribed = is_admin or False
 
 if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
@@ -1330,5 +1363,9 @@ if not user_subscribed:
   )
   st.stop()
 else:
-  st.sidebar.markdown("---")
-  st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
+  if is_admin:
+    st.sidebar.markdown("---")
+    st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
+  else:
+    st.sidebar.markdown("---")
+    st.sidebar.success("✅ Subskrypcja SaaS Aktywna")
