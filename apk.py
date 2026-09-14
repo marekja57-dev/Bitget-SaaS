@@ -179,7 +179,9 @@ if "known_markets" not in st.session_state:
   st.session_state.known_markets = set()
 
 if "listing_sniper_active" not in st.session_state:
-  st.session_state.listing_sniper_active = True
+  st.session_state.listing_sniper_active = (
+      True # Domyślnie włączony (działa w tle)
+  )
 
 
 def get_exchange(ex_type, api_key="", secret="", password=""):
@@ -212,6 +214,39 @@ spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
 futures_ex = get_exchange(
     "futures", api_key_input, secret_input, password_input
 )
+
+# =====================================================================
+# INICJALIZACJA SESJI (BEZ WYŁĄCZANIA SNIPERA)
+# =====================================================================
+if "session_initialized" not in st.session_state:
+  st.session_state.session_initialized = True
+  st.session_state.scanner_active = False
+  st.session_state.trend_bot_spot_active = False
+  st.session_state.trend_bot_fut_active = False
+  # UWAGA: listing_sniper_active celowo NIE jest tu zerowany na False!
+  st.session_state.active_trades = {}
+
+  if futures_ex:
+    try:
+      open_orders = futures_ex.fetch_open_orders()
+      for order in open_orders:
+        try:
+          futures_ex.cancel_order(order["id"], order["symbol"])
+        except Exception:
+          pass
+    except Exception:
+      pass
+
+  if spot_ex:
+    try:
+      open_spot_orders = spot_ex.fetch_open_orders()
+      for order in open_spot_orders:
+        try:
+          spot_ex.cancel_order(order["id"], order["symbol"])
+        except Exception:
+          pass
+    except Exception:
+      pass
 
 if futures_ex and not st.session_state.known_markets:
   try:
@@ -279,9 +314,7 @@ with st.sidebar.container(border=True):
   leverage_mode = st.radio(
       "Tryb Dźwigni", ["🤖 Automatyczny (Sugerowany)", "🎛️ Ręczny"]
   )
-  manual_leverage = st.slider(
-      "Stała dźwignia Futures (Ręczna)", 1, 50, 5
-  )
+  manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 50, 5)
 
   st.markdown("---")
   st.markdown("### 🧠 Inteligentne Wyjście & Sygnały")
@@ -349,6 +382,9 @@ if emergency_kill:
   st.session_state.scanner_active = False
   st.session_state.trend_bot_spot_active = False
   st.session_state.trend_bot_fut_active = False
+  st.session_state.listing_sniper_active = (
+      False # Kill switch wyłącza też snajpera
+  )
   st.session_state.active_trades = {}
   st.session_state.signal_cooldown = {}
   send_notification(
@@ -517,8 +553,8 @@ with col_btn:
       st.rerun()
 
 with col_status:
-  if st.session_state.scanner_active:
-    st.success("🟢 STATUS: AKTYWNY (NON-STOP)")
+  if st.session_state.scanner_active or st.session_state.listing_sniper_active:
+    st.success("🟢 STATUS: AKTYWNY (W TLE)")
   else:
     st.error("🔴 STATUS: ZATRZYMANY")
 
@@ -639,7 +675,6 @@ if spot_ex and st.session_state.trend_bot_spot_active:
       c_price = s_df["close"].iloc[-1]
 
       t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
-      # Bezpiecznik czasowy cooldownu (min. 60 sekund między wejściami na tym samym instrumencie)
       last_action = st.session_state.signal_cooldown.get(t_key, 0)
       if c_macd > c_sig and (time.time() - last_action > 60):
         if spot_free >= MIN_SPOT_TRADE:
@@ -742,7 +777,6 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         tf_key = f"trend_bot_fut_{sym}"
         last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
 
-        # Blokada ponownego wejścia przez minimum 90 sekund od ostatniej akcji
         if (
             sym not in st.session_state.active_trades
             and (time.time() - last_action_time > 90)
@@ -790,7 +824,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA (Zabezpieczone przed szybkim pętlami)
+# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
@@ -847,7 +881,6 @@ if futures_ex and st.session_state.active_trades:
           except Exception:
             pass
           trades_to_remove.append(sym)
-          # Ustawiamy czas zamknięcia w cooldownie, aby bot nie otworzył pozycji ponownie natychmiast
           st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
@@ -1153,7 +1186,10 @@ if futures_ex:
 
           if st.session_state.scanner_active and is_futures_signal:
             if len(st.session_state.active_trades) >= max_active_futures_positions:
-              status = f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń osiągnięty"
+              status = (
+                  f"🛡️ Limit {max_active_futures_positions} aktywnych"
+                  " zleceń osiągnięty"
+              )
             elif is_in_cooldown or sym in st.session_state.active_trades:
               status = "🛡️ Cooldown / Pozycja aktywna"
             else:
@@ -1300,10 +1336,14 @@ if st.session_state.trade_history:
 else:
   st.info("Brak zarejestratowanych transakcji w tej sesji.")
 
+# =====================================================================
+# CIĄGŁA PĘTLA TŁA (Wymusza odświeżanie, jeśli skaner lub SNIPER jest aktywny)
+# =====================================================================
 if (
     st.session_state.scanner_active
     or st.session_state.trend_bot_spot_active
     or st.session_state.trend_bot_fut_active
+    or st.session_state.listing_sniper_active
 ):
   time.sleep(scan_interval)
   st.rerun()
