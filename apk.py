@@ -479,7 +479,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (IDEALNIE ZSYNCHRONIZOWANE)
+# GŁÓWNE KAFELKI (SYMERYCZNE DLA SPOT I FUTURES + WYNIKI + CZAS)
 # =====================================================================
 col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
 with col1:
@@ -496,9 +496,9 @@ with col2:
     )
 with col3:
     st.metric(
-        label="📊 Wyniki Futures (Niezrealizowane)", 
+        label="📊 Wyniki Futures (PnL)", 
         value=f"{total_unrealized_pnl:+.2f} USDT", 
-        delta=f"Aktywne: {active_positions_count} / {max_active_futures_positions}"
+        delta=f"Aktywne: {active_positions_count}/{max_active_futures_positions}"
     )
 with col_clock:
     elapsed = datetime.now() - st.session_state.session_start_time
