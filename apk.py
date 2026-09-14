@@ -260,7 +260,10 @@ def get_exchange(market_type):
             "secret": st.session_state.secret_key,
             "password": st.session_state.passphrase,
             "enableRateLimit": True,
-            "options": {"defaultType": ex_type},
+            "options": {
+                "defaultType": ex_type,
+                "createMarketBuyOrderRequiresPrice": False
+            },
         })
         return exchange
     except Exception:
@@ -588,7 +591,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION (POPRAWIONE Z WYŚWIETLANIEM BŁĘDÓW API)
+# BOTS & LOGIC EXECUTION
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -619,7 +622,6 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                         if budget >= MIN_SPOT_TRADE and budget <= spot_free:
                             amount = budget / c_price
                             
-                            # Wykonanie zlecenia z uwzględnieniem precyzji giełdy
                             try:
                                 amount_prec = spot_ex.amount_to_precision(auto_bot_spot_coin, amount)
                                 spot_ex.create_market_buy_order(auto_bot_spot_coin, float(amount_prec))
