@@ -255,7 +255,8 @@ with st.sidebar.container(border=True):
     base_allocation_pct = st.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
     max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
     
-    # ZAKTUALIZOWANE: Suwak pozycji futures do 20
+    # Limity liczby pozycji dla Spot oraz Futures
+    max_active_spot_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Spot", 1, 20, 5)
     max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 5)
 
     st.markdown("---")
@@ -295,7 +296,6 @@ with st.sidebar.container(border=True):
     st.checkbox("🎯 Listing Sniper (Max 50 USDT, lewar 2x)", key="listing_sniper_cb", on_change=toggle_listing_sniper)
 
     st.markdown("---")
-    # ZAKTUALIZOWANE: Zakres skanowania par do 50
     max_spot_scan_pairs = st.slider("🔍 Liczba par Spot do skanowania", 5, 50, 15, 5)
     max_fut_scan_pairs = st.slider("📈 Liczba par Futures do skanowania", 5, 50, 15, 5)
 
@@ -387,7 +387,7 @@ if futures_ex:
 
 col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
 with col1:
-    st.metric(label="🟢 Portfel Spot", value=f"{spot_free:.2f} USDT", delta=f"Całkowite: {spot_total:.2f} USDT")
+    st.metric(label="🟢 Portfel Spot", value=f"{spot_free:.2f} USDT", delta=f"Aktywne: {len(st.session_state.active_spot_trades)} / {max_active_spot_positions}")
 with col2:
     st.metric(label="🔵 Portfel Futures", value=f"{fut_free:.2f} USDT", delta=f"Całkowite: {fut_total:.2f} USDT")
 with col3:
@@ -494,18 +494,18 @@ if futures_ex and st.session_state.listing_sniper_active:
         pass
 
 # =====================================================================
-# OBSŁUGA BOTA SPOT
+# OBSŁUGA BOTA SPOT (Z UWZGLĘDNIENIEM LIMITU POZYCJI)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
-        s_tickers = spot_ex.fetch_tickers()
-        best_spot_candidates = sorted(
-            [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym],
-            key=lambda x: s_tickers[x].get("quoteVolume", 0), reverse=True
-        )[:max_spot_scan_pairs]
-        if best_spot_candidates:
-            auto_bot_spot_coin = best_spot_candidates[0]
-            if spot_free >= MIN_SPOT_TRADE and auto_bot_spot_coin not in st.session_state.active_spot_trades:
+        if len(st.session_state.active_spot_trades) < max_active_spot_positions and spot_free >= MIN_SPOT_TRADE:
+            s_tickers = spot_ex.fetch_tickers()
+            best_spot_candidates = sorted(
+                [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym and sym not in st.session_state.active_spot_trades],
+                key=lambda x: s_tickers[x].get("quoteVolume", 0), reverse=True
+            )[:max_spot_scan_pairs]
+            if best_spot_candidates:
+                auto_bot_spot_coin = best_spot_candidates[0]
                 s_ohlcv = spot_ex.fetch_ohlcv(auto_bot_spot_coin, timeframe=spot_tf, limit=50)
                 s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                 s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
@@ -678,7 +678,7 @@ if futures_ex and st.session_state.active_trades:
             del st.session_state.active_trades[r_sym]
 
 # =====================================================================
-# SKANER SPOT (ZWYKŁY + BOT TRENDOWY W TLE)
+# SKANER SPOT (Z UWZGLĘDNIENIEM LIMITU POZYCJI)
 # =====================================================================
 st.subheader("📊 Skaner Spot (Wyświetlane Top 8)")
 spot_results = []
@@ -712,6 +712,9 @@ if spot_ex:
             elif sym in st.session_state.active_spot_trades:
                 spot_display_str = f"{MIN_SPOT_TRADE:.1f} USDT"
                 status = "🛡️ Pozycja spot aktywna"
+            elif len(st.session_state.active_spot_trades) >= max_active_spot_positions:
+                spot_display_str = "0.0 USDT"
+                status = "🛡️ Limit pozycji Spot osiągnięty"
             else:
                 risk_mult = 0.5 if current_vol > 3.5 else 1.0
                 allocated_budget = max(MIN_SPOT_TRADE, min(spot_free * ((base_allocation_pct * risk_mult) / 100.0), max_single_trade_usdt))
@@ -725,21 +728,23 @@ if spot_ex:
                     spot_display_str = f"{allocated_budget:.1f} USDT"
                     status = "⏳ Oczekiwanie"
                     if st.session_state.scanner_active and is_spot_signal:
-                        try:
-                            current_price = df["close"].iloc[-1]
-                            spot_ex.create_market_buy_order(sym, allocated_budget / current_price)
-                            st.session_state.active_spot_trades.add(sym)
-                            st.session_state.trade_history.insert(0, {"Czas": time.strftime("%Y-%m-%d %H:%M:%S"), "Typ": "SPOT BUY", "Para": sym, "Budżet": f"{allocated_budget:.2f} USDT", "Cena": f"{current_price:.4f}"})
-                            status = "🚀 KUPIONO"
-                            send_notification(f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT")
-                        except Exception as ex:
-                            status = f"❌ Błąd: {ex}"
+                        if len(st.session_state.active_spot_trades) >= max_active_spot_positions:
+                            status = "🛡️ Limit pozycji osiągnięty"
+                        else:
+                            try:
+                                current_price = df["close"].iloc[-1]
+                                spot_ex.create_market_buy_order(sym, allocated_budget / current_price)
+                                st.session_state.active_spot_trades.add(sym)
+                                st.session_state.trade_history.insert(0, {"Czas": time.strftime("%Y-%m-%d %H:%M:%S"), "Typ": "SPOT BUY", "Para": sym, "Budżet": f"{allocated_budget:.2f} USDT", "Cena": f"{current_price:.4f}"})
+                                status = "🚀 KUPIONO"
+                                send_notification(f"🟢 [SPOT] Kupiono {sym} za {allocated_budget:.1f} USDT")
+                            except Exception as ex:
+                                status = f"❌ Błąd: {ex}"
 
             spot_results.append({"Para": sym, "Cena": f"{df['close'].iloc[-1]:.4f}", "Strategia": strat_name, "Alokacja": spot_display_str, "Status": status})
         except Exception:
             continue
     if spot_results:
-        # ZAKTUALIZOWANE: Wyświetlanie maksymalnie 8 wierszy
         st.dataframe(pd.DataFrame(spot_results[:8]), use_container_width=True)
 
 st.markdown("---")
@@ -780,6 +785,9 @@ if futures_ex:
             elif sym in st.session_state.active_trades:
                 fut_display_str = f"{MIN_FUT_TRADE:.1f} USDT"
                 status = "🛡️ Pozycja aktywna"
+            elif len(st.session_state.active_trades) >= max_active_futures_positions:
+                fut_display_str = "0.0 USDT"
+                status = "🛡️ Limit pozycji Futures osiągnięty"
             else:
                 risk_mult = 0.5 if current_vol > 3.5 else 1.0
                 allocated_budget = max(MIN_FUT_TRADE, min(fut_free * ((base_allocation_pct * risk_mult) / 100.0), max_single_trade_usdt))
@@ -812,7 +820,6 @@ if futures_ex:
         except Exception:
             continue
     if fut_results:
-        # ZAKTUALIZOWANE: Wyświetlanie maksymalnie 8 wierszy
         st.dataframe(pd.DataFrame(fut_results[:8]), use_container_width=True)
 
 st.markdown("---")
