@@ -267,9 +267,12 @@ with st.sidebar.container(border=True):
   base_allocation_pct = st.slider(
       "Bazowy kapitał na 1 pozycję (%)", 1, 50, 10
   )
-  # Zakres od 5.0 do 500.0+ USDT zgodnie z wymaganiem
   max_single_trade_usdt = st.number_input(
       "🛡️ Maksymalnie USDT na 1 pozycję (Ogólne)", 5.0, 5000.0, 50.0, 5.0
+  )
+  # PRZYWRÓCONY SUVAK: Maksymalna liczba aktywnych pozycji Futures
+  max_active_futures_positions = st.slider(
+      "📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 10
   )
 
   st.markdown("---")
@@ -411,7 +414,7 @@ with col3:
   st.metric(
       label="📊 Wyniki Futures (Niezrealizowane)",
       value=f"{total_unrealized_pnl:+.2f} USDT",
-      delta=f"Aktywne pozycje: {active_positions_count} / 10 max",
+      delta=f"Aktywne pozycje: {active_positions_count} / {max_active_futures_positions} max",
   )
 
 with col_clock:
@@ -668,7 +671,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_fut_active:
   try:
-    if len(st.session_state.active_trades) < 10:
+    if len(st.session_state.active_trades) < max_active_futures_positions:
       f_tickers = futures_ex.fetch_tickers()
       best_fut_candidates = sorted(
           [
@@ -714,10 +717,10 @@ if futures_ex and st.session_state.trend_bot_fut_active:
 
       top_signal_pairs = sorted(
           evaluated_pairs, key=lambda x: x["strength"], reverse=True
-      )[:5]
+      )[:max_active_futures_positions]
 
       for item in top_signal_pairs:
-        if len(st.session_state.active_trades) >= 10:
+        if len(st.session_state.active_trades) >= max_active_futures_positions:
           break
 
         sym = item["symbol"]
@@ -929,7 +932,6 @@ if spot_ex:
         prov_budget = spot_free * (calc_pct / 100.0)
         allocated_budget = min(prov_budget, max_single_trade_usdt)
 
-        # Inteligentna korekta dolnego progu (nie blokuje 4.9 USDT, jeśli są środki)
         if (
             allocated_budget < MIN_SPOT_TRADE
             and spot_free >= MIN_SPOT_TRADE
@@ -1111,7 +1113,6 @@ if futures_ex:
         prov_budget = fut_free * (calc_pct / 100.0)
         allocated_budget = min(prov_budget, max_single_trade_usdt)
 
-        # Inteligentna korekta dolnego progu (nie blokuje 4.9 USDT, jeśli są środki)
         if (
             allocated_budget < MIN_FUT_TRADE
             and fut_free >= MIN_FUT_TRADE
@@ -1131,8 +1132,8 @@ if futures_ex:
           )
 
           if st.session_state.scanner_active and is_futures_signal:
-            if len(st.session_state.active_trades) >= 10:
-              status = "🛡️ Limit 10 aktywnych zleceń osiągnięty"
+            if len(st.session_state.active_trades) >= max_active_futures_positions:
+              status = f"🛡️ Limit {max_active_futures_positions} aktywnych zleceń osiągnięty"
             elif already_processed_fut or sym in st.session_state.active_trades:
               status = "🛡️ Sygnał obsłużony"
             else:
@@ -1320,4 +1321,3 @@ if not user_subscribed:
   st.stop()
 else:
   st.sidebar.success("✅ Dostęp aktywny (Administrator)")
-
