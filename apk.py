@@ -254,7 +254,9 @@ with st.sidebar.container(border=True):
     allocation_mode = st.radio("Zarządzanie wielkością pozycji", ["🤖 Inteligentny Auto-Dobór (Zmienność + Siła)", "🎛️ Stały procent portfela"])
     base_allocation_pct = st.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
     max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
-    max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 10, 5)
+    
+    # ZAKTUALIZOWANE: Suwak pozycji futures do 20
+    max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 20, 5)
 
     st.markdown("---")
     st.markdown("### 🛡️ Opcjonalne Limity SL / TP")
@@ -293,8 +295,9 @@ with st.sidebar.container(border=True):
     st.checkbox("🎯 Listing Sniper (Max 50 USDT, lewar 2x)", key="listing_sniper_cb", on_change=toggle_listing_sniper)
 
     st.markdown("---")
-    max_spot_scan_pairs = st.slider("🔍 Liczba par Spot", 5, 30, 10, 5)
-    max_fut_scan_pairs = st.slider("📈 Liczba par Futures", 5, 30, 10, 5)
+    # ZAKTUALIZOWANE: Zakres skanowania par do 50
+    max_spot_scan_pairs = st.slider("🔍 Liczba par Spot do skanowania", 5, 50, 15, 5)
+    max_fut_scan_pairs = st.slider("📈 Liczba par Futures do skanowania", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
 with st.sidebar.container(border=True):
@@ -639,7 +642,6 @@ if futures_ex and st.session_state.active_trades:
                 else:
                     pct_change = ((entry_price - curr_price) / entry_price) * 100 * trade_info["leverage"]
 
-                # Warunek zamknięcia 1: Awaryjny SL / TP (jeśli włączony w panelu)
                 sl_triggered = False
                 tp_triggered = False
                 if enable_custom_sl_tp:
@@ -648,7 +650,6 @@ if futures_ex and st.session_state.active_trades:
                     elif pct_change >= custom_take_profit_pct:
                         tp_triggered = True
 
-                # Warunek zamknięcia 2: Zmiana trendu MACD
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -677,9 +678,9 @@ if futures_ex and st.session_state.active_trades:
             del st.session_state.active_trades[r_sym]
 
 # =====================================================================
-# SKANER SPOT
+# SKANER SPOT (ZWYKŁY + BOT TRENDOWY W TLE)
 # =====================================================================
-st.subheader("📊 Skaner Spot")
+st.subheader("📊 Skaner Spot (Wyświetlane Top 8)")
 spot_results = []
 if spot_ex:
     try:
@@ -738,14 +739,15 @@ if spot_ex:
         except Exception:
             continue
     if spot_results:
-        st.dataframe(pd.DataFrame(spot_results), use_container_width=True)
+        # ZAKTUALIZOWANE: Wyświetlanie maksymalnie 8 wierszy
+        st.dataframe(pd.DataFrame(spot_results[:8]), use_container_width=True)
 
 st.markdown("---")
 
 # =====================================================================
 # SKANER FUTURES
 # =====================================================================
-st.subheader("📈 Skaner Futures (Bezpieczna Dźwignia)")
+st.subheader("📈 Skaner Futures (Wyświetlane Top 8)")
 fut_results = []
 if futures_ex:
     try:
@@ -810,7 +812,8 @@ if futures_ex:
         except Exception:
             continue
     if fut_results:
-        st.dataframe(pd.DataFrame(fut_results), use_container_width=True)
+        # ZAKTUALIZOWANE: Wyświetlanie maksymalnie 8 wierszy
+        st.dataframe(pd.DataFrame(fut_results[:8]), use_container_width=True)
 
 st.markdown("---")
 st.subheader("📜 Dziennik Transakcji")
