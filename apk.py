@@ -14,27 +14,6 @@ st.set_page_config(
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
-
-# =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
-# =====================================================================
-def get_exchange(market_type, api_key, secret, passphrase):
-  if not api_key or not secret:
-    return None
-  try:
-    ex_type = "spot" if market_type == "spot" else "swap"
-    exchange = ccxt.bitget({
-        "apiKey": api_key,
-        "secret": secret,
-        "password": passphrase,
-        "enableRateLimit": True,
-        "options": {"defaultType": ex_type},
-    })
-    return exchange
-  except Exception:
-    return None
-
-
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
@@ -202,48 +181,32 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
-# =====================================================================
-# BEZPIECZNA AUTORYZACJA ADMINISTRATORA (HASŁO ZAMIAST JAWNEGO E-MAILA)
-# =====================================================================
-try:
-  admin_pass_env = st.secrets.get("ADMIN_PASSWORD", "Zostaw1260")
-  admin_key_env = st.secrets.get(
-      "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
-  )
-  admin_sec_env = st.secrets.get(
-      "BITGET_SECRET_KEY",
-      "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
-  )
-  admin_passphrase_env = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-except Exception:
-  admin_pass_env = "Zostaw1260"
-  admin_key_env = "bg_bad3414dc389df75aadc7794100d5c2"
-  admin_sec_env = "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
-  admin_passphrase_env = "Zostaw1260"
 
-with st.sidebar.container(border=True):
-  st.markdown("### 💎 Autoryzacja Administratora")
-  admin_password_input = st.text_input(
-      "Hasło dostępu / Administratora:", type="password"
-  )
+def get_exchange(ex_type, api_key="", secret="", password=""):
+  try:
+    config = {
+        "apiKey": api_key,
+        "secret": secret,
+        "password": password,
+        "enableRateLimit": True,
+        "headers": {"X-BH-SUBACCOUNT": ""},
+    }
+    if ex_type == "spot":
+      ex = ccxt.bitget(config)
+    else:
+      config["options"] = {"defaultType": "swap"}
+      ex = ccxt.bitget(config)
+    ex.load_markets()
+    return ex
+  except Exception as e:
+    return None
 
-is_admin = admin_password_input == admin_pass_env
-
-ADMIN_API_KEY = admin_key_env if is_admin else ""
-ADMIN_SECRET_KEY = admin_sec_env if is_admin else ""
-ADMIN_PASSPHRASE = admin_passphrase_env if is_admin else ""
 
 with st.sidebar.container(border=True):
   st.markdown("### 🔑 Konfiguracja API Bitget")
-  api_key_input = st.text_input(
-      "API Key", value=ADMIN_API_KEY, type="password"
-  )
-  secret_input = st.text_input(
-      "Secret Key", value=ADMIN_SECRET_KEY, type="password"
-  )
-  password_input = st.text_input(
-      "Passphrase", value=ADMIN_PASSPHRASE, type="password"
-  )
+  api_key_input = st.text_input("API Key", type="password")
+  secret_input = st.text_input("Secret Key", type="password")
+  password_input = st.text_input("Passphrase", type="password")
 
 spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
 futures_ex = get_exchange(
@@ -676,6 +639,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
       c_price = s_df["close"].iloc[-1]
 
       t_key = f"trend_bot_spot_{auto_bot_spot_coin}"
+      # Bezpiecznik czasowy cooldownu (min. 60 sekund między wejściami na tym samym instrumencie)
       last_action = st.session_state.signal_cooldown.get(t_key, 0)
       if c_macd > c_sig and (time.time() - last_action > 60):
         if spot_free >= MIN_SPOT_TRADE:
@@ -778,6 +742,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         tf_key = f"trend_bot_fut_{sym}"
         last_action_time = st.session_state.signal_cooldown.get(tf_key, 0)
 
+        # Blokada ponownego wejścia przez minimum 90 sekund od ostatniej akcji
         if (
             sym not in st.session_state.active_trades
             and (time.time() - last_action_time > 90)
@@ -825,7 +790,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
     pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA
+# SPRAWDZANIE SYGNALÓW DO ZAMKNIĘCIA (Zabezpieczone przed szybkim pętlami)
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
   trades_to_remove = []
@@ -882,6 +847,7 @@ if futures_ex and st.session_state.active_trades:
           except Exception:
             pass
           trades_to_remove.append(sym)
+          # Ustawiamy czas zamknięcia w cooldownie, aby bot nie otworzył pozycji ponownie natychmiast
           st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
           st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time()
           send_notification(
@@ -1343,14 +1309,22 @@ if (
   st.rerun()
 
 # =====================================================================
-# BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
+# PANEL SUBSKRYPCJI I ZABEZPIECZENIE SAAS
 # =====================================================================
-user_subscribed = is_admin or False
+my_admin_email = "marekja57@wp.pl"
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💎 Strefa SaaS")
+
+current_user_email = st.sidebar.text_input(
+    "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
+)
+
+is_owner = current_user_email == my_admin_email
+user_subscribed = is_owner or False
 
 if not user_subscribed:
   stripe_payment_link = "https://buy.stripe.com/00w0kecL1sfbck0c13oA00"
-  st.sidebar.markdown("---")
-  st.sidebar.markdown("### 💎 Strefa SaaS")
   st.sidebar.markdown(
       f"""
         <a href="{stripe_payment_link}" target="_blank">
@@ -1368,9 +1342,4 @@ if not user_subscribed:
   )
   st.stop()
 else:
-  if is_admin:
-    st.sidebar.markdown("---")
-    st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
-  else:
-    st.sidebar.markdown("---")
-    st.sidebar.success("✅ Subskrypcja SaaS Aktywna")
+  st.sidebar.success("✅ Dostęp aktywny (Administrator)")
