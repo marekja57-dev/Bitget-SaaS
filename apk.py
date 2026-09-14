@@ -88,13 +88,13 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     if "Ręczny" in mode:
         return int(manual_lev)
     if current_vol > 4.0:
-        return 2
-    elif current_vol > 2.5:
         return 3
-    elif current_vol > 1.2:
-        return 4
-    else:
+    elif current_vol > 2.5:
         return 5
+    elif current_vol > 1.2:
+        return 8
+    else:
+        return 10
 
 st.markdown(
     """
@@ -244,7 +244,7 @@ with st.sidebar.container(border=True):
 
     st.markdown("---")
     st.markdown("### ⚡ Zarządzanie Dźwignią (Bezpieczne)")
-    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Autonomiczny (Bezpieczny, max 5x)", "🎛️ Ręczny"])
+    leverage_mode = st.radio("Tryb Dźwigni", ["🤖 Autonomiczny (Bezpieczny, max 10x)", "🎛️ Ręczny"])
     manual_leverage = st.slider("Stała dźwignia Futures (Ręczna)", 1, 10, 3)
 
     st.markdown("---")
