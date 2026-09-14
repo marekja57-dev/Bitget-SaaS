@@ -174,29 +174,44 @@ if "known_markets" not in st.session_state:
     st.session_state.known_markets = set()
 if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
+if "admin_unlocked" not in st.session_state:
+    st.session_state.admin_unlocked = False
 
+# =====================================================================
+# BEZPIECZNY PANEL ADMINISTRATORA (CHRONIONY HASŁEM)
+# =====================================================================
 with st.sidebar.container(border=True):
-    st.markdown("### 💎 Status Administratora")
-    input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
-    input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
-    input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
-
-    if st.button("🚀 ZAPISZ I POŁĄCZ Z GIEŁDĄ", use_container_width=True):
-        if input_api and input_secret and input_pass:
-            st.session_state.api_key = input_api
-            st.session_state.secret_key = input_secret
-            st.session_state.passphrase = input_pass
-            save_credentials(input_api, input_secret, input_pass)
-            st.session_state.logged_in = True
-            st.success("✅ Połączenie z Bitget aktywne")
-            st.rerun()
-        else:
-            st.error("Wypełnij wszystkie pola.")
-
-    if st.session_state.logged_in:
-        st.success("✅ Status: Zalogowany")
+    st.markdown("### 💎 Strefa Administratora")
+    if not st.session_state.admin_unlocked:
+        admin_pin = st.text_input("Podaj PIN Administratora", type="password")
+        if st.button("🔓 ODBLOKUJ KLUCZE API", use_container_width=True):
+            if admin_pin == st.session_state.passphrase:
+                st.session_state.admin_unlocked = True
+                st.success("Odblokowano panel administratora!")
+                st.rerun()
+            else:
+                st.error("Nieprawidłowy PIN.")
     else:
-        st.warning("⚠️ Brak autoryzacji")
+        st.success("🔓 Panel Admina Odblokowany")
+        input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
+        input_secret = st.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
+        input_pass = st.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
+
+        if st.button("🚀 ZAPISZ KLUCZE", use_container_width=True):
+            if input_api and input_secret and input_pass:
+                st.session_state.api_key = input_api
+                st.session_state.secret_key = input_secret
+                st.session_state.passphrase = input_pass
+                save_credentials(input_api, input_secret, input_pass)
+                st.session_state.logged_in = True
+                st.success("✅ Zapisano klucze pomyślnie")
+                st.rerun()
+            else:
+                st.error("Wypełnij wszystkie pola.")
+        
+        if st.button("🔒 ZABLOKUJ WIDOK", use_container_width=True):
+            st.session_state.admin_unlocked = False
+            st.rerun()
 
 spot_ex = get_exchange("spot")
 futures_ex = get_exchange("futures")
@@ -240,6 +255,12 @@ with st.sidebar.container(border=True):
     base_allocation_pct = st.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
     max_single_trade_usdt = st.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
     max_active_futures_positions = st.slider("📈 Maksymalna liczba aktywnych pozycji Futures", 1, 10, 5)
+
+    st.markdown("---")
+    st.markdown("### 🛡️ Opcjonalne Limity SL / TP")
+    enable_custom_sl_tp = st.checkbox("Włącz awaryjne limity SL / TP (%)", value=False)
+    custom_stop_loss_pct = st.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5, disabled=not enable_custom_sl_tp)
+    custom_take_profit_pct = st.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15, disabled=not enable_custom_sl_tp)
 
     st.markdown("---")
     st.markdown("### ⚡ Zarządzanie Dźwignią (Bezpieczne)")
@@ -600,7 +621,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         pass
 
 # =====================================================================
-# SPRAWDZANIE SYGNAŁÓW DO ZAMKNIĘCIA (FUTURES)
+# SPRAWDZANIE SYGNAŁÓW DO ZAMKNIĘCIA (FUTURES) + OPCJONALNY SL/TP
 # =====================================================================
 if futures_ex and st.session_state.active_trades:
     trades_to_remove = []
@@ -618,6 +639,16 @@ if futures_ex and st.session_state.active_trades:
                 else:
                     pct_change = ((entry_price - curr_price) / entry_price) * 100 * trade_info["leverage"]
 
+                # Warunek zamknięcia 1: Awaryjny SL / TP (jeśli włączony w panelu)
+                sl_triggered = False
+                tp_triggered = False
+                if enable_custom_sl_tp:
+                    if pct_change <= -custom_stop_loss_pct:
+                        sl_triggered = True
+                    elif pct_change >= custom_take_profit_pct:
+                        tp_triggered = True
+
+                # Warunek zamknięcia 2: Zmiana trendu MACD
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -627,7 +658,7 @@ if futures_ex and st.session_state.active_trades:
                 except Exception:
                     signal_reversed = False
 
-                if signal_reversed:
+                if sl_triggered or tp_triggered or signal_reversed:
                     close_side = "sell" if side == "buy" else "buy"
                     try:
                         futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
@@ -635,7 +666,9 @@ if futures_ex and st.session_state.active_trades:
                         pass
                     trades_to_remove.append(sym)
                     st.session_state.signal_cooldown[f"fut_{sym}"] = time.time()
-                    send_notification(f"🔄 [WYJŚCIE] Zamknięto {sym} wg sygnału (Wynik: {pct_change:+.2f}%)")
+                    
+                    reason = "SL/TP" if (sl_triggered or tp_triggered) else "Sygnał Trendu"
+                    send_notification(f"🔄 [WYJŚCIE - {reason}] Zamknięto {sym} (Wynik: {pct_change:+.2f}%)")
     except Exception:
         pass
 
