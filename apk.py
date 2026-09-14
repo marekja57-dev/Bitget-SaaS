@@ -662,67 +662,64 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: TOP 8 PAR SPOT I FUTURES (SKANER NA PIERWSZYM PLANIE)
+# WIDOK NA ŻYWO: SKANER SPOT I SKANER FUTURES (JEDEN POD DRUGIM)
 # =====================================================================
 st.markdown("---")
-col_view1, col_view2 = st.columns(2)
+st.subheader("🔥 Top 8 Par Spot (Skaner)")
+if spot_ex:
+    try:
+        s_tickers = spot_ex.fetch_tickers()
+        top_spot_view = sorted(
+            [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym],
+            key=lambda x: s_tickers[x].get("quoteVolume", 0), reverse=True
+        )[:8]
+        spot_data_list = []
+        for sym in top_spot_view:
+            t_data = s_tickers.get(sym, {})
+            spot_data_list.append({
+                "Para": sym,
+                "Cena": f"{t_data.get('last', 0):.4f}",
+                "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
+                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
+            })
+        if spot_data_list:
+            st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
+        else:
+            st.info("Brak danych Spot do wyświetlenia.")
+    except Exception:
+        st.info("Błąd pobierania danych rynkowych Spot.")
+else:
+    st.info("Skonfiguruj klucze API Spot, aby widzieć skaner.")
 
-with col_view1:
-    st.subheader("🔥 Top 8 Par Spot (Skaner)")
-    if spot_ex:
-        try:
-            s_tickers = spot_ex.fetch_tickers()
-            top_spot_view = sorted(
-                [sym for sym, data in s_tickers.items() if any(sym.startswith(c + "/") for c in trusted_base_coins) and sym.endswith("/USDT") and "BULL" not in sym and "BEAR" not in sym],
-                key=lambda x: s_tickers[x].get("quoteVolume", 0), reverse=True
-            )[:8]
-            spot_data_list = []
-            for sym in top_spot_view:
-                t_data = s_tickers.get(sym, {})
-                spot_data_list.append({
-                    "Para": sym,
-                    "Cena": f"{t_data.get('last', 0):.4f}",
-                    "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                    "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
-                })
-            if spot_data_list:
-                st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
-            else:
-                st.info("Brak danych Spot do wyświetlenia.")
-        except Exception:
-            st.info("Błąd pobierania danych rynkowych Spot.")
-    else:
-        st.info("Skonfiguruj klucze API Spot, aby widzieć skaner.")
-
-with col_view2:
-    st.subheader("📈 Top 8 Par Futures (Skaner)")
-    if futures_ex:
-        try:
-            f_tickers = futures_ex.fetch_tickers()
-            top_fut_view = sorted(
-                [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
-                key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
-            )[:8]
-            fut_data_list = []
-            for sym in top_fut_view:
-                t_data = f_tickers.get(sym, {})
-                fut_data_list.append({
-                    "Para": sym,
-                    "Cena": f"{t_data.get('last', 0):.4f}",
-                    "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
-                    "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
-                })
-            if fut_data_list:
-                st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
-            else:
-                st.info("Brak danych Futures do wyświetlenia.")
-        except Exception:
-            st.info("Błąd pobierania danych rynkowych Futures.")
-    else:
-        st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
+st.markdown("---")
+st.subheader("📈 Top 8 Par Futures (Skaner)")
+if futures_ex:
+    try:
+        f_tickers = futures_ex.fetch_tickers()
+        top_fut_view = sorted(
+            [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
+            key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
+        )[:8]
+        fut_data_list = []
+        for sym in top_fut_view:
+            t_data = f_tickers.get(sym, {})
+            fut_data_list.append({
+                "Para": sym,
+                "Cena": f"{t_data.get('last', 0):.4f}",
+                "Zmiana 24h": f"{t_data.get('percentage', 0):+.2f}%",
+                "Wolumen (USDT)": f"{t_data.get('quoteVolume', 0):,.0f}"
+            })
+        if fut_data_list:
+            st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
+        else:
+            st.info("Brak danych Futures do wyświetlenia.")
+    except Exception:
+        st.info("Błąd pobierania danych rynkowych Futures.")
+else:
+    st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
 
 # =====================================================================
-# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (POD SKANEREM)
+# WIDOK AKTYWNYCH POZYCJI I PRZYPISANYCH BOTÓW (POD SKANERAMI)
 # =====================================================================
 st.markdown("---")
 st.subheader("⚡ Aktywne Pozycje, Dźwignia i Przypisane Boty (Na Żywo)")
@@ -740,7 +737,6 @@ if futures_ex:
                 lev = p.get("leverage", 1)
                 pnl = float(p.get("unrealizedPnl", 0))
                 
-                # Określenie bota / źródła i statusu
                 bot_source = "🤖 Bot Futures Trendowy" if sym in st.session_state.active_trades else "👤 Pozycja Ręczna / Inna"
                 
                 active_pos_list.append({
