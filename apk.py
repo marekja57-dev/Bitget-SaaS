@@ -14,6 +14,27 @@ st.set_page_config(
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
+
+# =====================================================================
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
+# =====================================================================
+def get_exchange(market_type, api_key, secret, passphrase):
+  if not api_key or not secret:
+    return None
+  try:
+    ex_type = "spot" if market_type == "spot" else "swap"
+    exchange = ccxt.bitget({
+        "apiKey": api_key,
+        "secret": secret,
+        "password": passphrase,
+        "enableRateLimit": True,
+        "options": {"defaultType": ex_type},
+    })
+    return exchange
+  except Exception:
+    return None
+
+
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
@@ -194,7 +215,7 @@ with st.sidebar.container(border=True):
 
 is_admin = current_user_email.strip().lower() == my_admin_email
 
-# Definicja kluczy automatycznych tylko dla administratora
+# Klucze automatyczne TYLKO DLA ADMINA, dla reszty puste pola do wpisania
 ADMIN_API_KEY = (
     "bg_bad3414dc389df75aadc7794100d5c2" if is_admin else ""
 )
@@ -1317,7 +1338,7 @@ if (
   st.rerun()
 
 # =====================================================================
-# BLOKADA DOSTĘPU DLA SUBSRYKSENTÓW (PAYWALL SAAS)
+# BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
 # =====================================================================
 user_subscribed = is_admin or False
 
