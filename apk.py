@@ -262,7 +262,9 @@ def get_exchange(market_type):
             "enableRateLimit": True,
             "options": {
                 "defaultType": ex_type,
-                "createMarketBuyOrderRequiresPrice": False
+                "createOrder": {
+                    "createMarketBuyOrderRequiresPrice": False
+                }
             },
         })
         return exchange
@@ -624,9 +626,10 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                             
                             try:
                                 amount_prec = spot_ex.amount_to_precision(auto_bot_spot_coin, amount)
-                                spot_ex.create_market_buy_order(auto_bot_spot_coin, float(amount_prec))
+                                # Przekazanie ceny (c_price) rozwiązuje problem błędu CCXT / Bitget
+                                spot_ex.create_market_buy_order(auto_bot_spot_coin, float(amount_prec), c_price)
                             except Exception:
-                                spot_ex.create_market_buy_order(auto_bot_spot_coin, amount)
+                                spot_ex.create_market_buy_order(auto_bot_spot_coin, amount, c_price)
 
                             st.session_state.active_spot_trades.add(auto_bot_spot_coin)
                             st.session_state.signal_cooldown[t_key] = time.time()
