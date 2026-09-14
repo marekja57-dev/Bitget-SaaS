@@ -14,27 +14,6 @@ st.set_page_config(
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
-
-# =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT
-# =====================================================================
-def get_exchange(market_type, api_key, secret, passphrase):
-  if not api_key or not secret:
-    return None
-  try:
-    ex_type = "spot" if market_type == "spot" else "swap"
-    exchange = ccxt.bitget({
-        "apiKey": api_key,
-        "secret": secret,
-        "password": passphrase,
-        "enableRateLimit": True,
-        "options": {"defaultType": ex_type},
-    })
-    return exchange
-  except Exception:
-    return None
-
-
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
 # =====================================================================
@@ -203,35 +182,28 @@ if "listing_sniper_active" not in st.session_state:
   st.session_state.listing_sniper_active = True
 
 # =====================================================================
-# BEZPIECZNA AUTORYZACJA ADMINISTRATORA (HASŁO ZAMIAST JAWNEGO E-MAILA)
+# PANEL WERYFIKACJI / SAAS NA GÓRZE PASEK BOCZNY (AUTOMATYZACJA DLA ADMINA)
 # =====================================================================
-try:
-  admin_pass_env = st.secrets.get("ADMIN_PASSWORD", "Zostaw1260")
-  admin_key_env = st.secrets.get(
-      "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
-  )
-  admin_sec_env = st.secrets.get(
-      "BITGET_SECRET_KEY",
-      "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
-  )
-  admin_passphrase_env = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-except Exception:
-  admin_pass_env = "Zostaw1260"
-  admin_key_env = "bg_bad3414dc389df75aadc7794100d5c2"
-  admin_sec_env = "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
-  admin_passphrase_env = "Zostaw1260"
+my_admin_email = "marekja57@wp.pl"
 
 with st.sidebar.container(border=True):
-  st.markdown("### 💎 Autoryzacja Administratora")
-  admin_password_input = st.text_input(
-      "Hasło dostępu / Administratora:", type="password"
+  st.markdown("### 💎 Weryfikacja Użytkownika")
+  current_user_email = st.text_input(
+      "Twój e-mail (weryfikacja dostępu):", "marekja57@wp.pl"
   )
 
-is_admin = admin_password_input == admin_pass_env
+is_admin = current_user_email.strip().lower() == my_admin_email
 
-ADMIN_API_KEY = admin_key_env if is_admin else ""
-ADMIN_SECRET_KEY = admin_sec_env if is_admin else ""
-ADMIN_PASSPHRASE = admin_passphrase_env if is_admin else ""
+# Definicja kluczy automatycznych tylko dla administratora
+ADMIN_API_KEY = (
+    "bg_bad3414dc389df75aadc7794100d5c2" if is_admin else ""
+)
+ADMIN_SECRET_KEY = (
+    "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902"
+    if is_admin
+    else ""
+)
+ADMIN_PASSPHRASE = "Zostaw1260" if is_admin else ""
 
 with st.sidebar.container(border=True):
   st.markdown("### 🔑 Konfiguracja API Bitget")
@@ -245,7 +217,9 @@ with st.sidebar.container(border=True):
       "Passphrase", value=ADMIN_PASSPHRASE, type="password"
   )
 
-spot_ex = get_exchange("spot", api_key_input, secret_input, password_input)
+spot_ex = get_exchange(
+    "spot", api_key_input, secret_input, password_input
+)
 futures_ex = get_exchange(
     "futures", api_key_input, secret_input, password_input
 )
@@ -1343,7 +1317,7 @@ if (
   st.rerun()
 
 # =====================================================================
-# BLOKADA DOSTĘPU DLA SUBSKRYBENTÓW (PAYWALL SAAS)
+# BLOKADA DOSTĘPU DLA SUBSRYKSENTÓW (PAYWALL SAAS)
 # =====================================================================
 user_subscribed = is_admin or False
 
