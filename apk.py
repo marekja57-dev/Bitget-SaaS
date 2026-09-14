@@ -8,13 +8,15 @@ import streamlit as st
 # KONFIGURACJA STRONY I STYLIZACJA RETRO-VINTAGE
 # ==========================================
 st.set_page_config(
-    page_title="Bitget SAS - Terminal", page_icon="🛡️", layout="wide"
+    page_title="Bitget SAS - Profesjonalny Terminal Autonomiczny",
+    page_icon="⚡",
+    layout="wide",
 )
 
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Special+Elite&display=swap');
 
     .main { background-color: #0e1117; color: #e6e6e6; }
     .stButton>button { background-color: #d4af37; color: #000000; font-weight: bold; border-radius: 4px; border: none; }
@@ -22,61 +24,23 @@ st.markdown(
     .metric-card { background-color: #1a1c23; border: 1px solid #d4af37; padding: 15px; border-radius: 6px; margin-bottom: 10px; }
     .stAlert { background-color: #161b22; color: #e6e6e6; border: 1px solid #30363d; }
     
-    /* Złote ramki dla pól API i selectboksów */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"] {
-        border: 1px solid #d4af37 !important;
-        border-radius: 4px !important;
-        background-color: #161b22 !important;
-    }
-
-    /* Ekskluzywny ekran powitalny w stylu retro / Art Deco */
-    .retro-welcome-box {
-        background: linear-gradient(135deg, #12141c 0%, #1a1c24 100%);
-        border: 4px double #d4af37;
-        padding: 50px 30px;
-        text-align: center;
-        border-radius: 10px;
-        box-shadow: 0 0 35px rgba(212, 175, 55, 0.35);
-        margin: 50px auto;
-        max-width: 900px;
-    }
-    .retro-welcome-title {
-        font-family: 'Cinzel Decorative', Georgia, serif;
-        color: #d4af37;
-        font-size: 52px;
-        font-weight: 700;
-        letter-spacing: 8px;
-        text-shadow: 3px 3px 6px rgba(0,0,0,0.9);
-        margin-bottom: 15px;
-        text-transform: uppercase;
-    }
-    .retro-welcome-subtitle {
-        font-family: 'Playfair Display', serif;
-        color: #c5c6c7;
-        font-style: italic;
-        font-size: 22px;
-        letter-spacing: 3px;
-        margin-bottom: 30px;
-    }
-
-    /* Baner w głównym panelu */
-    .retro-banner {
-        background-color: #12141c;
-        border: 3px solid #d4af37;
-        padding: 15px;
-        text-align: center;
-        border-radius: 6px;
-        box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
-        margin-bottom: 20px;
-    }
     .retro-title {
-        font-family: 'Cinzel Decorative', Georgia, serif;
-        color: #d4af37;
-        font-size: 32px;
-        font-weight: bold;
-        letter-spacing: 4px;
-        text-transform: uppercase;
-        margin: 0;
+        font-family: 'Special Elite', cursive, monospace;
+        color: #2ecc71;
+        text-align: center;
+        font-size: 3.5rem;
+        letter-spacing: 2px;
+        margin-bottom: 0px;
+        text-shadow: 0 0 12px rgba(46, 204, 113, 0.4);
+    }
+    
+    .retro-subtitle {
+        font-family: 'Special Elite', cursive, monospace;
+        color: #d1d5db;
+        text-align: center;
+        font-size: 1.2rem;
+        margin-top: 5px;
+        margin-bottom: 25px;
     }
     </style>
 """,
@@ -84,613 +48,345 @@ st.markdown(
 )
 
 # ==========================================
-# INICJALIZACJA STANÓW SESJI I ROZPOZNAWANIE ADMINA PO IP
+# INICJALIZACIJA STANU SESJI
 # ==========================================
-if "page" not in st.session_state:
-  st.session_state.page = "welcome" # Domyślnie startujemy od ekranu powitalnego
 if "bot_active" not in st.session_state:
-  st.session_state.bot_active = False
+    st.session_state.bot_active = False
 if "trade_history" not in st.session_state:
-  st.session_state.trade_history = []
+    st.session_state.trade_history = []
 if "position_timers" not in st.session_state:
-  st.session_state.position_timers = {}
-if (
-    "session_start_time" not in st.session_state
-    or not isinstance(st.session_state.session_start_time, (int, float))
-):
-  st.session_state.session_start_time = time.time()
-if "top_spot_cache" not in st.session_state:
-  st.session_state.top_spot_cache = []
-if "top_swap_cache" not in st.session_state:
-  st.session_state.top_swap_cache = []
-
-# Bezpieczne pobieranie IP klienta z nagłówków proxy serwera (Hetzner)
-try:
-  headers = st.context.headers
-  client_ip = (
-      headers.get("X-Forwarded-For", "").split(",")[0].strip()
-      or headers.get("X-Real-IP", "127.0.0.1")
-  )
-except Exception:
-  client_ip = "127.0.0.1"
-
-# Weryfikacja czy to administrator po adresie IP
-admin_saved_ip = (
-    st.secrets.get("ADMIN_IP", "127.0.0.1")
-    if "ADMIN_IP" in st.secrets
-    else "127.0.0.1"
-)
-is_admin_ip = client_ip == admin_saved_ip
-
-if is_admin_ip:
-  admin_default_key = st.secrets.get("ADMIN_API_KEY", "")
-  admin_default_secret = st.secrets.get("ADMIN_API_SECRET", "")
-  admin_default_password = st.secrets.get("ADMIN_API_PASSWORD", "")
-else:
-  admin_default_key = ""
-  admin_default_secret = ""
-  admin_default_password = ""
-
-# ==========================================
-# PANEL BOCZNY - BITGET SAS CONTROL & SECURITY
-# ==========================================
-st.sidebar.title("🛡️ Bitget SAS Control")
-if is_admin_ip:
-  st.sidebar.success("👑 Zalogowano jako Administrator (Auto-IP)")
-
-api_key = st.sidebar.text_input(
-    "API Key", value=admin_default_key, type="password"
-)
-api_secret = st.sidebar.text_input(
-    "API Secret", value=admin_default_secret, type="password"
-)
-api_password = st.sidebar.text_input(
-    "API Password (Passphrase)", value=admin_default_password, type="password"
-)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Parametry Rynku i Skanera")
-market_type = st.sidebar.selectbox(
-    "Główny Typ Rynku (do bota)", ["swap", "spot"], index=0
-)
-tf = st.sidebar.selectbox(
-    "Interwał Analityczny", ["5m", "15m", "1h", "4h"], index=1
-)
-
-scan_breadth = st.sidebar.slider(
-    "Szerokość skanowania rynku (liczba par)", 10, 50, 20, step=5
-)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("💰 Zarządzanie Ryzykiem i Kapitałem")
-
-max_open_trades = st.sidebar.slider(
-    "Maks. liczba otwartych pozycji jednocześnie", 0, 50, 5, step=1
-)
-risk_pct_per_trade = (
-    st.sidebar.slider("Alokacja kapitału z konta na pozycję (%)", 1.0, 25.0, 10.0, 1.0)
-    / 100.0
-)
-use_dynamic_leverage = st.sidebar.checkbox(
-    "Włącz analityczny dobór dźwigni (Smart Leverage)", value=True
-)
-max_allowed_leverage = st.sidebar.slider(
-    "Maksymalna dozwolona dźwignia", 1, 20, 10
-)
-
-use_sltp = st.sidebar.checkbox("Włącz ochronę Stop Loss / Take Profit", value=True)
-stop_loss_pct = (
-    st.sidebar.slider("Stop Loss (%)", 0.5, 5.0, 1.5, 0.1) / 100.0
-)
-take_profit_pct = (
-    st.sidebar.slider("Take Profit (%)", 1.0, 20.0, 3.0, 0.5) / 100.0
-)
-min_hold_seconds = st.sidebar.number_input(
-    "Min. czas trzymania pozycji (Cooldown w sek.)", value=300, step=60
-)
-
-st.sidebar.markdown("---")
-
-if st.sidebar.button("🚨 KILL SWITCH (Zamknij wszystko)", type="primary"):
-  st.session_state.bot_active = False
-  if api_key and api_secret and api_password:
-    try:
-      temp_exchange = ccxt.bitget({
-          "apiKey": api_key,
-          "secret": api_secret,
-          "password": api_password,
-          "enableRateLimit": True,
-          "options": {"defaultType": market_type},
-      })
-      temp_exchange.load_markets()
-      positions = temp_exchange.fetch_positions()
-      for pos in positions:
-        if float(pos.get("contracts", 0)) > 0:
-          sym = pos["symbol"]
-          side_to_close = "sell" if pos["side"] == "long" else "buy"
-          temp_exchange.create_market_order(
-              sym, side_to_close, pos["contracts"], {"reduceOnly": True}
-          )
-      st.sidebar.success("Awaryjnie zamknięto wszystkie otwarte pozycje!")
-      st.session_state.trade_history.append(
-          f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 KILL SWITCH wykonany."
-      )
-    except Exception as e:
-      st.sidebar.error(f"Błąd Kill Switch: {e}")
-
-# ==========================================
-# PANEL PŁATNOŚCI I SUBSKRYPCJI W BOCZNYM PANELU (Bardzo widoczny)
-# ==========================================
-st.sidebar.markdown("---")
-st.sidebar.subheader("💳 Strefa Subskrypcji (49 PLN)")
-st.sidebar.markdown(
-    "Aktywuj pełny dostęp do autonomicznego terminala inwestycyjnego."
-)
-
-stripe_payment_link = "https://buy.stripe.com/test_placeholder_link_49zl"
-st.sidebar.markdown(
-    f"""
-    <a href="{stripe_payment_link}" target="_blank">
-        <button style="background-color: #d4af37; color: #000000; padding: 14px 20px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; box-shadow: 0 4px 10px rgba(212,175,55,0.3);">
-            💳 Opłać Subskrypcję (49 PLN)
-        </button>
-    </a>
-    """,
-    unsafe_allow_html=True,
-)
-
+    st.session_state.position_timers = {}
+if "nav_to_panel" not in st.session_state:
+    st.session_state.nav_to_panel = False
 
 # ==========================================
 # FUNKCJE ANALITYCZNE I GIEŁDOWE
 # ==========================================
 def init_exchange(k, s, p, m_type):
-  exchange = ccxt.bitget({
-      "apiKey": k,
-      "secret": s,
-      "password": p,
-      "enableRateLimit": True,
-      "options": {"defaultType": m_type},
-  })
-  return exchange
+    exchange = ccxt.bitget({
+        "apiKey": k,
+        "secret": s,
+        "password": p,
+        "enableRateLimit": True,
+        "options": {"defaultType": m_type},
+    })
+    return exchange
 
+def get_top_volume_pairs(exchange, limit=10, m_type="swap"):
+    """Inteligentny skaner wyszukujący najbardziej płynne pary na giełdzie"""
+    try:
+        exchange.load_markets()
+        tickers = exchange.fetch_tickers()
+        valid_pairs = []
 
-def get_account_balance(exchange):
-  try:
-    balance = exchange.fetch_balance()
-    free_usdt = balance.get("free", {}).get("USDT", 0.0)
-    total_usdt = balance.get("total", {}).get("USDT", 0.0)
-    return float(free_usdt), float(total_usdt)
-  except Exception:
-    return 0.0, 0.0
+        for symbol, ticker in tickers.items():
+            if "/USDT" in symbol or "/USDT:USDT" in symbol:
+                if m_type == "swap" and ":USDT" not in symbol:
+                    continue
+                quote_volume = ticker.get("quoteVolume", 0) or 0
+                valid_pairs.append({"symbol": symbol, "volume": quote_volume})
 
-
-def calculate_dynamic_leverage(df, max_lev):
-  try:
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift()).abs()
-    low_close = (df["low"] - df["close"].shift()).abs()
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = ranges.max(axis=1)
-    atr = true_range.rolling(14).mean().iloc[-1]
-    price = df["close"].iloc[-1]
-    volatility_pct = (atr / price) * 100
-
-    if volatility_pct < 0.5:
-      calculated = max_lev
-    elif volatility_pct < 1.5:
-      calculated = max_lev * 0.7
-    else:
-      calculated = max_lev * 0.4
-
-    return max(1, int(calculated))
-  except Exception:
-    return 3
-
-
-def get_top_volume_pairs(exchange, limit=20, m_type="swap"):
-  try:
-    exchange.load_markets()
-    tickers = exchange.fetch_tickers()
-    valid_pairs = []
-    for symbol, ticker in tickers.items():
-      if "/USDT" in symbol or "/USDT:USDT" in symbol:
-        if m_type == "swap" and ":USDT" not in symbol:
-          continue
-        if m_type == "spot" and ":USDT" in symbol:
-          continue
-        quote_volume = ticker.get("quoteVolume", 0) or 0
-        last_price = ticker.get("last", 0) or 0
-        valid_pairs.append({
-            "symbol": symbol,
-            "volume": quote_volume,
-            "price": last_price,
-        })
-    valid_pairs = sorted(valid_pairs, key=lambda x: x["volume"], reverse=True)
-    return valid_pairs[:limit]
-  except Exception:
-    return []
-
+        valid_pairs = sorted(valid_pairs, key=lambda x: x["volume"], reverse=True)
+        return [item["symbol"] for item in valid_pairs[:limit]]
+    except Exception as e:
+        st.error(f"Błąd skanowania par rynkowych: {e}")
+        return []
 
 def analyze_market_conditions(exchange, symbol, timeframe):
-  try:
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
-    df = pd.DataFrame(
-        ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-    )
-    df["EMA9"] = df["close"].ewm(span=9, adjust=False).mean()
-    df["EMA21"] = df["close"].ewm(span=21, adjust=False).mean()
-    df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
-
-    ema12 = df["close"].ewm(span=12, adjust=False).mean()
-    ema26 = df["close"].ewm(span=26, adjust=False).mean()
-    df["macd"] = ema12 - ema26
-    df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    return df
-  except Exception:
-    return None
-
-
-# ==========================================
-# RUTER STRON (WELCOME SCREEN VS MAIN TERMINAL)
-# ==========================================
-if st.session_state.page == "welcome":
-  # ==========================================
-  # STRONA STARTOWA (WELCOME SCREEN)
-  # ==========================================
-  st.markdown(
-      """
-        <div class="retro-welcome-box">
-            <h1 class="retro-welcome-title">BITGET SAS</h1>
-            <p class="retro-welcome-subtitle">Autonomiczny Terminal Inwestycyjny & Algorytmiczny Skaner Rynkowy</p>
-            <p style="color: #888; font-size: 15px; margin-bottom: 25px;">Zarządzaj swoimi inwestycjami na rynkach Spot i Futures z najwyższą precyzją.</p>
-        </div>
-    """,
-      unsafe_allow_html=True,
-  )
-
-  col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-  with col_btn2:
-    if st.button(
-        "🚀 WEJDŹ DO TERMINALA", type="primary", use_container_width=True
-    ):
-      st.session_state.page = "app"
-      st.rerun()
-
-else:
-  # ==========================================
-  # GŁÓWNY TERMINAL HANDLOWY
-  # ==========================================
-  col_top_nav1, col_top_nav2 = st.columns([8, 2])
-  with col_top_nav2:
-    if st.button("⬅ Wróć do ekranu powitalnego", use_container_width=True):
-      st.session_state.page = "welcome"
-      st.rerun()
-
-  st.markdown(
-      """
-        <div class="retro-banner">
-            <h1 class="retro-title">BITGET SAS</h1>
-        </div>
-    """,
-      unsafe_allow_html=True,
-  )
-
-  free_bal, total_bal = 0.0, 0.0
-  if api_key and api_secret and api_password:
+    """Pobiera dane OHLCV i oblicza wskaźniki (EMA + MACD) dla oceny trendu"""
     try:
-      tmp_ex = init_exchange(api_key, api_secret, api_password, market_type)
-      free_bal, total_bal = get_account_balance(tmp_ex)
-    except Exception:
-      pass
-
-  try:
-    session_uptime = int(
-        time.time() - float(st.session_state.session_start_time)
-    )
-  except Exception:
-    st.session_state.session_start_time = time.time()
-    session_uptime = 0
-
-  hours, remainder = divmod(session_uptime, 3600)
-  minutes, seconds = divmod(remainder, 60)
-  uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-  # Kafelki metryk
-  col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-  with col_m1:
-    st.markdown(
-        f"""<div class="metric-card"><h4>Status</h4><p style="color: {'#2ecc71' if st.session_state.bot_active else '#e74c3c'}; font-weight: bold; font-size: 16px;">{'🟢 AKTYWNY' if st.session_state.bot_active else '🔴 ZATRZYMANY'}</p></div>""",
-        unsafe_allow_html=True,
-    )
-  with col_m2:
-    st.markdown(
-        f"""<div class="metric-card"><h4>Wolne Środki</h4><p style="font-size: 16px; font-weight: bold; color: #d4af37;">{free_bal:,.2f} USDT</p></div>""",
-        unsafe_allow_html=True,
-    )
-  with col_m3:
-    st.markdown(
-        f"""<div class="metric-card"><h4>Całkowity Kapitał</h4><p style="font-size: 16px; font-weight: bold;">{total_bal:,.2f} USDT</p></div>""",
-        unsafe_allow_html=True,
-    )
-  with col_m4:
-    st.markdown(
-        f"""<div class="metric-card"><h4>Typ Rynku</h4><p style="font-size: 16px; font-weight: bold; color: #d4af37;">{market_type.upper()}</p></div>""",
-        unsafe_allow_html=True,
-    )
-  with col_m5:
-    st.markdown(
-        f"""<div class="metric-card"><h4>Zegar Sesji</h4><p style="font-size: 16px; font-weight: bold; color: #2ecc71;">{uptime_str}</p></div>""",
-        unsafe_allow_html=True,
-    )
-
-  c_start, c_stop = st.columns(2)
-  with c_start:
-    if st.button(
-        "▶ Uruchom w Pełnym Autopilocie",
-        type="primary",
-        use_container_width=True,
-    ):
-      if not api_key or not api_secret or not api_password:
-        st.error("Uzupełnij dane dostępowe API w panelu bocznym.")
-      else:
-        st.session_state.bot_active = True
-        st.success("Autopilot został włączony. System działa w tle.")
-  with c_stop:
-    if st.button("⏹ Zatrzymaj Autopilot", use_container_width=True):
-      st.session_state.bot_active = False
-      st.warning("Zatrzymano działanie autopilota.")
-
-  st.markdown("---")
-
-  if api_key and api_secret and api_password:
-    try:
-      exchange = init_exchange(api_key, api_secret, api_password, market_type)
-
-      tab1, tab2, tab3 = st.tabs([
-          "📊 Tabele Top 10 (Spot & Futures) i Skaner",
-          "📜 Dziennik Zdarzeń SAS",
-          "⚙️ Status Połączenia",
-      ])
-
-      with tab1:
-        st.subheader("Tablica Najlepszych Par Rynkowych (Top 10)")
-        st.markdown(
-            "Poniżej prezentujemy niezależne zestawienia Top 10 par dla obu"
-            " rynków: **Spot** oraz **Futures (Swap)**."
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
+        df = pd.DataFrame(
+            ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
 
-        run_cycle = st.button(
-            "🔄 Odśwież Skan i Wykonaj Cykl Handlowy",
-            type="primary",
-            use_container_width=True,
-        )
+        df["EMA9"] = df["close"].ewm(span=9, adjust=False).mean()
+        df["EMA21"] = df["close"].ewm(span=21, adjust=False).mean()
+        df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
 
-        col_table_spot, col_table_swap = st.columns(2)
+        ema12 = df["close"].ewm(span=12, adjust=False).mean()
+        ema26 = df["close"].ewm(span=26, adjust=False).mean()
+        df["macd"] = ema12 - ema26
+        df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-        if st.session_state.bot_active or run_cycle:
-          with st.spinner(
-              "Skanowanie rynków Spot i Futures, pobieranie danych..."
-          ):
-            free_usdt, _ = get_account_balance(exchange)
-
-            scanned_spot = get_top_volume_pairs(
-                exchange, limit=scan_breadth, m_type="spot"
-            )
-            scanned_swap = get_top_volume_pairs(
-                exchange, limit=scan_breadth, m_type="swap"
-            )
-
-            top_10_spot = scanned_spot[:10]
-            top_10_swap = scanned_swap[:10]
-
-            st.session_state.top_spot_cache = top_10_spot
-            st.session_state.top_swap_cache = top_10_swap
-
-            with col_table_spot:
-              st.markdown("#### 🟢 Rynek SPOT (Top 10)")
-              if top_10_spot:
-                df_spot = pd.DataFrame(top_10_spot)
-                df_spot.columns = ["Para Symbol", "Wolumen 24h", "Cena"]
-                st.dataframe(df_spot, use_container_width=True)
-              else:
-                st.info("Brak danych Spot.")
-
-            with col_table_swap:
-              st.markdown("#### ⚡ Rynek FUTURES / SWAP (Top 10)")
-              if top_10_swap:
-                df_swap = pd.DataFrame(top_10_swap)
-                df_swap.columns = ["Para Symbol", "Wolumen 24h", "Cena"]
-                st.dataframe(df_swap, use_container_width=True)
-              else:
-                st.info("Brak danych Swap.")
-
-            # Cykl handlowy
-            active_exchange_for_trade = init_exchange(
-                api_key, api_secret, api_password, market_type
-            )
-            open_positions = active_exchange_for_trade.fetch_positions()
-            active_positions_map = {
-                p["symbol"]: p
-                for p in open_positions
-                if float(p.get("contracts", 0)) > 0
-            }
-
-            current_market_pairs = (
-                top_10_swap if market_type == "swap" else top_10_spot
-            )
-
-            for item in current_market_pairs:
-              symbol = item["symbol"]
-              df = analyze_market_conditions(
-                  active_exchange_for_trade, symbol, tf
-              )
-              if df is None or df.empty:
-                continue
-
-              current_price = df["close"].iloc[-1]
-              last_ema50 = df["EMA50"].iloc[-1]
-              last_macd = df["macd"].iloc[-1]
-              last_signal = df["signal"].iloc[-1]
-              prev_macd = df["macd"].iloc[-2]
-              prev_signal = df["signal"].iloc[-2]
-              now_ts = time.time()
-
-              # Zarządzanie pozycją
-              if symbol in active_positions_map:
-                pos = active_positions_map[symbol]
-                pos_side = pos["side"]
-                entry_price = float(pos["entryPrice"])
-                contracts = float(pos["contracts"])
-                pnl_pct = float(pos.get("percentage", 0))
-
-                open_time = st.session_state.position_timers.get(symbol, now_ts)
-                time_elapsed = now_ts - open_time
-                exit_triggered = False
-                exit_reason = ""
-
-                if use_sltp:
-                  if pos_side == "long":
-                    if current_price <= entry_price * (1 - stop_loss_pct):
-                      exit_triggered = True
-                      exit_reason = "Twardy Stop Loss (LONG)"
-                    elif current_price >= entry_price * (1 + take_profit_pct):
-                      exit_triggered = True
-                      exit_reason = "Realizacja Take Profit (LONG)"
-                  elif pos_side == "short":
-                    if current_price >= entry_price * (1 + stop_loss_pct):
-                      exit_triggered = True
-                      exit_reason = "Twardy Stop Loss (SHORT)"
-                    elif current_price <= entry_price * (1 - take_profit_pct):
-                      exit_triggered = True
-                      exit_reason = "Realizacja Take Profit (SHORT)"
-
-                if not exit_triggered and time_elapsed >= min_hold_seconds:
-                  if (
-                      pos_side == "long"
-                      and prev_macd >= prev_signal
-                      and last_macd < last_signal
-                  ):
-                    exit_triggered = True
-                    exit_reason = "Odwrócenie trendu MACD (Zamknięcie LONG)"
-                  elif (
-                      pos_side == "short"
-                      and prev_macd <= prev_signal
-                      and last_macd > last_signal
-                  ):
-                    exit_triggered = True
-                    exit_reason = "Odwrócenie trendu MACD (Zamknięcie SHORT)"
-
-                if exit_triggered:
-                  side_to_close = "sell" if pos_side == "long" else "buy"
-                  try:
-                    active_exchange_for_trade.create_market_order(
-                        symbol,
-                        side_to_close,
-                        contracts,
-                        params={"reduceOnly": True},
-                    )
-                    log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] ❌ ZAMKNIĘTO {symbol} ({pos_side}). Powód: {exit_reason}. PnL: {pnl_pct:.2f}%"
-                    st.session_state.trade_history.append(log_msg)
-                    st.success(log_msg)
-                    st.session_state.position_timers.pop(symbol, None)
-                  except Exception as ex:
-                    st.error(f"Błąd zamykania {symbol}: {ex}")
-
-              else:
-                if len(active_positions_map) >= max_open_trades:
-                  continue
-                if free_usdt < 10.0:
-                  continue
-
-                chosen_leverage = (
-                    calculate_dynamic_leverage(df, max_allowed_leverage)
-                    if use_dynamic_leverage
-                    else max_allowed_leverage
-                )
-                allocated_margin = free_usdt * risk_pct_per_trade
-                notional_value = allocated_margin * chosen_leverage
-                calc_contracts = notional_value / current_price
-
-                if (
-                    current_price > last_ema50
-                    and prev_macd <= prev_signal
-                    and last_macd > last_signal
-                ):
-                  try:
-                    if market_type == "swap":
-                      active_exchange_for_trade.set_leverage(
-                          chosen_leverage, symbol
-                      )
-                    active_exchange_for_trade.create_market_order(
-                        symbol, "buy", calc_contracts
-                    )
-                    st.session_state.position_timers[symbol] = now_ts
-                    log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] 🟢 OTWARTO LONG na {symbol} | Kapitał: {allocated_margin:.2f} USDT | Dźwignia: {chosen_leverage}x"
-                    st.session_state.trade_history.append(log_msg)
-                    st.success(log_msg)
-                    free_usdt -= allocated_margin
-                    active_positions_map[symbol] = {"side": "long"}
-                  except Exception:
-                    pass
-
-                elif (
-                    current_price < last_ema50
-                    and prev_macd >= prev_signal
-                    and last_macd < last_signal
-                ):
-                  try:
-                    if market_type == "swap":
-                      active_exchange_for_trade.set_leverage(
-                          chosen_leverage, symbol
-                      )
-                    active_exchange_for_trade.create_market_order(
-                        symbol, "sell", calc_contracts
-                    )
-                    st.session_state.position_timers[symbol] = now_ts
-                    log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 OTWARTO SHORT na {symbol} | Kapitał: {allocated_margin:.2f} USDT | Dźwignia: {chosen_leverage}x"
-                    st.session_state.trade_history.append(log_msg)
-                    st.warning(log_msg)
-                    free_usdt -= allocated_margin
-                    active_positions_map[symbol] = {"side": "short"}
-                  except Exception:
-                    pass
-        else:
-          with col_table_spot:
-            st.markdown("#### 🟢 Rynek SPOT (Top 10)")
-            if st.session_state.top_spot_cache:
-              df_spot = pd.DataFrame(st.session_state.top_spot_cache)
-              df_spot.columns = ["Para Symbol", "Wolumen 24h", "Cena"]
-              st.dataframe(df_spot, use_container_width=True)
-            else:
-              st.info("Kliknij odśwież skan, aby pobrać.")
-
-          with col_table_swap:
-            st.markdown("#### ⚡ Rynek FUTURES / SWAP (Top 10)")
-            if st.session_state.top_swap_cache:
-              df_swap = pd.DataFrame(st.session_state.top_swap_cache)
-              df_swap.columns = ["Para Symbol", "Wolumen 24h", "Cena"]
-              st.dataframe(df_swap, use_container_width=True)
-            else:
-              st.info("Kliknij odśwież skan, aby pobrać.")
-
-      with tab2:
-        st.subheader("Rejestr Operacji i Działań Systemu SAS")
-        if st.session_state.trade_history:
-          for hist in reversed(st.session_state.trade_history[-20:]):
-            st.text(hist)
-        else:
-          st.info("Brak zarejestrowanych zdarzeń w bieżącej sesji.")
-
-      with tab3:
-        st.subheader("Diagnostyka Połączenia API")
-        st.success(
-            "Klient CCXT pomyślnie uwierzytelniony i połączony z giełdą Bitget."
-        )
-
+        return df
     except Exception as e:
-      st.error(f"Krytyczny błąd infrastruktury aplikacji: {e}")
-  else:
-    st.warning(
-        "👈 Uzupełnij dane dostępowe API w panelu bocznym lub skonfiguruj"
-        " serwer, aby aktywować terminal."
+        return None
+
+# ==========================================
+# EKRAN POWITALNY (W Stylu Retro)
+# ==========================================
+if not st.session_state.nav_to_panel:
+    st.markdown('<div class="retro-title">BITGET SAS</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="retro-subtitle">Autonomiczny Terminal Inwestycyjny & Algorytmiczny Skaner Rynkowy</div>',
+        unsafe_allow_html=True,
     )
+    st.markdown(
+        "<p style='text-align: center; color: #9ca3af; font-size: 1rem;'>Zarządzaj swoimi inwestycjami na rynkach Spot i Futures z najwyższą precyzją.</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🚀 WEJDŹ DO TERMINAŁA", use_container_width=True, type="primary"):
+            st.session_state.nav_to_panel = True
+            st.rerun()
+
+# ==========================================
+# PANEL OPERACYJNY
+# ==========================================
+else:
+    # PANEL BOCZNY - BITGET SAS CONTROL & SECURITY
+    st.sidebar.title("🛡️ Bitget SAS Control")
+    api_key = st.sidebar.text_input("API Key", type="password")
+    api_secret = st.sidebar.text_input("API Secret", type="password")
+    api_password = st.sidebar.text_input("API Password (Passphrase)", type="password")
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button("⬅ Wróć do ekranu powitalnego", use_container_width=True):
+        st.session_state.nav_to_panel = False
+        st.rerun()
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Parametry Rynku i Skanera")
+    market_type = st.sidebar.selectbox("Typ Rynku", ["swap", "spot"], index=0)
+    tf = st.sidebar.selectbox("Interwał Analityczny", ["5m", "15m", "1h", "4h"], index=1)
+    max_pairs_to_scan = st.sidebar.slider("Liczba par w skanerze", 5, 30, 10, step=5)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("💰 Zarządzanie Kapitałem")
+    amount_usdt = st.sidebar.number_input("Wielkość pozycji bazowej (USDT)", value=50.0, step=10.0)
+    leverage = st.sidebar.slider("Dźwignia (Leverage)", 1, 20, 5)
+    use_sltp = st.sidebar.checkbox("Włącz ochronę Stop Loss / Take Profit", value=True)
+    stop_loss_pct = st.sidebar.slider("Stop Loss (%)", 0.5, 5.0, 1.5, 0.1) / 100.0
+    take_profit_pct = st.sidebar.slider("Take Profit (%)", 1.0, 20.0, 3.0, 0.5) / 100.0
+    min_hold_seconds = st.sidebar.number_input(
+        "Min. czas trzymania pozycji (Cooldown w sek.)",
+        value=300,
+        step=60,
+        help="Zapobiega natychmiastowemu zamykaniu pozycji tuż po wejściu.",
+    )
+
+    st.sidebar.markdown("---")
+
+    # Przycisk awaryjny KILL SWITCH w stylu Bitget SAS
+    if st.sidebar.button("🚨 KILL SWITCH (Zamknij wszystko)", type="primary"):
+        st.session_state.bot_active = False
+        if api_key and api_secret and api_password:
+            try:
+                temp_exchange = ccxt.bitget({
+                    "apiKey": api_key,
+                    "secret": api_secret,
+                    "password": api_password,
+                    "enableRateLimit": True,
+                    "options": {"defaultType": market_type},
+                })
+                temp_exchange.load_markets()
+                positions = temp_exchange.fetch_positions()
+                for pos in positions:
+                    if float(pos.get("contracts", 0)) > 0:
+                        sym = pos["symbol"]
+                        side_to_close = "sell" if pos["side"] == "long" else "buy"
+                        temp_exchange.create_market_order(
+                            sym, side_to_close, pos["contracts"], {"reduceOnly": True}
+                        )
+                st.sidebar.success("Awaryjnie zamknięto wszystkie otwarte pozycje!")
+                st.session_state.trade_history.append(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 KILL SWITCH wykonany ręcznie."
+                )
+            except Exception as e:
+                st.sidebar.error(f"Błąd Kill Switch: {e}")
+        else:
+            st.sidebar.warning("Uzupełnij klucze API, aby wykonać awaryjne zamknięcie.")
+
+    # ==========================================
+    # GŁÓWNY INTERFEJS I Kafelki (RETRO-VINTAGE)
+    # ==========================================
+    st.markdown(
+        '<div class="retro-title" style="font-size: 2.2rem; text-align: left;">🚀 Bitget SAS - Panel Operacyjny</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "Profesjonalna platforma handlowa z wieloparowym skanerem płynności, filtrem trendu EMA50 oraz pełną ochroną kapitału."
+    )
+
+    # Kafelki metryk w stylu retro-vintage
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.markdown(
+            f"""<div class="metric-card"><h4>Status Systemu</h4><p style="color: {'#2ecc71' if st.session_state.bot_active else '#e74c3c'}; font-weight: bold; font-size: 18px;">{'🟢 URUCHOMIONY' if st.session_state.bot_active else '🔴 ZATRZYMANY'}</p></div>""",
+            unsafe_allow_html=True,
+        )
+    with col_m2:
+        st.markdown(
+            f"""<div class="metric-card"><h4>Typ Rynku</h4><p style="font-size: 18px; font-weight: bold; color: #d4af37;">{market_type.upper()}</p></div>""",
+            unsafe_allow_html=True,
+        )
+    with col_m3:
+        st.markdown(
+            f"""<div class="metric-card"><h4>Wybrana Dźwignia</h4><p style="font-size: 18px; font-weight: bold;">{leverage}x</p></div>""",
+            unsafe_allow_html=True,
+        )
+    with col_m4:
+        st.markdown(
+            f"""<div class="metric-card"><h4>Kapitał / Pozycję</h4><p style="font-size: 18px; font-weight: bold;">{amount_usdt} USDT</p></div>""",
+            unsafe_allow_html=True,
+        )
+
+    # Przyciski sterujące start/stop
+    c_start, c_stop = st.columns(2)
+    with c_start:
+        if st.button("▶ Uruchom Autonomiczny Handel", type="primary", use_container_width=True):
+            if not api_key or not api_secret or not api_password:
+                st.error("Wprowadź dane dostępowe API w panelu bocznym.")
+            else:
+                st.session_state.bot_active = True
+                st.success("Uruchomiono pętlę analityczną i handlową.")
+    with c_stop:
+        if st.button("⏹ Zatrzymaj System", use_container_width=True):
+            st.session_state.bot_active = False
+            st.warning("Zatrzymano działanie systemu.")
+
+    st.markdown("---")
+
+    # ==========================================
+    # GŁÓWNA PĘTLA WYKONAWCZA I ZAKŁADKI
+    # ==========================================
+    if api_key and api_secret and api_password:
+        try:
+            exchange = init_exchange(api_key, api_secret, api_password, market_type)
+
+            tab1, tab2, tab3 = st.tabs([
+                "📊 Skaner Rynku i Zarządzanie Pozycjami",
+                "📜 Dziennik Zdarzeń SAS",
+                "⚙️ Status Połączenia",
+            ])
+
+            with tab1:
+                st.subheader("Autonomiczny Skaner Wolumenu i Sygnałów")
+
+                if st.button("🔄 Wykonaj Cykl Skanowania i Analizy Rynku", type="primary", use_container_width=True):
+                    with st.spinner("Skanowanie giełdy Bitget, analiza płynności oraz wskaźników..."):
+                        active_symbols = get_top_volume_pairs(exchange, limit=max_pairs_to_scan, m_type=market_type)
+                        st.info(f"Pomyślnie pobrano top {len(active_symbols)} płynnych par o największym obrocie.")
+
+                        open_positions = exchange.fetch_positions()
+                        active_positions_map = {
+                            p["symbol"]: p for p in open_positions if float(p.get("contracts", 0)) > 0
+                        }
+
+                        for symbol in active_symbols:
+                            df = analyze_market_conditions(exchange, symbol, tf)
+                            if df is None or df.empty:
+                                continue
+
+                            current_price = df["close"].iloc[-1]
+                            last_ema50 = df["EMA50"].iloc[-1]
+                            last_macd = df["macd"].iloc[-1]
+                            last_signal = df["signal"].iloc[-1]
+                            prev_macd = df["macd"].iloc[-2]
+                            prev_signal = df["signal"].iloc[-2]
+                            now_ts = time.time()
+
+                            # --- A. ZARZĄDZANIE ISTNIEJĄCĄ POZYCJĄ (SL / TP / TREND) ---
+                            if symbol in active_positions_map:
+                                pos = active_positions_map[symbol]
+                                pos_side = pos["side"]
+                                entry_price = float(pos["entryPrice"])
+                                contracts = float(pos["contracts"])
+                                pnl_pct = float(pos.get("percentage", 0))
+
+                                st.write(
+                                    f"🔍 **{symbol}** | Aktywna: **{pos_side.upper()}** | Wejście: `{entry_price}` | PnL: `{pnl_pct:.2f}%`"
+                                )
+
+                                open_time = st.session_state.position_timers.get(symbol, now_ts)
+                                time_elapsed = now_ts - open_time
+                                exit_triggered = False
+                                exit_reason = ""
+
+                                if use_sltp:
+                                    if pos_side == "long":
+                                        if current_price <= entry_price * (1 - stop_loss_pct):
+                                            exit_triggered = True
+                                            exit_reason = "Twardy Stop Loss (LONG)"
+                                        elif current_price >= entry_price * (1 + take_profit_pct):
+                                            exit_triggered = True
+                                            exit_reason = "Realizacja Take Profit (LONG)"
+                                    elif pos_side == "short":
+                                        if current_price >= entry_price * (1 + stop_loss_pct):
+                                            exit_triggered = True
+                                            exit_reason = "Twardy Stop Loss (SHORT)"
+                                        elif current_price <= entry_price * (1 - take_profit_pct):
+                                            exit_triggered = True
+                                            exit_reason = "Realizacja Take Profit (SHORT)"
+
+                                if not exit_triggered and time_elapsed >= min_hold_seconds:
+                                    if pos_side == "long" and prev_macd >= prev_signal and last_macd < last_signal:
+                                        exit_triggered = True
+                                        exit_reason = "Odwrócenie trendu MACD (Zamknięcie LONG)"
+                                    elif pos_side == "short" and prev_macd <= prev_signal and last_macd > last_signal:
+                                        exit_triggered = True
+                                        exit_reason = "Odwrócenie trendu MACD (Zamknięcie SHORT)"
+
+                                if exit_triggered:
+                                    side_to_close = "sell" if pos_side == "long" else "buy"
+                                    try:
+                                        exchange.create_market_order(
+                                            symbol, side_to_close, contracts, params={"reduceOnly": True}
+                                        )
+                                        log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] ❌ ZAMKNIĘTO pozycję {symbol} ({pos_side}). Powód: {exit_reason}. Wynik PnL: {pnl_pct:.2f}%"
+                                        st.session_state.trade_history.append(log_msg)
+                                        st.success(log_msg)
+                                        st.session_state.position_timers.pop(symbol, None)
+                                    except Exception as ex:
+                                        st.error(f"Błąd zamykania pozycji {symbol}: {ex}")
+
+                            # --- B. SZUKANIE NOWYCH OKAZJI Z FILTREM TRENDU EMA50 ---
+                            else:
+                                notional = amount_usdt * (leverage if market_type == "swap" else 1)
+                                calc_contracts = notional / current_price
+
+                                if current_price > last_ema50 and prev_macd <= prev_signal and last_macd > last_signal:
+                                    try:
+                                        if market_type == "swap":
+                                            exchange.set_leverage(leverage, symbol)
+                                        exchange.create_market_order(symbol, "buy", calc_contracts)
+                                        st.session_state.position_timers[symbol] = now_ts
+                                        log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] 🟢 OTWARTO LONG na {symbol} | Cena: {current_price:,.4f} | Filtr EMA50 OK"
+                                        st.session_state.trade_history.append(log_msg)
+                                        st.success(log_msg)
+                                    except Exception:
+                                        pass
+
+                                elif current_price < last_ema50 and prev_macd >= prev_signal and last_macd < last_signal:
+                                    try:
+                                        if market_type == "swap":
+                                            exchange.set_leverage(leverage, symbol)
+                                        exchange.create_market_order(symbol, "sell", calc_contracts)
+                                        st.session_state.position_timers[symbol] = now_ts
+                                        log_msg = f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 OTWARTO SHORT na {symbol} | Cena: {current_price:,.4f} | Filtr EMA50 OK"
+                                        st.session_state.trade_history.append(log_msg)
+                                        st.warning(log_msg)
+                                    except Exception:
+                                        pass
+
+            with tab2:
+                st.subheader("Rejestr Operacji i Działań Systemu SAS")
+                if st.session_state.trade_history:
+                    for hist in reversed(st.session_state.trade_history[-20:]):
+                        st.text(hist)
+                else:
+                    st.info("Brak zarejestrowanych zdarzeń w bieżącej sesji. Uruchom cykl skanowania.")
+
+            with tab3:
+                st.subheader("Diagnostyka Połączenia API")
+                st.success("Klient CCXT pomyślnie uwierzytelniony i połączony z giełdą Bitget.")
+
+        except Exception as e:
+            st.error(f"Krytyczny błąd infrastruktury aplikacji: {e}")
+    else:
+        st.warning("👈 Uzupełnij dane dostępowe API w panelu bocznym, aby uruchomić interfejs terminala.")
