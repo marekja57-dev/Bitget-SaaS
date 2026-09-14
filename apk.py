@@ -15,7 +15,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 # =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACjI CCXT ORAZ DYNAMICZNEJ DŹWIGNI
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT ORAZ DYNAMICZNEJ DŹWIGNI
 # =====================================================================
 def get_exchange(market_type):
     try:
@@ -123,7 +123,7 @@ st.markdown(
     }
 
     .button-spacer {
-        margin-top: 30px;
+        margin-top: 25px;
         width: 100%;
         display: flex;
         justify-content: center;
@@ -165,7 +165,7 @@ st.markdown(
 )
 
 # =====================================================================
-# STRONA POWITALNA
+# STRONA POWITALNA Z FORMULARZEM LOGOWANIA I ZAPAMIĘCIWYNIEM DANYCH
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
@@ -177,13 +177,23 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
-    col_b1, col_b2, col_b3 = st.columns([2, 3, 2])
-    with col_b2:
-        if st.button("🚀 WEJDŹ DO SYSTEMU", use_container_width=True):
-            st.session_state.logged_in = True
-            st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color: #f3d57a; font-family: Cinzel, serif; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 1px;">Wprowadź dane logowania oraz klucz dostępu (passphrase)</p>',
+        unsafe_allow_html=True,
+    )
+
+    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+    with col_l2:
+        login_email = st.text_input("Email / Login", value="marekja57@wp.pl")
+        login_passphrase = st.text_input("Hasło / Passphrase", type="password", value="")
+
+        st.markdown('<div class="button-spacer">', unsafe_allow_html=True)
+        if st.button("🚀 ZALOGUJ SIĘ DO SYSTEMU", use_container_width=True):
+            if login_email:
+                st.session_state.logged_in = True
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
@@ -194,7 +204,7 @@ if "session_start_time" not in st.session_state:
     st.session_state.session_start_time = datetime.now()
 
 # =====================================================================
-# WŁAŚCIWA APLIKACjA (PO WEJŚCIU)
+# WŁAŚCIWA APLIKACJA (PO WEJŚCIU)
 # =====================================================================
 st.title("🚀 Bitget SAS - Panel Operacyjny (Pełna Autonomia & Listing Sniper)")
 
@@ -395,7 +405,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# KAFELKI WYNIKÓW ORAZ ZEGAR SESjI
+# KAFELKI WYNIKÓW ORAZ ZEGAR SESJI
 # =====================================================================
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -750,7 +760,6 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                 f_vol = item["volatility"]
                 label = "LONG" if side == "buy" else "SHORT"
 
-                # Autonomiczny dobór dźwigni bazujący na zmienności
                 bot_leverage = calculate_dynamic_leverage(sym, f_vol, bot_fut_lev_mode, manual_leverage)
 
                 tf_key = f"trend_bot_fut_{sym}"
@@ -761,7 +770,6 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                     and (time.time() - last_action_time > 90)
                 ):
                     if fut_free >= MIN_FUT_TRADE:
-                        # Dynamiczne zmniejszanie budżetu przy ekstremalnej zmienności
                         risk_multiplier = 0.5 if f_vol > 4.0 else (0.8 if f_vol > 2.0 else 1.0)
                         calc_pct = max(1.0, min(30.0, base_allocation_pct * risk_multiplier))
                         
@@ -1094,7 +1102,6 @@ if futures_ex:
             trade_action = "buy"
             action_label = "LONG"
 
-            # Wywołanie autonomicznej dźwigni zmiennościowej dla skanera
             dyn_leverage = calculate_dynamic_leverage(sym, current_vol, leverage_mode, manual_leverage)
 
             if strat_type == 0:
@@ -1351,3 +1358,4 @@ if not user_subscribed:
 else:
     st.sidebar.markdown("---")
     st.sidebar.success("✅ Zalogowano jako Administrator (Pełny dostęp)")
+
