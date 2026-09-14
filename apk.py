@@ -15,19 +15,10 @@ if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
 # =====================================================================
-# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (AUTOMATYCZNE KLUCZE)
+# FUNKCJA POMOCNICZA DO INICJALIZACJI CCXT (Z POLAMI W PANELU)
 # =====================================================================
-def get_exchange(market_type):
+def get_exchange(market_type, api_key, secret, passphrase):
   try:
-    api_key = st.secrets.get(
-        "BITGET_API_KEY", "bg_bad3414dc389df75aadc7794100d5c2"
-    )
-    secret = st.secrets.get(
-        "BITGET_SECRET_KEY",
-        "14829c31563785108f3c207963d431bdbeb80bcb8222340b6134bf5a4a2e902",
-    )
-    passphrase = st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
-
     ex_type = "spot" if market_type == "spot" else "swap"
     exchange = ccxt.bitget({
         "apiKey": api_key,
@@ -39,6 +30,18 @@ def get_exchange(market_type):
     return exchange
   except Exception:
     return None
+
+# =====================================================================
+# PANEL BOCZNY - KLUCZE API I AUTORYZACJA
+# =====================================================================
+with st.sidebar.container(border=True):
+  st.markdown("### 🔑 Klucze API Bitget")
+  api_key_input = st.text_input("Bitget API Key", type="password", value="")
+  secret_key_input = st.text_input("Bitget Secret Key", type="password", value="")
+  passphrase_input = st.text_input("Bitget Passphrase", type="password", value="")
+
+spot_ex = get_exchange("spot", api_key_input, secret_key_input, passphrase_input)
+futures_ex = get_exchange("futures", api_key_input, secret_key_input, passphrase_input)
 
 # =====================================================================
 # STYLIZACJA CSS (RETRO-VINTAGE + ZŁOTE RAMKI DLA KAFELKÓW)
