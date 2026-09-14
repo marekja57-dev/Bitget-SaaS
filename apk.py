@@ -97,6 +97,13 @@ if "user_id" not in st.session_state:
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
 
+# Bezpieczna inicjalizacja słownika aktywnych pozycji spot
+if "active_spot_trades" not in st.session_state:
+    st.session_state.active_spot_trades = {}
+elif isinstance(st.session_state.active_spot_trades, set):
+    old_set = st.session_state.active_spot_trades
+    st.session_state.active_spot_trades = {sym: {"entry_price": 0.0, "amount": 0.0} for sym in old_set}
+
 # Obsługa powrotu z płatności Stripe
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -239,16 +246,12 @@ if "scanner_active" not in st.session_state:
     st.session_state.scanner_active = False
 if "active_trades" not in st.session_state:
     st.session_state.active_trades = {}
-if "active_spot_trades" not in st.session_state:
-    st.session_state.active_spot_trades = set()
 if "trend_bot_spot_active" not in st.session_state:
     st.session_state.trend_bot_spot_active = False
 if "trend_bot_fut_active" not in st.session_state:
     st.session_state.trend_bot_fut_active = False
 if "known_markets" not in st.session_state:
     st.session_state.known_markets = set()
-if "listing_sniper_active" not in st.session_state:
-    st.session_state.listing_sniper_active = False
 
 def get_exchange(market_type):
     if not st.session_state.api_key:
@@ -441,7 +444,7 @@ if emergency_kill:
     st.session_state.trend_bot_spot_active = False
     st.session_state.trend_bot_fut_active = False
     st.session_state.active_trades = {}
-    st.session_state.active_spot_trades = set()
+    st.session_state.active_spot_trades = {}
     st.session_state.signal_cooldown = {}
     send_notification("🚨 [KILL SWITCH] Zamknięto pozycje i wyłączono boty!")
     st.success("🚨 KILL SWITCH WYKONANY.")
@@ -466,6 +469,21 @@ if futures_ex:
     except Exception:
         pass
 
+# Obliczanie niezrealizowanego PnL Spot
+total_spot_unrealized_pnl = 0.0
+if spot_ex and st.session_state.active_spot_trades:
+    try:
+        s_tickers = spot_ex.fetch_tickers(list(st.session_state.active_spot_trades.keys()))
+        for sym, tinfo in list(st.session_state.active_spot_trades.items()):
+            curr_price = float(s_tickers.get(sym, {}).get("last", tinfo["entry_price"]))
+            entry_price = tinfo["entry_price"]
+            amount = tinfo["amount"]
+            if entry_price > 0 and amount > 0:
+                pnl = (curr_price - entry_price) * amount
+                total_spot_unrealized_pnl += pnl
+    except Exception:
+        pass
+
 total_unrealized_pnl = 0.0
 active_positions_count = 0
 if futures_ex:
@@ -479,9 +497,9 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (SYMERYCZNE DLA SPOT I FUTURES + WYNIKI + CZAS)
+# GŁÓWNE KAFELKI (DOKŁADNIE 5 KAFELEK W RZĘDZIE)
 # =====================================================================
-col1, col2, col3, col_clock = st.columns([1, 1, 1, 1])
+col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
 with col1:
     st.metric(
         label="🟢 Portfel Spot", 
@@ -496,11 +514,17 @@ with col2:
     )
 with col3:
     st.metric(
+        label="📊 Wyniki Spot (PnL)", 
+        value=f"{total_spot_unrealized_pnl:+.2f} USDT", 
+        delta=f"Aktywne: {len(st.session_state.active_spot_trades)}/{max_active_spot_positions}"
+    )
+with col4:
+    st.metric(
         label="📊 Wyniki Futures (PnL)", 
         value=f"{total_unrealized_pnl:+.2f} USDT", 
         delta=f"Aktywne: {active_positions_count}/{max_active_futures_positions}"
     )
-with col_clock:
+with col5:
     elapsed = datetime.now() - st.session_state.session_start_time
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
@@ -608,7 +632,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION (CICHY TRYB BEZ BŁĘDÓW W UI)
+# BOTS & LOGIC EXECUTION
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
@@ -657,7 +681,7 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                                     price=c_price
                                 )
 
-                            st.session_state.active_spot_trades.add(auto_bot_spot_coin)
+                            st.session_state.active_spot_trades[auto_bot_spot_coin] = {"entry_price": c_price, "amount": amount}
                             st.session_state.signal_cooldown[t_key] = time.time()
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
