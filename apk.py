@@ -46,17 +46,6 @@ def load_stripe_credentials():
             pass
     return "", "", ""
 
-def save_stripe_credentials(stripe_pk, stripe_sk, stripe_price_id):
-    try:
-        with open(STRIPE_CONFIG_FILE, "w") as f:
-            json.dump({
-                "stripe_pk": stripe_pk,
-                "stripe_sk": stripe_sk,
-                "stripe_price_id": stripe_price_id
-            }, f)
-    except Exception:
-        pass
-
 saved_api, saved_secret, saved_pass = load_saved_credentials()
 saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credentials()
 
@@ -73,15 +62,13 @@ if "secret_key" not in st.session_state:
 if "passphrase" not in st.session_state:
     st.session_state.passphrase = saved_pass or st.secrets.get("BITGET_PASSPHRASE", "Zostaw1260")
 
-if "stripe_pk" not in st.session_state:
-    st.session_state.stripe_pk = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
-if "stripe_sk" not in st.session_state:
-    st.session_state.stripe_sk = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
-if "stripe_price_id" not in st.session_state:
-    st.session_state.stripe_price_id = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "price_1RxSubscriptionMock")
+# Pobieranie kluczy Stripe z bezpiecznego zapisu / secrets (niewidoczne dla klienta)
+stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
+stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
+stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "price_1RxSubscriptionMock")
 
-if st.session_state.stripe_sk:
-    stripe.api_key = st.session_state.stripe_sk
+if stripe_sk_val:
+    stripe.api_key = stripe_sk_val
 
 def get_exchange(market_type):
     try:
@@ -187,53 +174,7 @@ if "known_markets" not in st.session_state:
 if "listing_sniper_active" not in st.session_state:
     st.session_state.listing_sniper_active = True
 
-# =====================================================================
-# UMIESZCZONE NA SAMEJ GÓRZE: PANEL STRIPE I SUBSKRYPCJE
-# =====================================================================
-with st.sidebar.container(border=True):
-    st.markdown("### 💳 Panel Subskrybenta (Stripe)")
-    sub_mode = st.selectbox("Status Licencji / Dostępu", ["Weryfikacja Automatyczna", "Aktywny (VIP)", "Okres Próbny", "Wygasła"])
-    
-    input_s_pk = st.text_input("Stripe Public Key", value=st.session_state.stripe_pk, type="password")
-    input_s_sk = st.text_input("Stripe Secret Key", value=st.session_state.stripe_sk, type="password")
-    input_s_price = st.text_input("Stripe Price ID", value=st.session_state.stripe_price_id)
-
-    if st.button("Zapisz Konfigurację Stripe"):
-        st.session_state.stripe_pk = input_s_pk
-        st.session_state.stripe_sk = input_s_sk
-        st.session_state.stripe_price_id = input_s_price
-        save_stripe_credentials(input_s_pk, input_s_sk, input_s_price)
-        if input_s_sk:
-            stripe.api_key = input_s_sk
-        st.success("Zapisano klucze Stripe!")
-
-    st.markdown("#### 🛒 Bramka Płatności SaaS")
-    user_email_sub = st.text_input("Email subskrybenta", value="uzytkownik@bot-bitget.pl")
-    
-    if st.button("💳 Generuj Link do Płatności (Stripe Checkout)"):
-        if st.session_state.stripe_sk and st.session_state.stripe_price_id:
-            try:
-                checkout_session = stripe.checkout.Session.create(
-                    payment_method_types=['card'],
-                    line_items=[{
-                        'price': st.session_state.stripe_price_id,
-                        'quantity': 1,
-                    }],
-                    mode='subscription',
-                    success_url='https://bot-bitget.pl/?success=true',
-                    cancel_url='https://bot-bitget.pl/?canceled=true',
-                    customer_email=user_email_sub,
-                )
-                st.markdown(f"**🔗 Link płatności:** [Przejdź do Stripe Checkout]({checkout_session.url})", unsafe_allow_html=True)
-                st.success("Wygenerowano sesję płatności Stripe!")
-            except Exception as e:
-                st.error(f"Błąd Stripe API: {e}")
-        else:
-            st.warning("Podaj klucz Secret Key oraz Price ID w panelu.")
-
-st.sidebar.markdown("---")
-
-# Sidebar - API Credentials
+# Sidebar - API Credentials (Administratora)
 with st.sidebar.container(border=True):
     st.markdown("### 💎 Status Administratora")
     input_api = st.text_input("Bitget API Key", value=st.session_state.api_key, type="password")
@@ -334,6 +275,35 @@ with st.sidebar.container(border=True):
     st.markdown("---")
     max_spot_scan_pairs = st.slider("🔍 Liczba par Spot", 5, 30, 10, 5)
     max_fut_scan_pairs = st.slider("📈 Liczba par Futures", 5, 30, 10, 5)
+
+# =====================================================================
+# CZYSTY PRZYCISK DLA KLIENTA NA SAMYM DOLE (BEZ POKAZYWANIA DANYCH ADMINA)
+# =====================================================================
+st.sidebar.markdown("---")
+with st.sidebar.container(border=True):
+    st.markdown("### 💳 Strefa Klienta / Subskrypcja")
+    client_email = st.text_input("Twój adres e-mail", value="klient@domena.pl")
+    
+    if st.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
+        if stripe_sk_val and stripe_price_id_val:
+            try:
+                checkout_session = stripe.checkout.Session.create(
+                    payment_method_types=['card'],
+                    line_items=[{
+                        'price': stripe_price_id_val,
+                        'quantity': 1,
+                    }],
+                    mode='subscription',
+                    success_url='https://bot-bitget.pl/?success=true',
+                    cancel_url='https://bot-bitget.pl/?canceled=true',
+                    customer_email=client_email,
+                )
+                st.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj, aby opłacić]({checkout_session.url})", unsafe_allow_html=True)
+                st.success("Wygenerowano bezpieczny link płatności!")
+            except Exception as e:
+                st.error(f"Błąd płatności: {e}")
+        else:
+            st.error("Bramka płatności nie jest skonfigurowana przez administratora.")
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
