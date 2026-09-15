@@ -1038,11 +1038,11 @@ if futures_ex:
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
                 status_desc = "🟢 Aktywna (Pozycja Otwarta)"
                    # Automatyczne sprawdzenie TP/SL dla otwartej pozycji
-                     try:
-                    entry_price = float(pos.get('entryPrice', 0))
-                    mark_price = float(pos.get('markPrice', 0))
-                    pos_side = pos.get('side', '').lower()
-                    contracts = float(pos.get('contracts', 0))
+                try:
+                entry_price = float(pos.get('entryPrice', 0))
+                mark_price = float(pos.get('markPrice', 0))
+                pos_side = pos.get('side', '').lower()
+                contracts = float(pos.get('contracts', 0))
                     
                     if entry_price > 0 and mark_price > 0 and contracts > 0:
                         if pos_side == 'long':
