@@ -1090,34 +1090,34 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
-      spot_data_list = []
-        for sym in top_spot_view:
-            try:
-                s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-                s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
-                s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
-                
-                c_price = float(s_df["close"].iloc[-1])
-                c_macd = float(s_df["macd"].iloc[-1])
-                c_sig = float(s_df["signal"].iloc[-1])
-                status = "🟢 BULLISH (MACD > Signal)" if c_macd > c_sig else "🔴 BEARISH (MACD < Signal)"
-                is_active = sym in st.session_state.active_spot_trades
-                
-                spot_data_list.append({
-                    "Para": sym,
-                    "Cena": f"{c_price:.4f}",
-                    "Wolumen": f"{s_tickers[sym].get('quoteVolume', 0):,.0f} USDT",
-                    "Status": status,
-                    "Aktywna Pozycja": "TAK" if is_active else "NIE"
-                })
-            except Exception:
-                pass
+    spot_data_list = []
+for sym in top_spot_view:
+    try:
+        s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+        s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
+        s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
         
-        if spot_data_list:
-            st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
-    except Exception as e:
-        st.error(f"Błąd ładowania danych Spot: {e}")
+        c_price = float(s_df["close"].iloc[-1])
+        c_macd = float(s_df["macd"].iloc[-1])
+        c_sig = float(s_df["signal"].iloc[-1])
+        status = "🟢 BULLISH (MACD > Signal)" if c_macd > c_sig else "🔴 BEARISH (MACD < Signal)"
+        is_active = sym in st.session_state.active_spot_trades
+        
+        spot_data_list.append({
+            "Para": sym,
+            "Cena": f"{c_price:.4f}",
+            "Wolumen": f"{s_tickers[sym].get('quoteVolume', 0):,.0f} USDT",
+            "Status": status,
+            "Aktywna Pozycja": "TAK" if is_active else "NIE"
+        })
+    except Exception:
+        pass
+
+if spot_data_list:
+    st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
+except Exception as e:
+    st.error(f"Błąd ładowania danych Spot: {e}")
 
 st.markdown("---")
 st.subheader("📈 Top 8 Par Futures (Skaner i Status)")
@@ -1167,3 +1167,5 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active or enable_sniper:
     time.sleep(scan_interval)
     st.rerun()
+
+    
