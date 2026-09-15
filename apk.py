@@ -329,7 +329,7 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-    st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w00kecL1sfbck0c13oA00...")
+    st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w00kecL1sfbCk0c13oA00")
 
 # Konfiguracja Stripe dla Administratora
 if is_user_admin():
