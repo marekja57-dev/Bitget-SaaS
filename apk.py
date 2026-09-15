@@ -1038,25 +1038,25 @@ if futures_ex:
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
                 status_desc = "🟢 Aktywna (Pozycja Otwarta)"
                    # Automatyczne sprawdzenie TP/SL dla otwartej pozycji
-                   try:
-            entry_price = float(pos.get('entryPrice', 0))
-            mark_price = float(pos.get('markPrice', 0))
-            pos_side = pos.get('side', '').lower()
-            contracts = float(pos.get('contracts', 0))
-            
-            if entry_price > 0 and mark_price > 0 and contracts > 0:
-                if pos_side == 'long':
-                    calc_pnl = ((mark_price - entry_price) / entry_price) * 100 * lev
-                else:
-                    calc_pnl = ((entry_price - mark_price) / entry_price) * 100 * lev
+                     try:
+                    entry_price = float(pos.get('entryPrice', 0))
+                    mark_price = float(pos.get('markPrice', 0))
+                    pos_side = pos.get('side', '').lower()
+                    contracts = float(pos.get('contracts', 0))
                     
-                if calc_pnl >= float(custom_take_profit_pct) or calc_pnl <= -float(custom_stop_loss_pct):
-                    close_side = 'sell' if pos_side == 'long' else 'buy'
-                    futures_ex.create_market_order(sym, close_side, contracts, params={'reduceOnly': True})
-                    send_notification(f"🚨 [TP/SL Futures] Zamknięto {sym} ({pos_side}) | Wynik: {calc_pnl:.2f}%")
-                    st.rerun()
-        except Exception as auto_err:
-            pass
+                    if entry_price > 0 and mark_price > 0 and contracts > 0:
+                        if pos_side == 'long':
+                            calc_pnl = ((mark_price - entry_price) / entry_price) * 100 * lev
+                        else:
+                            calc_pnl = ((entry_price - mark_price) / entry_price) * 100 * lev
+                            
+                        if calc_pnl >= float(custom_take_profit_pct) or calc_pnl <= -float(custom_stop_loss_pct):
+                            close_side = 'sell' if pos_side == 'long' else 'buy'
+                            futures_ex.create_market_order(sym, close_side, contracts, params={'reduceOnly': True})
+                            send_notification(f"🚨 [TP/SL Futures] Zamknięto {sym} ({pos_side}) | Wynik: {calc_pnl:.2f}%")
+                            st.rerun()
+                except Exception as auto_err:
+                    pass
 
             else:
                 try:
