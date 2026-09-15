@@ -774,7 +774,6 @@ if enable_custom_sl_tp and futures_ex:
                             "Cena": f"{mark_price:.4f}",
                         })
                         send_notification(f"🛑 [STOP-LOSS] Zamknięto {sym} przy stracie {pnl_pct:.2f}%")
-                        st.rerun()
                     
                     elif pnl_pct >= float(custom_take_profit_pct):
                         close_side = "sell" if side == "long" else "buy"
@@ -786,7 +785,6 @@ if enable_custom_sl_tp and futures_ex:
                             "Cena": f"{mark_price:.4f}",
                         })
                         send_notification(f"🎯 [TAKE-PROFIT] Zamknięto {sym} przy zysku {pnl_pct:.2f}%")
-                        st.rerun()
     except Exception:
         pass
 
@@ -1037,27 +1035,6 @@ if futures_ex:
                 margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
                 status_desc = "🟢 Aktywna (Pozycja Otwarta)"
-                   # Automatyczne sprawdzenie TP/SL dla otwartej pozycji
-                try:
-                entry_price = float(pos.get('entryPrice', 0))
-                mark_price = float(pos.get('markPrice', 0))
-                pos_side = pos.get('side', '').lower()
-                contracts = float(pos.get('contracts', 0))
-                    
-                    if entry_price > 0 and mark_price > 0 and contracts > 0:
-                        if pos_side == 'long':
-                            calc_pnl = ((mark_price - entry_price) / entry_price) * 100 * lev
-                        else:
-                            calc_pnl = ((entry_price - mark_price) / entry_price) * 100 * lev
-                            
-                        if calc_pnl >= float(custom_take_profit_pct) or calc_pnl <= -float(custom_stop_loss_pct):
-                            close_side = 'sell' if pos_side == 'long' else 'buy'
-                            futures_ex.create_market_order(sym, close_side, contracts, params={'reduceOnly': True})
-                            send_notification(f"🚨 [TP/SL Futures] Zamknięto {sym} ({pos_side}) | Wynik: {calc_pnl:.2f}%")
-                            st.rerun()
-                except Exception as auto_err:
-                    pass
-
             else:
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
@@ -1113,3 +1090,4 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
+
