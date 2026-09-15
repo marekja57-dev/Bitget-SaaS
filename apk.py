@@ -323,12 +323,14 @@ if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
     st.session_state.passphrase = ""
     st.rerun()
 
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 💳 Strefa Subskrypcji")
 if is_user_admin() or is_user_paid():
-st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
+    st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
 else:
-st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "TUTAJ_WKLEJ_SWÓJ_LINK_STRIPE")
+    st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
+    st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/wklej_tutaj_swój_link")
+
 # Konfiguracja Stripe dla Administratora
 if is_user_admin():
     with st.sidebar.expander("🛠️ Konfiguracja Stripe (Admin)"):
