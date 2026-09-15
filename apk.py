@@ -448,6 +448,19 @@ if emergency_kill:
         except Exception:
             pass
 
+    if spot_ex and st.session_state.active_spot_trades:
+        try:
+            for sym, tinfo in list(st.session_state.active_spot_trades.items()):
+                amount = tinfo["amount"]
+                if amount > 0:
+                    try:
+                        amount_prec = float(spot_ex.amount_to_precision(sym, amount))
+                        spot_ex.create_order(sym, 'market', 'sell', amount_prec)
+                    except Exception:
+                        spot_ex.create_order(sym, 'market', 'sell', float(amount))
+        except Exception:
+            pass
+
     st.session_state.scanner_active = False
     st.session_state.trend_bot_spot_active = False
     st.session_state.trend_bot_fut_active = False
@@ -460,7 +473,7 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# PRAWIDŁOWE WYLICZENIE SALDA SPOT (USDT + WARTOŚĆ POSIADANYCH KRYPTO)
+# WYLICZENIE SALDA SPOT I FUTURES
 # =====================================================================
 spot_free, spot_total = 0.0, 0.0
 if spot_ex:
@@ -523,7 +536,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (DOKŁADNIE 5 KAFELEK W RZĘDZIE)
+# GŁÓWNE KAFELKI
 # =====================================================================
 col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
 with col1:
@@ -652,8 +665,60 @@ if spot_ex and enable_sniper:
         pass
 
 # =====================================================================
-# AWARYJNA KONTROLA SL / TP DLA FUTURES
+# AWARYJNA KONTROLA SL / TP ORAZ ZAMYKANIE POZYCJI SPOT
 # =====================================================================
+if spot_ex and st.session_state.active_spot_trades:
+    try:
+        s_tickers = spot_ex.fetch_tickers(list(st.session_state.active_spot_trades.keys()))
+        for sym, tinfo in list(st.session_state.active_spot_trades.items()):
+            curr_price = float(s_tickers.get(sym, {}).get("last", tinfo["entry_price"]))
+            entry_price = tinfo["entry_price"]
+            amount = tinfo["amount"]
+            if entry_price > 0 and curr_price > 0 and amount > 0:
+                pnl_pct = ((curr_price - entry_price) / entry_price) * 100
+                
+                # Sprawdzenie zamknięcia (SL/TP lub sygnał odwrotny MACD)
+                should_close = False
+                close_reason = ""
+                if enable_custom_sl_tp:
+                    if pnl_pct <= -float(custom_stop_loss_pct):
+                        should_close = True
+                        close_reason = f"SPOT STOP-LOSS ({pnl_pct:.2f}%)"
+                    elif pnl_pct >= float(custom_take_profit_pct):
+                        should_close = True
+                        close_reason = f"SPOT TAKE-PROFIT ({pnl_pct:.2f}%)"
+                
+                # Dodatkowa autmatyczna sprzedaż gdy MACD spada poniżej sygnału
+                if not should_close:
+                    try:
+                        s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+                        s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                        s_df["macd"] = s_df["close"].ewm(span=12, adjust=False).mean() - s_df["close"].ewm(span=26, adjust=False).mean()
+                        s_df["signal"] = s_df["macd"].ewm(span=9, adjust=False).mean()
+                        if float(s_df["macd"].iloc[-1]) < float(s_df["signal"].iloc[-1]):
+                            should_close = True
+                            close_reason = f"SPOT TREND EXIT ({pnl_pct:+.2f}%)"
+                    except Exception:
+                        pass
+
+                if should_close:
+                    try:
+                        amount_prec = float(spot_ex.amount_to_precision(sym, amount))
+                        spot_ex.create_order(sym, 'market', 'sell', amount_prec)
+                    except Exception:
+                        spot_ex.create_order(sym, 'market', 'sell', float(amount))
+                    
+                    del st.session_state.active_spot_trades[sym]
+                    st.session_state.trade_history.insert(0, {
+                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Typ": close_reason,
+                        "Para": sym,
+                        "Cena": f"{curr_price:.4f}",
+                    })
+                    send_notification(f"🟢 [{close_reason}] Zamknięto pozycję spot na {sym}")
+    except Exception:
+        pass
+
 if enable_custom_sl_tp and futures_ex:
     try:
         current_positions = futures_ex.fetch_positions()
@@ -697,7 +762,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION
+# BOTS & LOGIC EXECUTION (OTWIERANIE NOWYCH TRANSAKCJI)
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
