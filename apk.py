@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE
+# INICJALIZACJA BAZY DANYCH SQLITE (Z MIGRACJĄ KOLUMN)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -53,6 +53,12 @@ def init_db():
         )
     ''')
     
+    for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0")]:
+        try:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
@@ -73,15 +79,23 @@ def load_stripe_credentials():
         try:
             with open(STRIPE_CONFIG_FILE, "r") as f:
                 data = json.load(f)
-                return data.get("stripe_pk"), data.get("stripe_sk"), data.get("stripe_price_id")
+                return data.get("stripe_pk", ""), data.get("stripe_sk", ""), data.get("stripe_price_id", "")
         except Exception:
             pass
     return "", "", ""
 
+def save_stripe_credentials(pk, sk, price_id):
+    try:
+        with open(STRIPE_CONFIG_FILE, "w") as f:
+            json.dump({"stripe_pk": pk, "stripe_sk": sk, "stripe_price_id": price_id}, f)
+        return True
+    except Exception:
+        return False
+
 saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credentials()
 stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
 stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
-stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "price_1RxSubscriptionMock")
+stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "")
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
@@ -120,6 +134,7 @@ if st.query_params.get("success") == "true":
         except Exception:
             pass
         st.success("🎉 Płatność zakończona sukcesem! Twoja subskrypcja została aktywowana.")
+        st.query_params.clear()
 
 # =====================================================================
 # STYLIZACJA WYGLĄDU (RETRO / DARK)
@@ -314,8 +329,8 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-    if st.sidebar.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
-        if stripe_sk_val and stripe_price_id_val:
+    if stripe_sk_val and stripe_price_id_val:
+        if st.sidebar.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
             try:
                 checkout_session = stripe.checkout.Session.create(
                     payment_method_types=['card'],
@@ -328,11 +343,25 @@ else:
                     cancel_url='https://bot-bitget.pl/?canceled=true',
                     customer_email=st.session_state.user_email,
                 )
-                st.sidebar.markdown(f"**🔗 Link do płatności:** [Kliknij tutaj]({checkout_session.url})", unsafe_allow_html=True)
+                st.sidebar.markdown(f"**🔗 Link wygenerowany:** [Kliknij aby opłacić]({checkout_session.url})", unsafe_allow_html=True)
             except Exception as e:
                 st.sidebar.error(f"Błąd Stripe: {e}")
-        else:
-            st.sidebar.error("Bramka płatności nie skonfigurowana.")
+    else:
+        st.sidebar.error("Bramka płatności nie skonfigurowana. Wprowadź klucze Stripe poniżej.")
+
+# Konfiguracja Stripe dla Administratora
+if is_user_admin():
+    with st.sidebar.expander("🛠️ Konfiguracja Stripe (Admin)"):
+        input_s_pk = st.text_input("Stripe Publishable Key", value=stripe_pk_val, type="password")
+        input_s_sk = st.text_input("Stripe Secret Key", value=stripe_sk_val, type="password")
+        input_s_price = st.text_input("Stripe Price ID (np. price_...)", value=stripe_price_id_val)
+        if st.button("💾 Zapisz Konfigurację Stripe"):
+            if save_stripe_credentials(input_s_pk, input_s_sk, input_s_price):
+                st.success("Zapisano dane Stripe! Odśwież stronę.")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Błąd zapisu pliku konfiguracyjnego.")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔑 Klucze API Bitget")
@@ -677,7 +706,6 @@ if spot_ex and st.session_state.active_spot_trades:
             if entry_price > 0 and curr_price > 0 and amount > 0:
                 pnl_pct = ((curr_price - entry_price) / entry_price) * 100
                 
-                # Sprawdzenie zamknięcia (SL/TP lub sygnał odwrotny MACD)
                 should_close = False
                 close_reason = ""
                 if enable_custom_sl_tp:
@@ -688,7 +716,6 @@ if spot_ex and st.session_state.active_spot_trades:
                         should_close = True
                         close_reason = f"SPOT TAKE-PROFIT ({pnl_pct:.2f}%)"
                 
-                # Dodatkowa autmatyczna sprzedaż gdy MACD spada poniżej sygnału
                 if not should_close:
                     try:
                         s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
@@ -762,7 +789,7 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# BOTS & LOGIC EXECUTION (OTWIERANIE NOWYCH TRANSAKCJI)
+# BOTS & LOGIC EXECUTION
 # =====================================================================
 if spot_ex and st.session_state.trend_bot_spot_active:
     try:
