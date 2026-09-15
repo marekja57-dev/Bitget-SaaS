@@ -1055,8 +1055,8 @@ if futures_ex:
                                 futures_ex.create_market_order(sym, close_side, contracts, params={'reduceOnly': True})
                                 send_notification(f"🚨 [TP/SL Futures] Zamknięto {sym} ({pos_side}) | Wynik: {calc_pnl:.2f}%")
                                 st.rerun()
-                    except Exception as auto_err:
-                        pass
+                   except Exception as auto_err:
+                         pass
             else:
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
