@@ -835,7 +835,59 @@ if spot_ex and st.session_state.trend_bot_spot_active:
                     pass
     except Exception:
         pass
+# Automatyczne zamykanie pozycji Futures przy odwróceniu trendu (MACD)
+if futures_ex:
+    try:
+        current_positions = futures_ex.fetch_positions()
+        for pos in current_positions:
+            contracts = float(pos.get("contracts", 0))
+            if contracts > 0:
+                sym = pos["symbol"]
+                side = pos.get("side", "") # "long" lub "short"
+                try:
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    
+                    f_macd = float(f_df["macd"].iloc[-1])
+                    f_sig = float(f_df["signal"].iloc[-1])
+                    mark_price = float(pos.get("markPrice", 0))
+                    entry_price = float(pos.get("entryPrice", 0))
+                    leverage = float(pos.get("leverage", 1))
+                    
+                    if entry_price > 0 and mark_price > 0:
+                        if side == "long":
+                            pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
+                        else:
+                            pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
+                    else:
+                        pnl_pct = 0.0
 
+                    should_close_fut = False
+                    close_reason_fut = ""
+
+                    if side == "long" and f_macd < f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"FUTURES TREND EXIT LONG ({pnl_pct:+.2f}%)"
+                    elif side == "short" and f_macd > f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"FUTURES TREND EXIT SHORT ({pnl_pct:+.2f}%)"
+
+                    if should_close_fut:
+                        close_side = "sell" if side == "long" else "buy"
+                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": close_reason_fut,
+                            "Para": sym,
+                            "Cena": f"{mark_price:.4f}",
+                        })
+                        send_notification(f"🔵 [{close_reason_fut}] Zamknięto pozycję futures na {sym}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
         if len(st.session_state.active_trades) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
