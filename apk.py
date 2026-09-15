@@ -329,25 +329,14 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-    if stripe_sk_val and stripe_price_id_val:
-        if st.sidebar.button("💳 OPŁAĆ DOSTĘP (STRIPE)", use_container_width=True):
-            try:
-                checkout_session = stripe.checkout.Session.create(
-                    payment_method_types=['card'],
-                    line_items=[{
-                        'price': stripe_price_id_val,
-                        'quantity': 1,
-                    }],
-                    mode='subscription',
-                    success_url='https://bot-bitget.pl/?success=true',
-                    cancel_url='https://bot-bitget.pl/?canceled=true',
-                    customer_email=st.session_state.user_email,
-                )
-                st.sidebar.markdown(f"**🔗 Link wygenerowany:** [Kliknij aby opłacić]({checkout_session.url})", unsafe_allow_html=True)
-            except Exception as e:
-                st.sidebar.error(f"Błąd Stripe: {e}")
+   st.sidebar.markdown("---")
+    st.sidebar.markdown("### 💳 Strefa Subskrypcji")
+    if is_user_admin() or is_user_paid():
+        st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
     else:
-        st.sidebar.error("Bramka płatności nie skonfigurowana. Wprowadź klucze Stripe poniżej.")
+        st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
+        st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/wklej_tutaj_swój_link")
+
 
 # Konfiguracja Stripe dla Administratora
 if is_user_admin():
