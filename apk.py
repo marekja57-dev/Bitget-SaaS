@@ -1090,8 +1090,8 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
-    spot_data_list = []
-    for sym in top_spot_view:
+spot_data_list = []
+for sym in top_spot_view:
     try:
         s_ohlcv = spot_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
         s_df = pd.DataFrame(s_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -1167,5 +1167,3 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active or enable_sniper:
     time.sleep(scan_interval)
     st.rerun()
-
-    
