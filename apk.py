@@ -1116,9 +1116,9 @@ for sym in top_spot_view:
 
 if spot_data_list:
     try:
-    st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
-except Exception as e:
-    st.error(f"Błąd ładowania danych Spot: {e}")
+        st.dataframe(pd.DataFrame(spot_data_list), use_container_width=True)
+    except Exception as e:
+        st.error(f"Błąd ładowania danych Spot: {e}")
 
 st.markdown("---")
 st.subheader("📈 Top 8 Par Futures (Skaner i Status)")
