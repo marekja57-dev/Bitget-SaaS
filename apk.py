@@ -324,14 +324,12 @@ if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💳 Strefa Subskrypcji")
-if is_user_admin() or is_user_paid():
-    st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
-else:
-    st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-   st.sidebar.markdown("---")
-    st.sidebar.markdown("### 💳 Strefa Subskrypcji")
+   st.sidebar.markdown("### 💳 Strefa Subskrypcji")
     if is_user_admin() or is_user_paid():
+        st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
+    else:
+        st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
+        st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "TUTAJ_WKLEJ_SWÓJ_LINK_STRIPE")
         st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
     else:
         st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
