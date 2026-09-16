@@ -1175,7 +1175,7 @@ if futures_ex:
                 c_macd = float(f_df["macd"].iloc[-1])
                 c_sig = float(f_df["signal"].iloc[-1])
                 status = "🟢 LONG (MACD > Signal)" if c_macd > c_sig else "🔴 SHORT (MACD < Signal)"
-                is_active = sym in st.session_state.
+                is_active = sym in st.session_state.get("active_trades", set())
                       # --- TUTAJ DODAJ AUTOMATYCZNE OTWIERANIE ZLECENIA ---
         # Sprawdzamy czy Bot Futures jest włączony w panelu oraz czy para nie jest już aktywna
         if st.session_state.get(
