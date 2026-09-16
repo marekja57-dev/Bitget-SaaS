@@ -1188,18 +1188,30 @@ if futures_ex:
                 )
                 is_active = sym in st.session_state.get("active_trades", set())
 
-                # AUTOMATYCZNE OTWIERANIE ZLECENIA
+                   # AUTOMATYCZNE OTWIERANIE ZLECENIA
                 if (
                     st.session_state.get("trend_bot_fut_active", False)
                     and not is_active
                 ):
                   if len(st.session_state.get("active_trades", set())) < 10:
                     try:
+                      amount_usdt = 15.0 # Kwota w USDT na zlecenie
+                      amount_tokens = amount_usdt / c_price
+                      
+                      # Faktyczne wysłanie zlecenia Market Long na giełdę
+                      futures_ex.create_market_order(
+                          symbol=sym,
+                          side="buy",
+                          amount=amount_tokens,
+                          params={"marginMode": "isolated", "leverage": 10}
+                      )
+                      
                       if "active_trades" not in st.session_state:
                         st.session_state.active_trades = set()
                       st.session_state.active_trades.add(sym)
-                    except Exception:
-                      pass
+                    except Exception as e:
+                      st.error(f"Błąd otwierania zlecenia {sym}: {e}")
+
 
                 fut_data_list.append({
                     "Para": sym,
