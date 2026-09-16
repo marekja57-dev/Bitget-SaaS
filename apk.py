@@ -1188,9 +1188,6 @@ if futures_ex:
                     else "🔴 SHORT (MACD < Signal)"
                 )
                 is_active = sym in st.session_state.get("active_trades", set())
-            except Exception as e:
-                st.error(f"Błąd danych dla {sym}: {e}")
-                continue
 
         # AUTOMATYCZNE OTWIERANIE I ZAMYKANIE POZYCJI NA GIEŁDZIE
         if st.session_state.get("trend_bot_fut_active", False):
