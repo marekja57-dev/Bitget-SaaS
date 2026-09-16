@@ -1163,46 +1163,57 @@ if futures_ex:
             [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
             key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
         )[:8]
-        fut_data_list = []
+      es", set()) 
+   fut_data_list = []
         for sym in top_fut_view:
-            try:
+          try:
             f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
-        time.sleep(0.01)
-        f_df = pd.DataFrame(
-            f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )
-        f_df["macd"] = (
-            f_df["close"].ewm(span=12, adjust=False).mean()
-            - f_df["close"].ewm(span=26, adjust=False).mean()
-        )
-        f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+            time.sleep(0.01)
+            f_df = pd.DataFrame(
+                f_ohlcv,
+                columns=["timestamp", "open", "high", "low", "close", "volume"],
+            )
+            f_df["macd"] = (
+                f_df["close"].ewm(span=12, adjust=False).mean()
+                - f_df["close"].ewm(span=26, adjust=False).mean()
+            )
+            f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-        c_price = float(f_df["close"].iloc[-1])
-        c_macd = float(f_df["macd"].iloc[-1])
-        c_sig = float(f_df["signal"].iloc[-1])
-        status = (
-            "🟢 LONG (MACD > Signal)"
-            if c_macd > c_sig
-            else "🔴 SHORT (MACD < Signal)"
-        )
-        is_active = sym in st.session_state.get("active_trades", set())
+            c_price = float(f_df["close"].iloc[-1])
+            c_macd = float(f_df["macd"].iloc[-1])
+            c_sig = float(f_df["signal"].iloc[-1])
+            status = (
+                "🟢 LONG (MACD > Signal)"
+                if c_macd > c_sig
+                else "🔴 SHORT (MACD < Signal)"
+            )
+            is_active = sym in st.session_state.get("active_trades", set())
 
-        # AUTOMATYCZNE OTWIERANIE ZLECENIA
-        if st.session_state.get("trend_bot_fut_active", False) and not is_active:
-          if len(st.session_state.get("active_trades", set())) < 10:
-            try:
-              if "active_trades" not in st.session_state:
-                st.session_state.active_trades = set()
-              st.session_state.active_trades.add(sym)
-            except Exception:
-              pass
+            # AUTOMATYCZNE OTWIERANIE ZLECENIA
+            if (
+                st.session_state.get("trend_bot_fut_active", False)
+                and not is_active
+            ):
+              if len(st.session_state.get("active_trades", set())) < 10:
+                try:
+                  if "active_trades" not in st.session_state:
+                    st.session_state.active_trades = set()
+                  st.session_state.active_trades.add(sym)
+                except Exception:
+                  pass
 
-        fut_data_list.append({
-            "Para": sym,
-            "Cena": f"{c_price:.4f}",
-            "Status": status,
-            "Pozycja": "AKTYWNA" if is_active else "BRAK",
-        })
+            fut_data_list.append({
+                "Para": sym,
+                "Cena": f"{c_price:.4f}",
+                "Status": status,
+                "Pozycja": "AKTYWNA" if is_active else "BRAK",
+            })
+          except Exception:
+            pass
+
+       
+
+    
       except Exception:
         pass
 
