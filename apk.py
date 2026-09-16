@@ -890,7 +890,7 @@ if futures_ex:
     except Exception:
         pass
         
-  if futures_ex and st.session_state.trend_bot_fut_active:
+    if futures_ex and st.session_state.trend_bot_fut_active:
         try:
             real_positions = futures_ex.fetch_positions()
             active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
