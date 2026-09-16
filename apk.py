@@ -891,7 +891,14 @@ if futures_ex:
         pass
 if futures_ex and st.session_state.trend_bot_fut_active:
     try:
-        if len(st.session_state.active_trades) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
+           try:
+                real_positions = futures_ex.fetch_positions()
+                active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
+            except:
+                active_symbols = []
+
+            if len(active_symbols) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
+
             f_tickers = futures_ex.fetch_tickers()
             best_fut_candidates = sorted(
                 [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym and sym not in st.session_state.active_trades],
