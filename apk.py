@@ -1204,7 +1204,7 @@ if futures_ex:
                               amount=contract_amount,
                               params={"reduceOnly": True}
                           )
-                     if is_active and c_macd <= c_sig:
+                    if is_active and c_macd <= c_sig:
                       try:
                         positions = futures_ex.fetch_positions([sym])
                         for p in positions:
