@@ -1165,8 +1165,8 @@ if futures_ex:
         )[:8]
         fut_data_list = []
         for sym in top_fut_view:
-        try:
-        f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
+            try:
+            f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
         time.sleep(0.01)
         f_df = pd.DataFrame(
             f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
