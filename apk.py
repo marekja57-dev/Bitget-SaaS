@@ -1213,21 +1213,23 @@ if futures_ex:
                   # 2. OTWIERANIE POZYCJI (gdy nie ma pozycji, jest sygnał wzrostowy i < 10 pozycji)
                   elif not is_active and c_macd > c_sig:
                     if len(st.session_state.get("active_trades", set())) < 10:
-                       try:
+                     try:
                       amount_usdt = 15.0 # Kwota w USDT na zlecenie
                       amount_tokens = amount_usdt / c_price
-                      
+
                       futures_ex.create_market_order(
                           symbol=sym,
                           side="buy",
                           amount=amount_tokens,
                           params={"marginMode": "isolated", "leverage": 10}
                       )
-                      
+
                       if "active_trades" not in st.session_state:
                         st.session_state.active_trades = set()
                       st.session_state.active_trades.add(sym)
                       is_active = True
+                    except Exception as e:
+                      st.error(f"Błąd otwierania: {e}")
                     except Exception as e:
                       st.error(f"Błąd otwierania: {e}")
 
