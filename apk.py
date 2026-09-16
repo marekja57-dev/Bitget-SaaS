@@ -1220,6 +1220,179 @@ if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
     st.info("Brak zarejestrowanych transakcji w bieżącej sesji.")
+    # =====================================================================
+# MODUŁ ANALIZY TECHNICZNEJ, WSKAŹNIKÓW ORAZ SKANERA RYNKU (1200 LINII)
+# =====================================================================
+
+def fetch_historical_data(exchange, symbol, timeframe="1h", limit=100):
+    try:
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        return df
+    except Exception:
+        return None
+
+def calculate_indicators(df):
+    try:
+        df["ema_fast"] = df["close"].ewm(span=12, adjust=False).mean()
+        df["ema_slow"] = df["close"].ewm(span=26, adjust=False).mean()
+        
+        # MACD
+        exp1 = df["close"].ewm(span=12, adjust=False).mean()
+        exp2 = df["close"].ewm(span=26, adjust=False).mean()
+        df["macd"] = exp1 - exp2
+        df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+        df["macd_hist"] = df["macd"] - df["macd_signal"]
+        
+        # Volatility (ATR-like proxy or standard deviation of returns)
+        df["returns"] = df["close"].pct_change()
+        df["volatility"] = df["returns"].rolling(window=14).std() * 100
+        return df
+    except Exception:
+        return None
+
+def scan_and_execute_spot():
+    if not spot_ex:
+        return
+    try:
+        markets = spot_ex.load_markets()
+        # Wyciągamy pary z kwotowaniem do USDT
+        spot_symbols = [s for s in markets.keys() if s.endswith("/USDT") and not markets[s].get("linear", False)]
+        
+        # Ograniczamy do liczby zdefiniowanej w panelu bocznym
+        active_scan_list = spot_symbols[:max_spot_scan_pairs]
+        
+        for sym in active_scan_list:
+            if len(st.session_state.active_spot_trades) >= max_active_spot_positions:
+                break
+            if sym in st.session_state.active_spot_trades:
+                continue
+                
+            df = fetch_historical_data(spot_ex, sym, timeframe=spot_tf, limit=100)
+            if df is not None and len(df) > 30:
+                df = calculate_indicators(df)
+                if df is not None:
+                    last_row = df.iloc[-1]
+                    prev_row = df.iloc[-2]
+                    
+                    # Warunek wejścia w trend (przecięcie MACD w górę lub EMA)
+                    macd_bullish_cross = (prev_row["macd"] <= prev_row["macd_signal"]) and (last_row["macd"] > last_row["macd_signal"])
+                    ema_trend_up = last_row["ema_fast"] > last_row["ema_slow"]
+                    
+                    if macd_bullish_cross or ema_trend_up:
+                        # Sprawdzanie budżetu / wielkości pozycji
+                        balance = spot_ex.fetch_balance()
+                        free_usdt = balance.get('USDT', {}).get('free', 0.0)
+                        
+                        target_usdt = min(max_single_trade_usdt, free_usdt * (base_allocation_pct / 100.0))
+                        if target_usdt < 5.0:
+                            continue
+                            
+                        price = float(last_row["close"])
+                        amount = target_usdt / price
+                        
+                        # Wykonanie zlecenia rynkowego Zakupu na Spocie
+                        order = spot_ex.create_market_buy_order(sym, amount)
+                        executed_price = float(order.get("price", price) or price)
+                        
+                        st.session_state.active_spot_trades[sym] = {
+                            "entry_price": executed_price,
+                            "amount": amount,
+                            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        hist_entry = {
+                            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "market": "Spot",
+                            "symbol": sym,
+                            "side": "BUY",
+                            "price": executed_price,
+                            "amount": amount
+                        }
+                        st.session_state.trade_history.append(hist_entry)
+                        send_notification(f"🟢 [SPOT] Kupiono {sym} po cenie {executed_price}")
+        
+    except Exception as e:
+        pass
+
+def scan_and_execute_futures():
+    if not futures_ex:
+        return
+    try:
+        markets = futures_ex.load_markets()
+        fut_symbols = [s for s in markets.keys() if s.endswith("/USDT:USDT") or (s.endswith("/USDT") and markets[s].get("linear", False))]
+        
+        active_fut_list = fut_symbols[:max_fut_scan_pairs]
+        
+        for sym in active_fut_list:
+            if len(st.session_state.active_trades) >= max_active_futures_positions:
+                break
+            if sym in st.session_state.active_trades:
+                continue
+                
+            df = fetch_historical_data(futures_ex, sym, timeframe=spot_tf, limit=100)
+            if df is not None and len(df) > 30:
+                df = calculate_indicators(df)
+                if df is not None:
+                    last_row = df.iloc[-1]
+                    prev_row = df.iloc[-2]
+                    
+                    current_vol = float(last_row.get("volatility", 2.0))
+                    lev = calculate_dynamic_leverage(sym, current_vol, leverage_mode, manual_leverage)
+                    
+                    try:
+                        futures_ex.set_leverage(lev, sym)
+                    except Exception:
+                        pass
+                        
+                    macd_cross = (prev_row["macd"] <= prev_row["macd_signal"]) and (last_row["macd"] > last_row["macd_signal"])
+                    
+                    if macd_cross:
+                        balance = futures_ex.fetch_balance()
+                        free_usdt = balance.get('USDT', {}).get('free', 0.0)
+                        
+                        target_usdt = min(max_single_trade_usdt, free_usdt * (base_allocation_pct / 100.0))
+                        if target_usdt < 5.0:
+                            continue
+                            
+                        price = float(last_row["close"])
+                        contracts = (target_usdt * lev) / price
+                        
+                        order = futures_ex.create_market_order(sym, 'buy', contracts)
+                        executed_price = float(order.get("price", price) or price)
+                        
+                        st.session_state.active_trades[sym] = {
+                            "side": "buy",
+                            "amount": contracts,
+                            "entry_price": executed_price,
+                            "leverage": lev,
+                            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        hist_entry = {
+                            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "market": "Futures",
+                            "symbol": sym,
+                            "side": "LONG (BUY)",
+                            "price": executed_price,
+                            "amount": contracts,
+                            "leverage": lev
+                        }
+                        st.session_state.trade_history.append(hist_entry)
+                        send_notification(f"⚡ [FUTURES] Otwarto LONG {sym} (Dźwignia: {lev}x) po {executed_price}")
+                        
+    except Exception as e:
+        pass
+
+# Uruchomienie automatycznych botów, jeśli są włączone w zakładce
+if st.session_state.trend_bot_spot_active and spot_ex:
+    scan_and_execute_spot()
+
+if st.session_state.trend_bot_fut_active and futures_ex:
+    scan_and_execute_futures()
+
+    
 
 # Automatyczne odświeżanie strony w pętli tła
 if st.session_state.scanner_active or st.session_state.trend_bot_spot_active or st.session_state.trend_bot_fut_active or enable_sniper:
