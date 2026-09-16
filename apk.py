@@ -877,6 +877,7 @@ if futures_ex:
                     if should_close_fut:
                         close_side = "sell" if side == "long" else "buy"
                         futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        st.session_state.active_trades.pop(sym, None) 
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "Typ": close_reason_fut,
