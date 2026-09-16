@@ -1191,7 +1191,7 @@ if futures_ex:
                 # AUTOMATYCZNE OTWIERANIE I ZAMYKANIE POZYCJI NA GIEŁDZIE
                 if st.session_state.get("trend_bot_fut_active", False):
             # 1. ZAMYKANIE POZYCJI
-            if is_active and c_macd <= c_sig:
+                if is_active and c_macd <= c_sig:
                 try:
                     positions = futures_ex.fetch_positions([sym])
                     for p in positions:
