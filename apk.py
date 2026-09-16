@@ -983,8 +983,6 @@ if futures_ex:
                             "Cena": f"{f_price:.4f}",
                         })
                         send_notification(f"🥾 [BOT] Otwarto {label} na {sym} ({bot_leverage}x)")
-    except Exception:
-        pass
 
 exchange_positions = {}
 if futures_ex:
