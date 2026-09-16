@@ -1224,14 +1224,10 @@ if futures_ex:
                             params={"marginMode": "isolated", "leverage": 10}
                         )
                         
-                        if "active_trades" not in st.session_state:
-                          st.session_state.active_trades = set()
-                        st.session_state.active_trades.add(sym)
-                        is_active = True
-                      except Exception as e:
-                        st.error(f"Błąd otwierania {sym}: {e}")
-                    except Exception as e:
-                      st.error(f"Błąd otwierania zlecenia {sym}: {e}")
+                      f "active_trades" not in st.session_state:
+                  st.session_state.active_trades = set()
+                st.session_state.active_trades.add(sym)
+                is_active = True
 
 
                 fut_data_list.append({
