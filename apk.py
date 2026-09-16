@@ -1191,22 +1191,22 @@ if futures_ex:
                 # AUTOMATYCZNE OTWIERANIE I ZAMYKANIE POZYCJI NA GIEŁDZIE
                 if st.session_state.get("trend_bot_fut_active", False):
             # 1. ZAMYKANIE POZYCJI
-                if is_active and c_macd <= c_sig:
-                try:
-                    positions = futures_ex.fetch_positions([sym])
-                    for p in positions:
-                        if p["symbol"] == sym and float(p.get("contracts", 0)) > 0:
-                            futures_ex.create_market_order(
-                                symbol=sym,
-                                side="sell",
-                                amount=float(p["contracts"]),
-                                params={"reduceOnly": True}
-                            )
-                    if "active_trades" in st.session_state and sym in st.session_state.active_trades:
-                        st.session_state.active_trades.remove(sym)
-                        is_active = False
-                except Exception as e:
-                    st.error(f"Błąd zamykania: {e}")
+                 if is_active and c_macd <= c_sig:
+                 try:
+                     positions = futures_ex.fetch_positions([sym])
+                     for p in positions:
+                         if p["symbol"] == sym and float(p.get("contracts", 0)) > 0:
+                             futures_ex.create_market_order(
+                                 symbol=sym,
+                                 side="sell",
+                                 amount=float(p["contracts"]),
+                                 params={"reduceOnly": True}
+                             )
+                     if "active_trades" in st.session_state and sym in st.session_state.active_trades:
+                         st.session_state.active_trades.remove(sym)
+                         is_active = False
+                 except Exception as e:
+                     st.error(f"Błąd zamykania: {e}")
 
             # 2. OTWIERANIE POZYCJI
             elif not is_active and c_macd > c_sig:
