@@ -1175,7 +1175,32 @@ if futures_ex:
                 c_macd = float(f_df["macd"].iloc[-1])
                 c_sig = float(f_df["signal"].iloc[-1])
                 status = "🟢 LONG (MACD > Signal)" if c_macd > c_sig else "🔴 SHORT (MACD < Signal)"
-                is_active = sym in st.session_state.active_trades
+                is_active = sym in st.session_state.
+                      # --- TUTAJ DODAJ AUTOMATYCZNE OTWIERANIE ZLECENIA ---
+        # Sprawdzamy czy Bot Futures jest włączony w panelu oraz czy para nie jest już aktywna
+        if st.session_state.get(
+            "trend_bot_fut_active", False
+        ) and not is_active:
+          # Sprawdzamy ile mamy aktualnie aktywnych (np. limit max 10)
+          if len(st.session_state.get("active_trades", set())) < 10:
+            try:
+              # Określenie kierunku (LONG / SHORT) na podstawie MACD
+              side_action = "buy" if c_macd > c_sig else "sell"
+
+              # Tutaj wywołujesz swoją funkcję zlecenia giełdowego, np.:
+              # amount = ... (twój budżet na pozycję, np. 50 USDT)
+              # order = futures_ex.create_market_order(sym, side_action, amount)
+
+              # Dodajemy symbol do aktywnych w sesji, żeby pętla wiedziała, że już weszliśmy
+              if "active_trades" not in st.session_state:
+                st.session_state.active_trades = set()
+              st.session_state.active_trades.add(sym)
+
+              print(f"AUTOMAT: Otwarto pozycję {sym} ({side_action})")
+            except Exception as order_err:
+              print(f"Błąd automatycznego otwarcia dla {sym}: {order_err}")
+        # ----------------------------------------------------
+
                 
                 fut_data_list.append({
                     "Para": sym,
