@@ -1189,24 +1189,43 @@ if futures_ex:
                 is_active = sym in st.session_state.get("active_trades", set())
 
                 # AUTOMATYCZNE OTWIERANIE I ZAMYKANIE POZYCJI NA GIEŁDZIE
-                if st.session_state.get("trend_bot_fut_active", False):
+        if st.session_state.get("trend_bot_fut_active", False):
             # 1. ZAMYKANIE POZYCJI
-                 if is_active and c_macd <= c_sig:
-                 try:
-                     positions = futures_ex.fetch_positions([sym])
-                     for p in positions:
-                         if p["symbol"] == sym and float(p.get("contracts", 0)) > 0:
-                             futures_ex.create_market_order(
-                                 symbol=sym,
-                                 side="sell",
-                                 amount=float(p["contracts"]),
-                                 params={"reduceOnly": True}
-                             )
-                     if "active_trades" in st.session_state and sym in st.session_state.active_trades:
-                         st.session_state.active_trades.remove(sym)
-                         is_active = False
-                 except Exception as e:
-                     st.error(f"Błąd zamykania: {e}")
+            if is_active and c_macd <= c_sig:
+                try:
+                    positions = futures_ex.fetch_positions([sym])
+                    for p in positions:
+                        if p["symbol"] == sym and float(p.get("contracts", 0)) > 0:
+                            futures_ex.create_market_order(
+                                symbol=sym,
+                                side="sell",
+                                amount=float(p["contracts"]),
+                                params={"reduceOnly": True}
+                            )
+                    if "active_trades" in st.session_state and sym in st.session_state.active_trades:
+                        st.session_state.active_trades.remove(sym)
+                        is_active = False
+                except Exception as e:
+                    st.error(f"Błąd zamykania: {e}")
+
+            # 2. OTWIERANIE POZYCJI
+            elif not is_active and c_macd > c_sig:
+                if len(st.session_state.get("active_trades", set())) < 10:
+                    try:
+                        amount_usdt = 15.0
+                        amount_tokens = amount_usdt / c_price
+                        futures_ex.create_market_order(
+                            symbol=sym,
+                            side="buy",
+                            amount=amount_tokens,
+                            params={"marginMode": "isolated", "leverage": 10}
+                        )
+                        if "active_trades" not in st.session_state:
+                            st.session_state.active_trades = set()
+                        st.session_state.active_trades.add(sym)
+                        is_active = True
+                    except Exception as e:
+                        st.error(f"Błąd otwierania: {e}")
 
             # 2. OTWIERANIE POZYCJI
             elif not is_active and c_macd > c_sig:
