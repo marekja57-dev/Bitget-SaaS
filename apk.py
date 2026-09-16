@@ -1178,16 +1178,15 @@ if futures_ex:
                 )
                 f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
 
-                              c_price = float(f_df["close"].iloc[-1])
-                c_price = float(f_df["close"].iloc[-1])
-                c_macd = float(f_df["macd"].iloc[-1])
-                c_sig = float(f_df["signal"].iloc[-1])
-                status = (
-                    "🟢 LONG (MACD > Signal)"
-                    if c_macd > c_sig
-                    else "🔴 SHORT (MACD < Signal)"
-                )
-                is_active = sym in st.session_state.get("active_trades", set())
+                   c_price = float(f_df["close"].iloc[-1])
+            c_macd = float(f_df["macd"].iloc[-1])
+            c_sig = float(f_df["signal"].iloc[-1])
+            status = (
+                "🟢 LONG (MACD > Signal)"
+                if c_macd > c_sig
+                else "🔴 SHORT (MACD < Signal)"
+            )
+            is_active = sym in st.session_state.get("active_trades", set())
 
         # AUTOMATYCZNE OTWIERANIE I ZAMYKANIE POZYCJI NA GIEŁDZIE
         if st.session_state.get("trend_bot_fut_active", False):
