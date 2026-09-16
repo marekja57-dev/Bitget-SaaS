@@ -889,6 +889,7 @@ if futures_ex:
                     pass
     except Exception:
         pass
+        
   if futures_ex and st.session_state.trend_bot_fut_active:
         try:
             real_positions = futures_ex.fetch_positions()
