@@ -1164,8 +1164,8 @@ if futures_ex:
             key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
         )[:8]
         fut_data_list = []
-    for sym in top_fut_view:
-      try:
+        for sym in top_fut_view:
+        try:
         f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
         time.sleep(0.01)
         f_df = pd.DataFrame(
