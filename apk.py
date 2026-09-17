@@ -341,28 +341,60 @@ scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 3, 60, 5)
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
 
+# =====================================================================
+# PANCERNY KILL SWITCH (ANULOWANIE ZLECEŃ + ZAMKNIĘCIE WSZYSTKIEGO)
+# =====================================================================
 if emergency_kill:
     if futures_ex:
+        close_errors = []
+        # 1. Anuluj wszystkie otwarte zlecenia oczekujące
+        try:
+            open_orders = futures_ex.fetch_open_orders()
+            for ord in open_orders:
+                try:
+                    futures_ex.cancel_order(ord['id'], ord['symbol'])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 2. Zamknij wszystkie otwarte pozycje z podwójną weryfikacją
         try:
             positions = futures_ex.fetch_positions()
             for p in positions:
                 contracts = float(p.get("contracts", 0))
                 if contracts > 0:
                     sym = p["symbol"]
-                    side = "sell" if p.get("side") == "long" else "buy"
+                    pos_side = str(p.get("side", "")).lower()
+                    side = "sell" if pos_side == "long" else "buy"
                     try:
+                        # Próba z redukcją
                         futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
                     except Exception:
-                        pass
-        except Exception:
-            pass
+                        try:
+                            # Awaryjna próba bez flagi reduceOnly w razie odrzucenia przez giełdę
+                            futures_ex.create_market_order(sym, side, contracts)
+                        except Exception as e:
+                            close_errors.append(f"{sym}: {e}")
+        except Exception as e:
+            close_errors.append(f"Fetch positions error: {e}")
 
     st.session_state.trend_bot_active = False
-    st.session_state.trade_history = []
+    st.session_state.trade_history.insert(0, {
+        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "Typ": "🛑 KILL SWITCH",
+        "Para": "WSZYSTKIE",
+        "Cena": "-",
+        "Info": "Awaryjne zamknięcie giełdy wywołane przez użytkownika."
+    })
     st.session_state.locked_symbols = set()
     st.session_state.open_candles = {}
-    st.success("🚨 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje.")
-    time.sleep(2)
+    
+    if 'close_errors' in locals() and close_errors:
+        st.error(f"🚨 KILL SWITCH wykonany z błędami: {close_errors}")
+    else:
+        st.success("🚨 KILL SWITCH WYKONANY SKUTECZNIE. Zamknięto pozycje i anulowano zlecenia.")
+    time.sleep(3)
     st.rerun()
 
 # =====================================================================
@@ -518,7 +550,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 last_closed_ts = df['timestamp'].iloc[-2]
                 
                 # === BEZWZGLĘDNA OCHRONA ŚWIECY (CANDLE COOLDOWN) ===
-                # Nie zamykaj pozycji na tej samej świecy, na której została otwarta!
                 opened_ts = st.session_state.open_candles.get(sym, 0)
                 if last_closed_ts == opened_ts:
                     continue
@@ -638,11 +669,9 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     is_bearish = last_fast < last_slow
                     
                     if is_bullish or is_bearish:
-                        # Natychmiastowe zablokowanie symbolu i zapamiętanie świecy wejścia
                         st.session_state.locked_symbols.add(sym)
                         st.session_state.open_candles[sym] = last_closed_ts
 
-                        # Dźwignia dynamiczna zależna od ATR (do limitu base_leverage)
                         if use_dynamic_leverage and atr > 0:
                             volatility_ratio = current_price / atr
                             calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
@@ -654,7 +683,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         except Exception:
                             pass
                             
-                        # === DYNAMICZNY MARGINES DOPASOWANY DO RYZYKA (Z LIMITEM Z SUWAKA) ===
                         if atr > 0 and current_price > 0:
                             risk_factor = current_price / (atr * 40.0) 
                             risk_factor = np.clip(risk_factor, 0.25, 1.0) 
