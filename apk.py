@@ -118,12 +118,12 @@ if st.query_params.get("success") == "true":
         st.query_params.clear()
 
 # =====================================================================
-# STYLIZACJA WYGLĄDU (WYMUSZENIE 4 KAFELKÓW W JEDNYM RZĘDZIE)
+# STYLIZACJA WYGLĄDU (WYMUSZENIE 4 KOLUMN W JEDNYM RZĘDZIE)
 # =====================================================================
 st.markdown(
     """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
     
-    /* Wymuszenie 4 kolumn w jednym rzędzie bez łamania wierszy */
+    /* Blokada przed łamaniem 4 kafelków */
     div[data-testid="stHorizontalBlock"] {
         display: flex;
         flex-direction: row;
@@ -426,7 +426,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE
+# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE NA GÓRZE
 # =====================================================================
 elapsed = datetime.now() - st.session_state.session_start_time
 total_seconds = int(elapsed.total_seconds())
