@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE
+# INICJALIZACJA BAZY DANYCH SQLITE (POPRAWIONA KOLEJNOŚĆ)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -44,16 +44,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users ( 
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             email TEXT UNIQUE, 
-            password TEXT, 
-            is_admin INTEGER DEFAULT 0, 
-            stripe_paid INTEGER DEFAULT 0, 
-            api_key TEXT, 
-            secret_key TEXT, 
-            passphrase TEXT 
+            password TEXT 
         ) 
     ''')
     conn.commit()
     
+    # Najpierw sprawdzamy i dodajemy kolumny, ZANIM zrobimy na nich jakikolwiek UPDATE
     cursor.execute("PRAGMA table_info(users)")
     existing_cols = [col[1] for col in cursor.fetchall()]
 
@@ -65,6 +61,7 @@ def init_db():
             except Exception:
                 pass
 
+    # Dopiero teraz, gdy kolumny na 100% istnieją, aktualizujemy uprawnienia
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
@@ -674,7 +671,7 @@ elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
     st.sidebar.warning("⚠️ Limit otwartych par ustawiony na 0. Bot nie otwiera nowych pozycji.")
 
 # =====================================================================
-# WIDOK AKTYWNYCH POZYCJI (Z POPRAWIONYM KAPITAŁEM W USDT)
+# WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
 st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle Top Wolumen Crypto)")
@@ -688,7 +685,6 @@ if exchange_positions:
         contracts = float(pos.get("contracts", 0))
         unreal_pnl = float(pos.get("unrealizedPnl", 0))
         
-        # Pobieranie / obliczanie wartości i kapitału w USDT
         notional = float(pos.get("notional", 0))
         if notional == 0 and entry_p > 0:
             notional = contracts * entry_p
