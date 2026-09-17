@@ -118,24 +118,51 @@ if st.query_params.get("success") == "true":
         st.query_params.clear()
 
 # =====================================================================
-# STYLIZACJA WYGLĄDU (WYMUSZENIE DOKŁADNIE 4 KOLUMN W JEDNYM RZĘDZIE)
+# STYLIZACJA WYGLĄDU (GWARANCJA DOKŁADNIE 4 KAFELKÓW)
 # =====================================================================
 st.markdown(
     """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
     
-    /* Blokada przed łamaniem i wymuszenie równego układu 4 kafelków */
-    div[data-testid="stHorizontalBlock"] {
+    /* Niezależny, sztywny układ dokładnie 4 kafelków */
+    .metrics-row {
         display: flex;
         flex-direction: row;
         flex-wrap: nowrap !important;
-        gap: 12px;
+        gap: 14px;
+        width: 100%;
+        margin-bottom: 10px;
     }
-    div[data-testid="stHorizontalBlock"] > div {
+    .metric-card {
         flex: 1;
         min-width: 0;
+        border: 2px solid #f3d57a;
+        border-radius: 10px;
+        padding: 12px 14px;
+        background-color: rgba(243, 213, 122, 0.03);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    .metric-label {
+        font-family: 'Cinzel', serif;
+        color: #f3d57a;
+        font-size: 0.85rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .metric-value {
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: #ffffff;
+        margin-bottom: 4px;
+    }
+    .metric-delta {
+        font-size: 0.75rem;
+        color: #e6c687;
     }
 
-    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } div[data-testid="stMetric"] { border: 2px solid #f3d57a; border-radius: 10px; padding: 10px 12px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } div[data-testid="stMetric"] label { color: #f3d57a !important; } </style> """,
+    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } </style> """,
     unsafe_allow_html=True,
 )
 
@@ -426,38 +453,37 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE NA GÓRZE (BEZ ŚMIECI)
+# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE (HTML GRID)
 # =====================================================================
 elapsed = datetime.now() - st.session_state.session_start_time
 total_seconds = int(elapsed.total_seconds())
 hours, remainder = divmod(total_seconds, 3600)
 minutes, seconds = divmod(remainder, 60)
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(
-        label="🔵 Portfel Futures", 
-        value=f"{fut_total:.2f} USDT", 
-        delta=f"Wolne: {fut_free:.2f} USDT"
-    )
-with col2:
-    st.metric(
-        label="📊 Wyniki Futures (PnL)", 
-        value=f"{total_unrealized_pnl:+.2f} USDT", 
-        delta=f"Status: {'Aktywny' if st.session_state.scanner_active else 'Zatrzymany'}"
-    )
-with col3:
-    st.metric(
-        label="📈 Sloty Futures", 
-        value=f"{active_positions_count} / {max_active_futures_positions}", 
-        delta="Aktywne / Maksymalne"
-    )
-with col4:
-    st.metric(
-        label="⏱️ Czas Sesji", 
-        value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", 
-        delta=f"Interwał: {scan_interval}s"
-    )
+st.markdown(f"""
+    <div class="metrics-row">
+        <div class="metric-card">
+            <div class="metric-label">🔵 Portfel Futures</div>
+            <div class="metric-value">{fut_total:.2f} USDT</div>
+            <div class="metric-delta">Wolne: {fut_free:.2f} USDT</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">📊 Wyniki Futures (PnL)</div>
+            <div class="metric-value">{total_unrealized_pnl:+.2f} USDT</div>
+            <div class="metric-delta">Status: {'Aktywny' if st.session_state.scanner_active else 'Zatrzymany'}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">📈 Sloty Futures</div>
+            <div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
+            <div class="metric-delta">Aktywne / Maksymalne</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">⏱️ Czas Sesji</div>
+            <div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
+            <div class="metric-delta">Interwał: {scan_interval}s</div>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
