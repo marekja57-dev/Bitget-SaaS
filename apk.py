@@ -24,7 +24,7 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl"]
 
 def is_user_admin():
-email = str(st.session_state.get("user_email", "")).strip().lower()
+    email = str(st.session_state.get("user_email", "")).strip().lower()
 if email in ADMIN_EMAILS:
 return True
 return bool(st.session_state.get("is_admin", False))
