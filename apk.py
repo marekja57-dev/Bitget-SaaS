@@ -4,12 +4,13 @@ import os
 sqlite3 = __import__('sqlite3')
 import time
 import ccxt
+import numpy as np
 import pandas as pd
 import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Trend-Following + SL/TP",
+    page_title="Bitget Futures - Full Market Long/Short Risk Bot",
     layout="wide",
 )
 
@@ -156,7 +157,7 @@ st.markdown(
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
-        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">TREND-FOLLOWING + SL/TP</div> """,
+        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-DYNAMIC BOT</div> """,
         unsafe_allow_html=True,
     )
 
@@ -307,23 +308,27 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
 futures_ex = get_futures_exchange()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 Ustawienia Strategii Trendu")
-trade_symbol = st.sidebar.text_input("Handlowana Para (np. BTC/USDT:USDT)", value="BTC/USDT:USDT")
-trade_budget_usdt = st.sidebar.number_input("Budżet na pozycję (USDT)", 5.0, 5000.0, 50.0, 5.0)
-trend_leverage = st.sidebar.slider("Dźwignia (Leverage)", 1, 20, 5)
+st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Ryzyka")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛡️ Awaryjne Zabezpieczenia (SL / TP)")
-use_sl_tp = st.sidebar.checkbox("Włącz ochronę SL / TP", value=True)
-stop_loss_pct = st.sidebar.slider("Stop-Loss (%) - Tnij stratę", 0.5, 10.0, 2.0, 0.5)
-take_profit_pct = st.sidebar.slider("Take-Profit (%) - Zgarnij zysk", 1.0, 30.0, 5.0, 0.5)
+st.sidebar.markdown("### ⚖️ Dynamiczne Zarządzanie Ryzykiem i Dźwignią")
+risk_per_trade_pct = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.5, 5.0, 1.5, 0.5)
+use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od zmienności (ATR)", value=True)
+base_leverage = st.sidebar.slider("Bazowa max dźwignia", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔄 Odświeżanie Tła")
-scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 2, 60, 5)
+st.sidebar.markdown("### 🛡️ Awaryjny SL / TP (Opcjonalny Wentyl Bezpieczeństwa)")
+use_optional_sltp = st.sidebar.checkbox("Włącz awaryjne SL/TP jako strażnika", value=False)
+safety_sl_pct = st.sidebar.slider("Awaryjny Stop-Loss (%)", 1.0, 15.0, 4.0, 0.5)
+safety_tp_pct = st.sidebar.slider("Awaryjny Take-Profit (%)", 2.0, 40.0, 8.0, 0.5)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔄 Skanowanie Rynku")
+scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 3, 60, 5)
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
@@ -346,7 +351,7 @@ if emergency_kill:
 
     st.session_state.trend_bot_active = False
     st.session_state.trade_history = []
-    st.success("🚨 KILL SWITCH WYKONANY. Zamknięto pozycje.")
+    st.success("🚨 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje.")
     time.sleep(2)
     st.rerun()
 
@@ -409,130 +414,217 @@ with col3:
     mins, secs = divmod(rem, 60)
     st.metric(label="⏰ Czas Sesji", value=f"{hours:02d}:{mins:02d}:{secs:02d}", delta=f"Interwał: {scan_interval}s")
 with col4:
-    st.metric(label="🎯 Aktywne Pozycje", value=f"{active_positions_count}", delta=f"Para: {trade_symbol}")
+    st.metric(label="🎯 Aktywne Pozycje", value=f"{active_positions_count}", delta=f"Limit: {max_active_pairs}")
 
 st.markdown("---")
 
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Trend-Following Bot + Awaryjne SL/TP")
+st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
-        if st.button("🚀 Uruchom Bota (Trend + SL/TP)", type="primary", use_container_width=True):
+        if st.button("🚀 Uruchom Skaner Long/Short", type="primary", use_container_width=True):
             st.session_state.trend_bot_active = True
             st.rerun()
     else:
-        if st.button("⏹️ Zatrzymaj Bota", type="secondary", use_container_width=True):
+        if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
             st.session_state.trend_bot_active = False
             st.rerun()
 with col_status:
     if st.session_state.trend_bot_active:
-        st.success("STATUS: BOT AKTYWNY")
+        st.success("STATUS: SKANER AKTYWNY")
     else:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# LOGIKA BOTA (TREND + SPRAWDZANIE SL/TP)
+# LOGIKA BOTA (LONG & SHORT + DYNAMIC RISK + OPTIONAL SL/TP)
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active:
     try:
-        # Pobieramy świeczki z wykresu i liczymy EMA
-        ohlcv = futures_ex.fetch_ohlcv(trade_symbol, timeframe=timeframe_choice, limit=100)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        markets = futures_ex.load_markets()
+        usdt_symbols = [
+            s for s, m in markets.items()
+            if m.get('swap') and m.get('quote') == 'USDT' and m.get('active') and s.endswith(':USDT')
+        ]
         
-        df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
-        df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
-        
-        last_fast = df['fast_ema'].iloc[-1]
-        last_slow = df['slow_ema'].iloc[-1]
-        prev_fast = df['fast_ema'].iloc[-2]
-        prev_slow = df['slow_ema'].iloc[-2]
-        current_price = df['close'].iloc[-1]
-
-        # Stan pozycji
-        current_pos = exchange_positions.get(trade_symbol, None)
-        has_long = current_pos and float(current_pos.get('contracts', 0)) > 0 and current_pos.get('side') == 'long'
-        
-        # Sprawdzamy SL/TP jeśli mamy otwarto pozycję
-        sl_tp_triggered = False
-        if has_long and use_sl_tp:
-            entry_price = float(current_pos.get('entryPrice', 0))
-            if entry_price > 0:
-                sl_price = entry_price * (1.0 - (stop_loss_pct / 100.0))
-                tp_price = entry_price * (1.0 + (take_profit_pct / 100.0))
+        # 1. Obsługa otwartych pozycji (zarządzanie trendem + opcjonalny awaryjny SL/TP)
+        for sym, pos in list(exchange_positions.items()):
+            contracts = float(pos.get('contracts', 0))
+            if contracts <= 0:
+                continue
                 
-                if current_price <= sl_price:
-                    contracts = float(current_pos.get('contracts', 0))
-                    futures_ex.create_market_order(trade_symbol, 'sell', contracts, params={"reduceOnly": True})
-                    st.session_state.trade_history.insert(0, {
-                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Typ": "🛑 STOP-LOSS (UTRACENIE STRATY)",
-                        "Para": trade_symbol,
-                        "Cena": f"{current_price:.4f}",
-                        "Info": f"Cena spadła poniżej SL ({sl_price:.4f})"
-                    })
-                    sl_tp_triggered = True
-                elif current_price >= tp_price:
-                    contracts = float(current_pos.get('contracts', 0))
-                    futures_ex.create_market_order(trade_symbol, 'sell', contracts, params={"reduceOnly": True})
-                    st.session_state.trade_history.insert(0, {
-                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Typ": "🎯 TAKE-PROFIT (ZYSK OSIĄGNIĘTY)",
-                        "Para": trade_symbol,
-                        "Cena": f"{current_price:.4f}",
-                        "Info": f"Cena osiągnęła TP ({tp_price:.4f})"
-                    })
-                    sl_tp_triggered = True
+            entry_price = float(pos.get('entryPrice', 0))
+            pos_side = pos.get('side', 'long') # 'long' lub 'short'
+            
+            try:
+                ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
+                df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
+                
+                current_price = df['close'].iloc[-1]
+                last_fast = df['fast_ema'].iloc[-1]
+                last_slow = df['slow_ema'].iloc[-1]
+                
+                closed_position = False
+                
+                # A. Opcjonalny awaryjny SL/TP (jeśli użytkownik włączył w panelu)
+                if use_optional_sltp and entry_price > 0:
+                    if pos_side == 'long':
+                        sl_price = entry_price * (1.0 - (safety_sl_pct / 100.0))
+                        tp_price = entry_price * (1.0 + (safety_tp_pct / 100.0))
+                        if current_price <= sl_price:
+                            futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "🛑 AWARYJNY STOP-LOSS (LONG)",
+                                "Para": sym,
+                                "Cena": f"{current_price:.4f}",
+                                "Info": f"Cena pod SL ({sl_price:.4f})"
+                            })
+                            closed_position = True
+                        elif current_price >= tp_price:
+                            futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "🎯 AWARYJNY TAKE-PROFIT (LONG)",
+                                "Para": sym,
+                                "Cena": f"{current_price:.4f}",
+                                "Info": f"Cena nad TP ({tp_price:.4f})"
+                            })
+                            closed_position = True
+                    else: # short
+                        sl_price = entry_price * (1.0 + (safety_sl_pct / 100.0))
+                        tp_price = entry_price * (1.0 - (safety_tp_pct / 100.0))
+                        if current_price >= sl_price:
+                            futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "🛑 AWARYJNY STOP-LOSS (SHORT)",
+                                "Para": sym,
+                                "Cena": f"{current_price:.4f}",
+                                "Info": f"Cena nad SL ({sl_price:.4f})"
+                            })
+                            closed_position = True
+                        elif current_price <= tp_price:
+                            futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": "🎯 AWARYJNY TAKE-PROFIT (SHORT)",
+                                "Para": sym,
+                                "Cena": f"{current_price:.4f}",
+                                "Info": f"Cena pod TP ({tp_price:.4f})"
+                            })
+                            closed_position = True
 
-        # Jeśli nie zadziałało SL/TP, sprawdzamy sygnały z wykresu (trend-following)
-        if not sl_tp_triggered:
-            is_uptrend = last_fast > last_slow
-            trend_reversed = prev_fast >= prev_slow and last_fast < last_slow
+                # B. Zamknięcie pozycji z powodu odwrócenia trendu EMA
+                if not closed_position:
+                    if pos_side == 'long' and last_fast < last_slow:
+                        futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": "📉 ZAMKNIĘCIE LONG (TREND SPADEK)",
+                            "Para": sym,
+                            "Cena": f"{current_price:.4f}",
+                            "Info": "Fast EMA < Slow EMA"
+                        })
+                    elif pos_side == 'short' and last_fast > last_slow:
+                        futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": "📈 ZAMKNIĘCIE SHORT (TREND WZROST)",
+                            "Para": sym,
+                            "Cena": f"{current_price:.4f}",
+                            "Info": "Fast EMA > Slow EMA"
+                        })
+                time.sleep(0.3)
+            except Exception:
+                pass
 
-            # 1. Wejście w trend wzrostowy
-            if is_uptrend and not has_long and fut_free >= 5.0:
+        # 2. Skanowanie nowych okazji (Long i Short) z dynamicznym ryzykiem i dźwignią
+        if active_positions_count < max_active_pairs and fut_free >= 5.0:
+            for sym in usdt_symbols:
+                if sym in exchange_positions:
+                    continue
+                if active_positions_count >= max_active_pairs:
+                    break
+                    
                 try:
-                    futures_ex.set_leverage(trend_leverage, trade_symbol)
+                    ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
+                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
+                    df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
+                    
+                    # Obliczenie ATR do dynamicznej oceny ryzyka i zmienności
+                    high_low = df['high'] - df['low']
+                    high_close = np.abs(df['high'] - df['close'].shift())
+                    low_close = np.abs(df['low'] - df['close'].shift())
+                    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                    atr = tr.rolling(window=14).mean().iloc[-1]
+                    
+                    current_price = df['close'].iloc[-1]
+                    last_fast = df['fast_ema'].iloc[-1]
+                    last_slow = df['slow_ema'].iloc[-1]
+                    
+                    # Określenie kierunku: Long (wzrosty) lub Short (spadki)
+                    is_bullish = last_fast > last_slow
+                    is_bearish = last_fast < last_slow
+                    
+                    if is_bullish or is_bearish:
+                        # Dynamiczny dobór dźwigni i kwoty w zależności od zmienności (ATR) i ryzyka
+                        if use_dynamic_leverage and atr > 0:
+                            volatility_ratio = current_price / atr
+                            calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
+                        else:
+                            calculated_leverage = base_leverage
+                            
+                        try:
+                            futures_ex.set_leverage(calculated_leverage, sym)
+                        except Exception:
+                            pass
+                            
+                        # Obliczenie budżetu na podstawie procentu ryzyka kapitału
+                        risk_budget = fut_total * (risk_per_trade_pct / 100.0) * calculated_leverage
+                        budget = max(5.0, min(fut_free, risk_budget))
+                        
+                        contracts = (budget * calculated_leverage) / current_price
+                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        
+                        if contracts_prec > 0:
+                            if is_bullish:
+                                futures_ex.create_market_order(sym, 'buy', contracts_prec)
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Typ": "📈 NOWY LONG (WZROST)",
+                                    "Para": sym,
+                                    "Cena": f"{current_price:.4f}",
+                                    "Info": f"Dźwignia: {calculated_leverage}x | Ryzyko: {risk_per_trade_pct}%"
+                                })
+                            else:
+                                futures_ex.create_market_order(sym, 'sell', contracts_prec)
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Typ": "📉 NOWY SHORT (SPADEK)",
+                                    "Para": sym,
+                                    "Cena": f"{current_price:.4f}",
+                                    "Info": f"Dźwignia: {calculated_leverage}x | Ryzyko: {risk_per_trade_pct}%"
+                                })
+                            active_positions_count += 1
+                            time.sleep(0.5)
+                            st.rerun()
                 except Exception:
                     pass
-                
-                budget = min(fut_free, trade_budget_usdt)
-                contracts = (budget * trend_leverage) / current_price
-                contracts_prec = float(futures_ex.amount_to_precision(trade_symbol, contracts))
-                
-                futures_ex.create_market_order(trade_symbol, 'buy', contracts_prec)
-                st.session_state.trade_history.insert(0, {
-                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Typ": "📈 TREND START (BUY)",
-                    "Para": trade_symbol,
-                    "Cena": f"{current_price:.4f}",
-                    "Info": f"Fast EMA > Slow EMA"
-                })
-                st.rerun()
-
-            # 2. Odwrócenie trendu – szybka ucieczka
-            elif (trend_reversed or not is_uptrend) and has_long:
-                contracts = float(current_pos.get('contracts', 0))
-                futures_ex.create_market_order(trade_symbol, 'sell', contracts, params={"reduceOnly": True})
-                st.session_state.trade_history.insert(0, {
-                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Typ": "📉 ODWRÓCENIE TRENDU",
-                    "Para": trade_symbol,
-                    "Cena": f"{current_price:.4f}",
-                    "Info": f"Fast EMA < Slow EMA"
-                })
-                st.rerun()
-
+                    
     except Exception as e:
-        st.error(f"Błąd pętli bota: {e}")
+        st.error(f"Błąd skanera rynku: {e}")
 
 # =====================================================================
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie (Long & Short)")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -554,13 +646,13 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Bot czeka na sygnał wykresu.")
+    st.info("Brak otwartych pozycji. Skaner analizuje rynek w poszukiwaniu trendów wzrostowych i spadkowych.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
 # =====================================================================
 st.markdown("---")
-st.subheader("📜 Dziennik Operacji i Zabezpieczeń")
+st.subheader("📜 Dziennik Operacji Rynkowych")
 if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
