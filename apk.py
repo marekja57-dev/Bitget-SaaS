@@ -312,7 +312,7 @@ st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Ryzyka")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 20, 5)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 50, 5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚖️ Dynamiczne Zarządzanie Ryzykiem i Dźwignią")
@@ -439,14 +439,15 @@ with col_status:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# LOGIKA BOTA (LONG & SHORT + DYNAMIC RISK + OPTIONAL SL/TP)
+# LOGIKA BOTA (WSZYSTKIE INSTRUMENTY Z USDT: KRYPTO, INDEKSY, TOWARY, WALUTY)
 # =====================================================================
-if futures_ex and st.session_state.trend_bot_active:
+if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
         markets = futures_ex.load_markets()
+        # Skanowanie WSZYSTKICH rynków swap rozliczanych w USDT (kryptowaluty, indeksy, towary, waluty itp.)
         usdt_symbols = [
             s for s, m in markets.items()
-            if m.get('swap') and m.get('quote') == 'USDT' and m.get('active') and s.endswith(':USDT')
+            if m.get('swap') and (m.get('quote') == 'USDT' or m.get('settle') == 'USDT') and m.get('active')
         ]
         
         # 1. Obsługa otwartych pozycji (zarządzanie trendem + opcjonalny awaryjny SL/TP)
@@ -456,7 +457,7 @@ if futures_ex and st.session_state.trend_bot_active:
                 continue
                 
             entry_price = float(pos.get('entryPrice', 0))
-            pos_side = pos.get('side', 'long') # 'long' lub 'short'
+            pos_side = pos.get('side', 'long')
             
             try:
                 ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
@@ -470,7 +471,7 @@ if futures_ex and st.session_state.trend_bot_active:
                 
                 closed_position = False
                 
-                # A. Opcjonalny awaryjny SL/TP (jeśli użytkownik włączył w panelu)
+                # A. Opcjonalny awaryjny SL/TP
                 if use_optional_sltp and entry_price > 0:
                     if pos_side == 'long':
                         sl_price = entry_price * (1.0 - (safety_sl_pct / 100.0))
@@ -495,7 +496,7 @@ if futures_ex and st.session_state.trend_bot_active:
                                 "Info": f"Cena nad TP ({tp_price:.4f})"
                             })
                             closed_position = True
-                    else: # short
+                    else:
                         sl_price = entry_price * (1.0 + (safety_sl_pct / 100.0))
                         tp_price = entry_price * (1.0 - (safety_tp_pct / 100.0))
                         if current_price >= sl_price:
@@ -543,7 +544,7 @@ if futures_ex and st.session_state.trend_bot_active:
             except Exception:
                 pass
 
-        # 2. Skanowanie nowych okazji (Long i Short) z dynamicznym ryzykiem i dźwignią
+        # 2. Skanowanie nowych okazji na wszystkich rynkach z USDT (krypto, indeksy, towary, waluty)
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in usdt_symbols:
                 if sym in exchange_positions:
@@ -557,7 +558,6 @@ if futures_ex and st.session_state.trend_bot_active:
                     df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
                     df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
                     
-                    # Obliczenie ATR do dynamicznej oceny ryzyka i zmienności
                     high_low = df['high'] - df['low']
                     high_close = np.abs(df['high'] - df['close'].shift())
                     low_close = np.abs(df['low'] - df['close'].shift())
@@ -568,12 +568,10 @@ if futures_ex and st.session_state.trend_bot_active:
                     last_fast = df['fast_ema'].iloc[-1]
                     last_slow = df['slow_ema'].iloc[-1]
                     
-                    # Określenie kierunku: Long (wzrosty) lub Short (spadki)
                     is_bullish = last_fast > last_slow
                     is_bearish = last_fast < last_slow
                     
                     if is_bullish or is_bearish:
-                        # Dynamiczny dobór dźwigni i kwoty w zależności od zmienności (ATR) i ryzyka
                         if use_dynamic_leverage and atr > 0:
                             volatility_ratio = current_price / atr
                             calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
@@ -585,7 +583,6 @@ if futures_ex and st.session_state.trend_bot_active:
                         except Exception:
                             pass
                             
-                        # Obliczenie budżetu na podstawie procentu ryzyka kapitału
                         risk_budget = fut_total * (risk_per_trade_pct / 100.0) * calculated_leverage
                         budget = max(5.0, min(fut_free, risk_budget))
                         
@@ -619,12 +616,14 @@ if futures_ex and st.session_state.trend_bot_active:
                     
     except Exception as e:
         st.error(f"Błąd skanera rynku: {e}")
+elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
+    st.sidebar.warning("⚠️ Limit otwartych par ustawiony na 0. Bot nie otwiera nowych pozycji.")
 
 # =====================================================================
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie (Long & Short)")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie (Wszystkie rynki USDT)")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -646,7 +645,7 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner analizuje rynek w poszukiwaniu trendów wzrostowych i spadkowych.")
+    st.info("Brak otwartych pozycji. Skaner analizuje wszystkie rynki USDT (kryptowaluty, indeksy, towary, waluty) w poszukiwaniu trendów.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
