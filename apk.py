@@ -10,7 +10,7 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Top 8 Volume Long/Short Bot",
+    page_title="Bitget Futures - Top Volume Long/Short Bot",
     layout="wide",
 )
 
@@ -320,7 +320,7 @@ st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Trendu")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 8, 5)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 20, 5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
@@ -336,7 +336,7 @@ safety_sl_pct = st.sidebar.slider("Awaryjny Stop-Loss (%)", 1.0, 15.0, 4.0, 0.5)
 safety_tp_pct = st.sidebar.slider("Awaryjny Take-Profit (%)", 2.0, 40.0, 8.0, 0.5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔄 Skanowanie Rynku (Ściśle TOP 8 Wolumenu)")
+st.sidebar.markdown("### 🔄 Skanowanie Rynku (Ściśle Top Wolumen Crypto)")
 scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 3, 60, 5)
 
 st.sidebar.markdown("---")
@@ -433,7 +433,7 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk (Ściśle TOP 8 Wolumenu)")
+st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk (Ściśle Top Wolumen Crypto)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
@@ -451,32 +451,55 @@ with col_status:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# LOGIKA BOTA (ŚCIŚLE TOP 8 PAR POD WZGLĘDEM WOLUMENU)
+# PANCERNA FUNKCJA POBIERANIA TOP WOLUMENU (BEZ ŚMIECI I TOWARÓW)
+# =====================================================================
+def get_top_volume_crypto_symbols(exchange, limit_count=20):
+    try:
+        tickers = exchange.fetch_tickers()
+        valid_items = []
+        for s, t in tickers.items():
+            # Tylko swap USDT
+            if not (s.endswith('/USDT:USDT') or s.endswith('/USDT')):
+                continue
+            # Wyklucz towary tradycyjne (np. XAG, XAU) oraz inne non-crypto
+            base = s.split('/')[0]
+            if base in ['XAG', 'XAU', 'EUR', 'GBP', 'USD', 'USDC']:
+                continue
+            
+            vol = t.get('quoteVolume')
+            try:
+                vol_val = float(vol) if vol is not None else 0.0
+            except (ValueError, TypeError):
+                vol_val = 0.0
+                
+            if vol_val > 0:
+                valid_items.append((s, vol_val))
+                
+        # Sortowanie malejące po faktycznym wolumenie USDT
+        valid_items.sort(key=lambda x: x[1], reverse=True)
+        top_list = [item[0] for item in valid_items[:limit_count]]
+        if len(top_list) > 0:
+            return top_list
+    except Exception:
+        pass
+        
+    # Sztywna awaryjna lista topowych kryptowalut o potężnym obrocie
+    return [
+        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT',
+        'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'LINK/USDT:USDT',
+        'DOT/USDT:USDT', 'NEAR/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT',
+        'SHIB/USDT:USDT', 'RENDER/USDT:USDT', 'FET/USDT:USDT', 'APT/USDT:USDT',
+        'AR/USDT:USDT', 'INJ/USDT:USDT', 'UNI/USDT:USDT', 'ATOM/USDT:USDT'
+    ]
+
+# =====================================================================
+# LOGIKA BOTA
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
-        markets = futures_ex.load_markets()
-        usdt_symbols = [
-            s for s, m in markets.items()
-            if m.get('swap') and (m.get('quote') == 'USDT' or m.get('settle') == 'USDT') and m.get('active')
-        ]
-        
-        # Bezpieczne pobranie tickerów i wyselekcjonowanie ŚCIŚLE TOP 8 o najwyższym wolumenie 24h
-        try:
-            tickers = futures_ex.fetch_tickers()
-            usdt_tickers = {
-                s: t for s, t in tickers.items()
-                if s in usdt_symbols and t.get('quoteVolume') is not None
-            }
-            sorted_usdt_symbols = sorted(
-                usdt_tickers.keys(),
-                key=lambda s: usdt_tickers[s].get('quoteVolume', 0),
-                reverse=True
-            )
-            top_symbols = sorted_usdt_symbols[:8]
-        except Exception:
-            # Awaryjna sztywna lista topowych par, jeśli API giełdy odrzuci masowy fetch
-            top_symbols = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'LINK/USDT:USDT']
+        # Pobieramy dynamicznie topowe pary (liczba pobieranych zależy od suwaka max_active_pairs lub max 20)
+        fetch_limit = max(max_active_pairs, 10)
+        top_symbols = get_top_volume_crypto_symbols(futures_ex, limit_count=fetch_limit)
         
         # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
@@ -578,7 +601,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji wyłącznie z TOP 8
+        # 2. Skanowanie i otwieranie nowych pozycji wyłącznie z TOP wolumenu
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
@@ -630,7 +653,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'buy', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (TOP 8 WOLUMENU)",
+                                    "Typ": "📈 NOWY LONG (TOP WOLUMEN)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
@@ -639,7 +662,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (TOP 8 WOLUMENU)",
+                                    "Typ": "📉 NOWY SHORT (TOP WOLUMEN)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
@@ -659,7 +682,7 @@ elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle TOP 8 Wolumenu)")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle Top Wolumen Crypto)")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -681,7 +704,7 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner monitoruje wyłącznie ściśle wyselekcjonowane TOP 8 par giełdy Bitget pod względem wolumenu 24h.")
+    st.info("Brak otwartych pozycji. Skaner monitoruje wyłącznie ściśle wyselekcjonowane czołowe kryptowaluty pod względem faktycznego obrotu 24h.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
