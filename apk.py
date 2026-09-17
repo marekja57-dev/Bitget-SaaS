@@ -314,7 +314,6 @@ def background_trading_daemon():
                     tickers = ex.fetch_tickers()
                     current_symbols = set(tickers.keys())
                     
-                    # Inicjalizacja listy widzianych symboli dla użytkownika, jeśli pusta
                     user_seen_key = f"seen_{u_id}"
                     if user_seen_key not in st.session_state:
                         st.session_state[user_seen_key] = current_symbols
@@ -582,7 +581,7 @@ leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)"
 manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3)
 
 # =====================================================================
-# NOWY MODUŁ: SNAJPER NOWYCH PAR (NEW LISTING AUTO-SNIPER)
+# SNAJPER NOWYCH PAR (NEW LISTING AUTO-SNIPER)
 # =====================================================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎯 Snajper Nowych Par (New Listings)")
@@ -601,9 +600,6 @@ def toggle_sniper_cb():
 st.sidebar.checkbox("🚀 Auto-Snajper Nowych Tokenów", value=st.session_state.new_listing_sniper_active, key="cb_sniper_active", on_change=toggle_sniper_cb)
 sniper_budget = st.sidebar.number_input("Budżet na nowy token (USDT)", min_value=5.0, value=20.0, step=5.0)
 sniper_leverage = st.sidebar.slider("Dźwignia Snajpera Nowych Par", 1, 10, 3)
-
-if st.sidebar.markdown(f"**Status Snajpera:** {'🟢 Nasłuchuje nowych par...' if st.session_state.new_listing_sniper_active else '🔴 Wyłączony'}"):
-    pass
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🧠 Interwał Analizy")
@@ -675,7 +671,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (4 W JEDNYM RZĘDZIE)
+# GŁÓWNE KAFELKI (4 W JEDNYM RZĘDZIE - WYROWNANE)
 # =====================================================================
 col1, col2, col3, col4 = st.columns(4)
 with col1:
@@ -693,14 +689,19 @@ with col2:
 with col3:
     st.metric(
         label="📈 Wynik Niezrealizowany", 
-        value=f"{total_unrealized_pnl:+.2f} USDT"
+        value=f"{total_unrealized_pnl:+.2f} USDT",
+        delta="P/L na żywo"
     )
 with col4:
     elapsed = datetime.now() - st.session_state.session_start_time
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    st.metric(label="⏰ Czas Sesji", value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", delta=f"Tło: 24/7 Aktywne")
+    st.metric(
+        label="⏰ Czas Sesji", 
+        value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", 
+        delta="Tło: 24/7 Aktywne"
+    )
 
 st.markdown("---")
 
