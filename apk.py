@@ -758,22 +758,24 @@ if emergency_kill:
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
     try:
-        # Próbujemy pobrać saldo ze sprecyzowanym typem konta Futures na Bitget
-        try:
-            f_bal = futures_ex.fetch_balance({"accountType": "usdt-futures"})
-        except Exception:
-            f_bal = futures_ex.fetch_balance()
-            
+        # Wymuszenie pobrania salda dla kontraktów Futures (Swap) na Bitget
+        f_bal = futures_ex.fetch_balance({"type": "swap"})
         if isinstance(f_bal, dict):
             if "USDT" in f_bal and isinstance(f_bal["USDT"], dict):
                 fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
                 fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
             elif "free" in f_bal and isinstance(f_bal["free"], dict):
-                fut_free = float(f_bal["free"].get("USDT", 0.0) or 0.0)
+                fut_free = float(f_bal.get("free", {}).get("USDT", 0.0) or 0.0)
                 fut_total = float(f_bal.get("total", {}).get("USDT", 0.0) or 0.0)
     except Exception:
-        # Cicha obsługa, żeby aplikacja nie wariowała na ekranie
-        pass
+        try:
+            # Awaryjne zapytanie standardowe
+            f_bal = futures_ex.fetch_balance()
+            fut_free = float(f_bal.get("free", {}).get("USDT", 0.0) or 0.0)
+            fut_total = float(f_bal.get("total", {}).get("USDT", 0.0) or 0.0)
+        except Exception:
+            pass
+
 
 
 
