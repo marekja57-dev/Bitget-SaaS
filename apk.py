@@ -759,10 +759,16 @@ fut_free, fut_total = 0.0, 0.0
 if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance()
-        fut_free = float(f_bal.get("free", {}).get("USDT", 0.0))
-        fut_total = float(f_bal.get("total", {}).get("USDT", 0.0))
-    except Exception:
-        pass
+        # Obsługa standardowej struktury CCXT lub struktury bezpośredniej Bitget Futures
+        if "free" in f_bal and isinstance(f_bal["free"], dict) and f_bal["free"].get("USDT") is not None:
+            fut_free = float(f_bal["free"].get("USDT", 0.0) or 0.0)
+            fut_total = float(f_bal.get("total", {}).get("USDT", 0.0) or 0.0)
+        elif "USDT" in f_bal and isinstance(f_bal["USDT"], dict):
+            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
+    except Exception as e:
+        st.error(f"⚠️ Błąd odczytu salda: {e}")
+
 
 total_unrealized_pnl = 0.0
 active_positions_count = 0
