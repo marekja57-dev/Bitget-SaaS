@@ -132,6 +132,8 @@ if "trend_bot_active" not in st.session_state:
     st.session_state.trend_bot_active = False
 if "locked_symbols" not in st.session_state:
     st.session_state.locked_symbols = set()
+if "open_candles" not in st.session_state:
+    st.session_state.open_candles = {}
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -317,8 +319,7 @@ slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "30m", "1h", "4h"], index=4)
 
-# Zwiększony zakres suwaka do 20 otwartych par jednocześnie
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie (sloty)", 1, 20, 1)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie (sloty)", 1, 20, 10)
 top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
 
 st.sidebar.markdown("---")
@@ -359,6 +360,7 @@ if emergency_kill:
     st.session_state.trend_bot_active = False
     st.session_state.trade_history = []
     st.session_state.locked_symbols = set()
+    st.session_state.open_candles = {}
     st.success("🚨 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje.")
     time.sleep(2)
     st.rerun()
@@ -406,7 +408,9 @@ if futures_ex:
         active_positions_count = st.session_state.get("last_active_count", 0)
         total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
 
+# Synchronizacja blokady z realnymi pozycjami giełdowymi
 st.session_state.locked_symbols = {s for s in st.session_state.locked_symbols if s in exchange_positions}
+st.session_state.open_candles = {s: ts for s, ts in st.session_state.open_candles.items() if s in exchange_positions}
 
 # =====================================================================
 # KAFELKI METRYK
@@ -487,7 +491,7 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
     ]
 
 # =====================================================================
-# LOGIKA BOTA (ZAMKNIĘTA ŚWIECA + DYNAMICZNY MARGINES RYZYKA + LIMIT)
+# LOGIKA BOTA (ZAMKNIĘTA ŚWIECA + COOLDOWN + DYNAMICZNY MARGINES)
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
@@ -511,6 +515,13 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 current_price = df['close'].iloc[-1]
                 last_fast = df['fast_ema'].iloc[-2]
                 last_slow = df['slow_ema'].iloc[-2]
+                last_closed_ts = df['timestamp'].iloc[-2]
+                
+                # === BEZWZGLĘDNA OCHRONA ŚWIECY (CANDLE COOLDOWN) ===
+                # Nie zamykaj pozycji na tej samej świecy, na której została otwarta!
+                opened_ts = st.session_state.open_candles.get(sym, 0)
+                if last_closed_ts == opened_ts:
+                    continue
                 
                 closed_position = False
                 
@@ -586,19 +597,24 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         })
                         closed_position = True
                 
-                if closed_position and sym in st.session_state.locked_symbols:
-                    st.session_state.locked_symbols.remove(sym)
+                if closed_position:
+                    if sym in st.session_state.locked_symbols:
+                        st.session_state.locked_symbols.remove(sym)
+                    if sym in st.session_state.open_candles:
+                        del st.session_state.open_candles[sym]
 
                 time.sleep(0.2)
             except Exception:
                 pass
 
         # 2. Skanowanie i otwieranie nowych pozycji w wolnych slotach
-        if active_positions_count < max_active_pairs and fut_free >= 5.0:
+        total_active_and_locked = len(exchange_positions) + len(st.session_state.locked_symbols)
+        if total_active_and_locked < max_active_pairs and fut_free >= 5.0:
             for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
                     continue
-                if active_positions_count >= max_active_pairs:
+                
+                if (len(exchange_positions) + len(st.session_state.locked_symbols)) >= max_active_pairs:
                     break
                     
                 try:
@@ -616,12 +632,15 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     current_price = df['close'].iloc[-1]
                     last_fast = df['fast_ema'].iloc[-2]
                     last_slow = df['slow_ema'].iloc[-2]
+                    last_closed_ts = df['timestamp'].iloc[-2]
                     
                     is_bullish = last_fast > last_slow
                     is_bearish = last_fast < last_slow
                     
                     if is_bullish or is_bearish:
+                        # Natychmiastowe zablokowanie symbolu i zapamiętanie świecy wejścia
                         st.session_state.locked_symbols.add(sym)
+                        st.session_state.open_candles[sym] = last_closed_ts
 
                         # Dźwignia dynamiczna zależna od ATR (do limitu base_leverage)
                         if use_dynamic_leverage and atr > 0:
@@ -668,7 +687,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                 })
-                            active_positions_count += 1
                             time.sleep(0.3)
                             st.rerun()
                 except Exception:
