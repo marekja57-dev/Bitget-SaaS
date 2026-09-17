@@ -412,30 +412,28 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (STABILNA SIATKA 2x2 - BRAK ROJZDÓW)
+# GŁÓWNE KAFELKI (CZYSTY UKŁAD 4 KOLUMN - BEZ DUPLIKATÓW)
 # =====================================================================
-c1, c2 = st.columns(2)
-with c1:
+col1, col2, col3, col4 = st.columns(4)
+with col1:
     st.metric(
         label="🔵 Portfel Futures", 
         value=f"{fut_total:.2f} USDT", 
         delta=f"Wolne: {fut_free:.2f} USDT"
     )
-with c2:
+with col2:
     st.metric(
         label="📊 Wyniki Futures (PnL)", 
         value=f"{total_unrealized_pnl:+.2f} USDT", 
         delta=f"Status: {'Aktywny' if st.session_state.scanner_active else 'Zatrzymany'}"
     )
-
-c3, c4 = st.columns(2)
-with c3:
+with col3:
     st.metric(
         label="📈 Sloty Futures", 
         value=f"{active_positions_count} / {max_active_futures_positions}", 
-        delta="Aktywne / Maksymalne sloty"
+        delta="Aktywne / Maksymalne"
     )
-with c4:
+with col4:
     elapsed = datetime.now() - st.session_state.session_start_time
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
