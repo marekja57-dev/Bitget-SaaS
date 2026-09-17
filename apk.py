@@ -418,39 +418,58 @@ if emergency_kill:
 # =====================================================================
 # WYLICZENIE SALDA I POZYCJI FUTURES
 # =====================================================================
-fut_free, fut_total = 0.0, 0.0
-if futures_ex:
-    try:
-        f_bal = futures_ex.fetch_balance({"type": "swap"})
-        if "USDT" in f_bal:
-            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
-            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
-    except Exception:
-        pass
+# WYLICZENIE SALDA I POZYCJI FUTURES z zabezpieczeniem cache sesji
+if "cached_fut_free" not in st.session_state:
+  st.session_state["cached_fut_free"] = 0.0
+if "cached_fut_total" not in st.session_state:
+  st.session_state["cached_fut_total"] = 0.0
 
-    if fut_total == 0.0:
-        try:
-            f_bal2 = futures_ex.fetch_balance()
-            if "USDT" in f_bal2:
-                fut_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
-                fut_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
-            elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
-                fut_free = float(f_bal2["free"]["USDT"] or 0.0)
-                fut_total = float(f_bal2.get("total", {}).get("USDT", fut_free) or fut_free)
-        except Exception:
-            pass
+fut_free = st.session_state["cached_fut_free"]
+fut_total = st.session_state["cached_fut_total"]
 
-total_unrealized_pnl = 0.0
-active_positions_count = 0
 if futures_ex:
+  try:
+    f_bal = futures_ex.fetch_balance({"type": "swap"})
+    if "USDT" in f_bal:
+      t_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+      t_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
+      if t_total > 0:
+        fut_free = t_free
+        fut_total = t_total
+        st.session_state["cached_fut_free"] = fut_free
+        st.session_state["cached_fut_total"] = fut_total
+  except Exception:
+    pass
+
+  if fut_total == 0.0:
     try:
-        positions = futures_ex.fetch_positions()
-        for p in positions:
-            if float(p.get("contracts", 0)) > 0:
-                active_positions_count += 1
-                total_unrealized_pnl += float(p.get("unrealizedPnl", 0.0))
+      f_bal2 = futures_ex.fetch_balance()
+      if "USDT" in f_bal2:
+        t_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
+        t_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
+        if t_total > 0:
+          fut_free = t_free
+          fut_total = t_total
+          st.session_state["cached_fut_free"] = fut_free
+          st.session_state["cached_fut_total"] = fut_total
+      elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
+        t_free = float(f_bal2["free"]["USDT"] or 0.0)
+        t_total = float(
+            f_bal2.get("total", {}).get("USDT", fut_free) or fut_free
+        )
+        if t_total > 0:
+          fut_free = t_free
+          fut_total = t_total
+          st.session_state["cached_fut_free"] = fut_free
+          st.session_state["cached_fut_total"] = fut_total
     except Exception:
-        pass
+      pass
+
+# Awaryjny fallback do pamięci sesji, gdyby giełda w ogóle nie odpowiedziała
+if fut_total == 0.0 and st.session_state["cached_fut_total"] > 0:
+  fut_free = st.session_state["cached_fut_free"]
+  fut_total = st.session_state["cached_fut_total"]
+
 
 # =====================================================================
 # GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE (HTML GRID)
