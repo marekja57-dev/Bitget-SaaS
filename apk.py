@@ -679,7 +679,6 @@ if futures_ex:
             contracts = float(pos.get("contracts", 0))
             sym = pos["symbol"]
             if contracts > 0:
-                # Upewniamy się, że para jest w aktywnych transakcjach
                 st.session_state.active_trades[sym] = True
                 side = pos.get("side", "")
                 try:
@@ -739,7 +738,6 @@ if futures_ex:
                 except Exception:
                     pass
             else:
-                # Jeśli pozycja wynosi 0 kontraktów na giełdzie, usuwamy z lokalnych aktywnych
                 st.session_state.active_trades.pop(sym, None)
     except Exception:
         pass
@@ -748,7 +746,6 @@ if futures_ex:
         try:
             real_positions = futures_ex.fetch_positions()
             active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
-            # Synchronizacja lokalnych aktywnych trade'ów z giełdą
             for sym in list(st.session_state.active_trades.keys()):
                 if sym not in active_symbols:
                     st.session_state.active_trades.pop(sym, None)
@@ -818,7 +815,6 @@ if futures_ex:
                             budget = fut_free
 
                         if budget >= MIN_FUT_TRADE:
-                            # Natychmiastowe oznaczenie w pamięci, aby pętla w tej samej sekundzie tego nie powtórzyła
                             st.session_state.active_trades[sym] = True
                             st.session_state.signal_cooldown[tf_key] = time.time()
 
@@ -928,33 +924,62 @@ else:
     st.info("Skonfiguruj klucze API Futures w panelu bocznym i zapisz je, aby widzieć skaner i portfel.")
 
 # =====================================================================
-# HISTORIA ZAMKNIĘTYCH POZYCJI I Z/S (Z GIEŁDY BITGET)
+# HISTORIA ZAMKNIĘTYCH POZYCJI I Z/S (Z GIEŁDY BITGET) - POPRAWIONE
 # =====================================================================
 st.markdown("---")
 st.subheader("📜 Dziennik Zamkniętych Pozycji i Zysków/Strat (Z Giełdy)")
 if futures_ex:
     try:
-        closed_orders = futures_ex.fetch_closed_orders(limit=30)
         closed_data = []
-        for o in closed_orders:
-            symbol = o.get("symbol")
-            side = o.get("side")
-            price = o.get("average") or o.get("price") or 0.0
-            amount = o.get("amount") or 0.0
-            timestamp = o.get("timestamp")
-            dt_str = pd.to_datetime(timestamp, unit="ms").strftime("%Y-%m-%d %H:%M:%S") if timestamp else "-"
-            
-            info = o.get("info", {})
-            pnl = info.get("profit", info.get("pnl", "N/A"))
-            
-            closed_data.append({
-                "Czas": dt_str,
-                "Para": symbol,
-                "Strona": side,
-                "Cena Wykonania": f"{float(price):.4f}" if price else "-",
-                "Ilość": f"{float(amount):.4f}" if amount else "-",
-                "Zysk / Strata (USDT)": str(pnl)
-            })
+        
+        # 1. Próbujemy pobrać faktyczne zyski z historii dochodów (realized_pnl)
+        try:
+            incomes = futures_ex.fetch_income(params={"productType": "usdt-futures", "limit": 30})
+            for inc in incomes:
+                if inc.get("incomeType") == "realized_pnl":
+                    timestamp = inc.get("timestamp")
+                    dt_str = pd.to_datetime(timestamp, unit="ms").strftime("%Y-%m-%d %H:%M:%S") if timestamp else "-"
+                    symbol = inc.get("symbol", "-")
+                    amount_pnl = float(inc.get("income", 0.0))
+                    closed_data.append({
+                        "Czas": dt_str,
+                        "Para": symbol,
+                        "Strona": "-",
+                        "Cena Wykonania": "-",
+                        "Ilość": "-",
+                        "Zysk / Strata (USDT)": f"{amount_pnl:+.2f}"
+                    })
+        except Exception:
+            pass
+
+        # 2. Jeśli fetch_income jest puste, pobieramy zlecenia i wyciągamy PnL z szerokiej puli pól Bitget
+        if not closed_data:
+            closed_orders = futures_ex.fetch_closed_orders(limit=30)
+            for o in closed_orders:
+                symbol = o.get("symbol")
+                side = o.get("side")
+                price = o.get("average") or o.get("price") or 0.0
+                amount = o.get("amount") or 0.0
+                timestamp = o.get("timestamp")
+                dt_str = pd.to_datetime(timestamp, unit="ms").strftime("%Y-%m-%d %H:%M:%S") if timestamp else "-"
+                
+                info = o.get("info", {})
+                pnl = info.get("profit") or info.get("pnl") or info.get("achievedProfits") or info.get("netProfit") or 0.0
+                try:
+                    pnl_val = float(pnl)
+                    pnl_str = f"{pnl_val:+.2f}" if pnl_val != 0.0 else "0.00"
+                except Exception:
+                    pnl_str = str(pnl) if pnl else "0.00"
+
+                closed_data.append({
+                    "Czas": dt_str,
+                    "Para": symbol,
+                    "Strona": side,
+                    "Cena Wykonania": f"{float(price):.4f}" if price else "-",
+                    "Ilość": f"{float(amount):.4f}" if amount else "-",
+                    "Zysk / Strata (USDT)": pnl_str
+                })
+
         if closed_data:
             st.dataframe(pd.DataFrame(closed_data), use_container_width=True)
         else:
