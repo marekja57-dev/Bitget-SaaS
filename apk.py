@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE
+# INICJALIZACJA BAZY DANYCH SQLITE (NAPRAWIONA)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -52,12 +52,18 @@ def init_db():
             passphrase TEXT 
         ) 
     ''')
+    conn.commit()
     
+    cursor.execute("PRAGMA table_info(users)")
+    existing_cols = [col[1] for col in cursor.fetchall()]
+
     for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0")]:
-        try:
-            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
-        except sqlite3.OperationalError:
-            pass
+        if col not in existing_cols:
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+                conn.commit()
+            except Exception:
+                pass
 
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
@@ -467,7 +473,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
         except Exception:
             sorted_usdt_symbols = usdt_symbols
         
-        # 1. Zarządzanie otwartymi pozycjami (zamykanie przy odwróceniu trendu EMA lub awaryjnym SL/TP)
+        # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
             contracts = float(pos.get('contracts', 0))
             if contracts <= 0:
@@ -537,7 +543,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             })
                             closed_position = True
 
-                # B. Zamknięcie przy odwróceniu trendu (Fast EMA przecięła Slow EMA)
+                # B. Zamknięcie przy odwróceniu trendu
                 if not closed_position:
                     if pos_side == 'long' and last_fast < last_slow:
                         futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
@@ -567,10 +573,9 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji w kolejności TOP WOLUMEN
+        # 2. Skanowanie i otwieranie nowych pozycji
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in sorted_usdt_symbols:
-                # Blokada: pomijamy, jeśli para ma już pozycję lub została właśnie zablokowana w tej sesji
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
                     continue
                 if active_positions_count >= max_active_pairs:
@@ -596,7 +601,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     is_bearish = last_fast < last_slow
                     
                     if is_bullish or is_bearish:
-                        # Natychmiast blokujemy symbol, żeby pętla nie weszła w niego drugi raz
                         st.session_state.locked_symbols.add(sym)
 
                         if use_dynamic_leverage and atr > 0:
@@ -611,8 +615,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             pass
                             
                         risk_budget = fut_total * (risk_per_trade_pct / 100.0) * calculated_leverage
-                        
-                        # Ścisłe ograniczenie: budżet nie może przekroczyć wolnych środków, budżetu ryzyka i MAKSYMALNEJ KWOTY Z SUWAKA
                         budget = max(5.0, min(fut_free, risk_budget, max_capital_per_trade))
                         
                         contracts = (budget * calculated_leverage) / current_price
@@ -692,4 +694,3 @@ else:
 if st.session_state.trend_bot_active:
     time.sleep(scan_interval)
     st.rerun()
-
