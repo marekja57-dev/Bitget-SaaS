@@ -10,7 +10,7 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Full Market Long/Short Risk Bot",
+    page_title="Bitget Futures - Top 8 Volume Long/Short Bot",
     layout="wide",
 )
 
@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE (NAPRAWIONA)
+# INICJALIZACJA BAZY DANYCH SQLITE
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -320,7 +320,7 @@ st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Trendu")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 50, 5)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 8, 5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
@@ -336,7 +336,7 @@ safety_sl_pct = st.sidebar.slider("Awaryjny Stop-Loss (%)", 1.0, 15.0, 4.0, 0.5)
 safety_tp_pct = st.sidebar.slider("Awaryjny Take-Profit (%)", 2.0, 40.0, 8.0, 0.5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔄 Skanowanie Rynku")
+st.sidebar.markdown("### 🔄 Skanowanie Rynku (Ściśle TOP 8 Wolumenu)")
 scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 3, 60, 5)
 
 st.sidebar.markdown("---")
@@ -408,7 +408,6 @@ if futures_ex:
         active_positions_count = st.session_state.get("last_active_count", 0)
         total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
 
-# Synchronizacja zablokowanych symboli z faktycznymi pozycjami na giełdzie
 st.session_state.locked_symbols = {s for s in st.session_state.locked_symbols if s in exchange_positions}
 
 # =====================================================================
@@ -434,7 +433,7 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk (Top Volume)")
+st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk (Ściśle TOP 8 Wolumenu)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
@@ -452,7 +451,7 @@ with col_status:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# LOGIKA BOTA (Z UWZGLĘDNIENIEM LIMITU Z SUWAKA MAKS. KWOTY)
+# LOGIKA BOTA (ŚCIŚLE TOP 8 PAR POD WZGLĘDEM WOLUMENU)
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
@@ -462,16 +461,22 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             if m.get('swap') and (m.get('quote') == 'USDT' or m.get('settle') == 'USDT') and m.get('active')
         ]
         
-        # Sortowanie od największego obrotu (Top Volume) do najmniejszego
+        # Bezpieczne pobranie tickerów i wyselekcjonowanie ŚCIŚLE TOP 8 o najwyższym wolumenie 24h
         try:
-            tickers = futures_ex.fetch_tickers(usdt_symbols)
+            tickers = futures_ex.fetch_tickers()
+            usdt_tickers = {
+                s: t for s, t in tickers.items()
+                if s in usdt_symbols and t.get('quoteVolume') is not None
+            }
             sorted_usdt_symbols = sorted(
-                usdt_symbols,
-                key=lambda s: tickers.get(s, {}).get('quoteVolume', 0) or 0,
+                usdt_tickers.keys(),
+                key=lambda s: usdt_tickers[s].get('quoteVolume', 0),
                 reverse=True
             )
+            top_symbols = sorted_usdt_symbols[:8]
         except Exception:
-            sorted_usdt_symbols = usdt_symbols
+            # Awaryjna sztywna lista topowych par, jeśli API giełdy odrzuci masowy fetch
+            top_symbols = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'LINK/USDT:USDT']
         
         # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
@@ -494,7 +499,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 
                 closed_position = False
                 
-                # A. Awaryjny SL/TP (opcjonalny)
+                # A. Awaryjny SL/TP
                 if use_optional_sltp and entry_price > 0:
                     if pos_side == 'long':
                         sl_price = entry_price * (1.0 - (safety_sl_pct / 100.0))
@@ -573,9 +578,9 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji
+        # 2. Skanowanie i otwieranie nowych pozycji wyłącznie z TOP 8
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
-            for sym in sorted_usdt_symbols:
+            for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
                     continue
                 if active_positions_count >= max_active_pairs:
@@ -625,7 +630,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'buy', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (Z TRENDEM)",
+                                    "Typ": "📈 NOWY LONG (TOP 8 WOLUMENU)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
@@ -634,7 +639,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (Z TRENDEM)",
+                                    "Typ": "📉 NOWY SHORT (TOP 8 WOLUMENU)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
@@ -654,7 +659,7 @@ elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie (Priorytetyzowane wg Wolumenu)")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle TOP 8 Wolumenu)")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -676,7 +681,7 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner przejmuje rynki USDT w kolejności od najwyższego 24h obrotu i czeka na sygnał trendu.")
+    st.info("Brak otwartych pozycji. Skaner monitoruje wyłącznie ściśle wyselekcjonowane TOP 8 par giełdy Bitget pod względem wolumenu 24h.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
