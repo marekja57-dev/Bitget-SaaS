@@ -118,17 +118,17 @@ if st.query_params.get("success") == "true":
         st.query_params.clear()
 
 # =====================================================================
-# STYLIZACJA WYGLĄDU (WYMUSZENIE 4 KOLUMN W JEDNYM RZĘDZIE)
+# STYLIZACJA WYGLĄDU (WYMUSZENIE DOKŁADNIE 4 KOLUMN W JEDNYM RZĘDZIE)
 # =====================================================================
 st.markdown(
     """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
     
-    /* Blokada przed łamaniem 4 kafelków */
+    /* Blokada przed łamaniem i wymuszenie równego układu 4 kafelków */
     div[data-testid="stHorizontalBlock"] {
         display: flex;
         flex-direction: row;
-        flex-wrap: nowrap;
-        gap: 10px;
+        flex-wrap: nowrap !important;
+        gap: 12px;
     }
     div[data-testid="stHorizontalBlock"] > div {
         flex: 1;
@@ -389,7 +389,7 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA I POZYCJI FUTURES (ODPORNE NA BŁĘDY BITGET)
+# WYLICZENIE SALDA I POZYCJI FUTURES
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
@@ -426,7 +426,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE NA GÓRZE
+# GŁÓWNE KAFELKI – DOKŁADNIE 4 W JEDNYM RZĘDZIE NA GÓRZE (BEZ ŚMIECI)
 # =====================================================================
 elapsed = datetime.now() - st.session_state.session_start_time
 total_seconds = int(elapsed.total_seconds())
