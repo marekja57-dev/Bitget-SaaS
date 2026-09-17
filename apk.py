@@ -54,7 +54,8 @@ def init_db():
             bot_active INTEGER DEFAULT 0,
             sniper_active INTEGER DEFAULT 0,
             bot_scan_pairs INTEGER DEFAULT 15,
-            max_active_positions INTEGER DEFAULT 5
+            max_active_positions INTEGER DEFAULT 5,
+            position_pct_allocation INTEGER DEFAULT 20
         ) 
     ''')
     
@@ -62,7 +63,8 @@ def init_db():
         ("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), 
         ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0"), 
         ("bot_active", "INTEGER DEFAULT 0"), ("sniper_active", "INTEGER DEFAULT 0"),
-        ("bot_scan_pairs", "INTEGER DEFAULT 15"), ("max_active_positions", "INTEGER DEFAULT 5")
+        ("bot_scan_pairs", "INTEGER DEFAULT 15"), ("max_active_positions", "INTEGER DEFAULT 5"),
+        ("position_pct_allocation", "INTEGER DEFAULT 20")
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -185,7 +187,7 @@ if not st.session_state.logged_in:
         if st.button("ZALOGUJ SIĘ", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
             user_row = cursor.fetchone()
             conn.close()
 
@@ -206,6 +208,7 @@ if not st.session_state.logged_in:
                 st.session_state.new_listing_sniper_active = bool(user_row[9])
                 st.session_state.bot_scan_pairs = user_row[10] if user_row[10] is not None else 15
                 st.session_state.max_active_positions = user_row[11] if user_row[11] is not None else 5
+                st.session_state.position_pct_allocation = user_row[12] if user_row[12] is not None else 20
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
             else:
@@ -260,11 +263,13 @@ if "bot_scan_pairs" not in st.session_state:
     st.session_state.bot_scan_pairs = 15
 if "max_active_positions" not in st.session_state:
     st.session_state.max_active_positions = 5
+if "position_pct_allocation" not in st.session_state:
+    st.session_state.position_pct_allocation = 20
 
 try:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE id = ?", (st.session_state.user_id,))
+    cursor.execute("SELECT bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE id = ?", (st.session_state.user_id,))
     r = cursor.fetchone()
     conn.close()
     if r:
@@ -272,6 +277,7 @@ try:
         st.session_state.new_listing_sniper_active = bool(r[1])
         st.session_state.bot_scan_pairs = r[2] if r[2] is not None else 15
         st.session_state.max_active_positions = r[3] if r[3] is not None else 5
+        st.session_state.position_pct_allocation = r[4] if r[4] is not None else 20
 except Exception:
     pass
 
@@ -315,12 +321,12 @@ def background_trading_daemon():
         try:
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
+            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
             active_users = cursor.fetchall()
             conn.close()
 
             for user in active_users:
-                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip, u_scan_pairs, u_max_pos = user
+                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip, u_scan_pairs, u_max_pos, u_pos_alloc = user
                 ex = get_futures_exchange(u_api, u_sec, u_pass)
                 if not ex:
                     continue
@@ -372,7 +378,7 @@ def background_trading_daemon():
                         tp_pct = 5.0
                         lev_mode = "🤖 Autonomiczny (max 10x)"
                         man_lev = 3
-                        pos_allocation = 20.0
+                        pos_allocation = u_pos_alloc if u_pos_alloc is not None else 20.0
                         risk_red = True
                         min_trade = 5.0
                         limit_pairs = u_scan_pairs if u_scan_pairs is not None else 15
@@ -595,7 +601,19 @@ max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywny
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Górny)")
-position_pct_allocation = st.sidebar.slider("Maksymalny % wolnych środków na 1 pozycję", 5, 100, 20, 5)
+def update_pos_allocation():
+    val = st.session_state.slider_pos_alloc
+    st.session_state.position_pct_allocation = val
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET position_pct_allocation = ? WHERE id = ?", (val, st.session_state.user_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+position_pct_allocation = st.sidebar.slider("Maksymalny % wolnych środków na 1 pozycję", 5, 100, value=st.session_state.position_pct_allocation, step=5, key="slider_pos_alloc", on_change=update_pos_allocation)
 risk_reduction_enabled = st.sidebar.checkbox("🧠 Inteligentna redukcja kapitału przy wysokim ryzyku (zmienności)", value=True)
 
 st.sidebar.markdown("---")
@@ -901,4 +919,3 @@ else:
 
 time.sleep(scan_interval)
 st.rerun()
-
