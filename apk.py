@@ -631,7 +631,7 @@ if futures_ex and st.session_state.listing_sniper_active:
             newly_listed = current_market_symbols - st.session_state.known_markets
             if newly_listed:
                 for new_sym in newly_listed:
-                    if "BULL" in new_sym or "BEAR" in new_sym:
+                    if "BULL" in new_sym or "BEAR" in new_sym or new_sym in st.session_state.active_trades:
                         continue
                     try:
                         tickers_chk = futures_ex.fetch_tickers()
@@ -652,6 +652,7 @@ if futures_ex and st.session_state.listing_sniper_active:
                             except Exception:
                                 futures_ex.create_order(new_sym, 'market', 'buy', float(contracts))
                            
+                            st.session_state.active_trades[new_sym] = True
                             t_item = {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                                 "Typ": "🎯 LISTING SNIPER LONG",
@@ -676,8 +677,10 @@ if futures_ex:
         current_positions = futures_ex.fetch_positions()
         for pos in current_positions:
             contracts = float(pos.get("contracts", 0))
+            sym = pos["symbol"]
             if contracts > 0:
-                sym = pos["symbol"]
+                # Upewniamy się, że para jest w aktywnych transakcjach
+                st.session_state.active_trades[sym] = True
                 side = pos.get("side", "")
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
@@ -735,6 +738,9 @@ if futures_ex:
                         save_trade_to_db(st.session_state.user_id, t_item)
                 except Exception:
                     pass
+            else:
+                # Jeśli pozycja wynosi 0 kontraktów na giełdzie, usuwamy z lokalnych aktywnych
+                st.session_state.active_trades.pop(sym, None)
     except Exception:
         pass
 
@@ -742,6 +748,10 @@ if futures_ex:
         try:
             real_positions = futures_ex.fetch_positions()
             active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
+            # Synchronizacja lokalnych aktywnych trade'ów z giełdą
+            for sym in list(st.session_state.active_trades.keys()):
+                if sym not in active_symbols:
+                    st.session_state.active_trades.pop(sym, None)
         except Exception:
             active_symbols = []
 
@@ -752,7 +762,7 @@ if futures_ex:
             try:
                 f_tickers = futures_ex.fetch_tickers()
                 best_fut_candidates = sorted(
-                    [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym and sym not in active_symbols],
+                    [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym and sym not in active_symbols and sym not in st.session_state.active_trades],
                     key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
                 )[:max_fut_scan_pairs]
 
@@ -783,7 +793,7 @@ if futures_ex:
 
                 for item in top_signal_pairs:
                     sym = item["symbol"]
-                    if sym in active_symbols:
+                    if sym in active_symbols or sym in st.session_state.active_trades:
                         continue
 
                     f_price = item["price"]
@@ -794,7 +804,7 @@ if futures_ex:
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     tf_key = f"trend_bot_fut_{sym}"
                    
-                    if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 60:
+                    if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 120:
                         max_allowed_budget = position_fixed_budget
                        
                         if risk_reduction_enabled:
@@ -808,6 +818,10 @@ if futures_ex:
                             budget = fut_free
 
                         if budget >= MIN_FUT_TRADE:
+                            # Natychmiastowe oznaczenie w pamięci, aby pętla w tej samej sekundzie tego nie powtórzyła
+                            st.session_state.active_trades[sym] = True
+                            st.session_state.signal_cooldown[tf_key] = time.time()
+
                             try:
                                 futures_ex.set_leverage(bot_leverage, sym)
                             except Exception:
@@ -820,9 +834,6 @@ if futures_ex:
                             except Exception:
                                 futures_ex.create_order(sym, 'market', side, float(contracts))
 
-                            st.session_state.signal_cooldown[tf_key] = time.time()
-                            st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
-                            
                             t_item = {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                                 "Typ": f"BOT FUTURES {label}",
