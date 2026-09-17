@@ -10,7 +10,7 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Top Volume Trend Bot",
+    page_title="Bitget Futures - Full Market Long/Short Risk Bot",
     layout="wide",
 )
 
@@ -44,21 +44,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users ( 
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             email TEXT UNIQUE, 
-            password TEXT 
+            password TEXT, 
+            is_admin INTEGER DEFAULT 0, 
+            stripe_paid INTEGER DEFAULT 0, 
+            api_key TEXT, 
+            secret_key TEXT, 
+            passphrase TEXT 
         ) 
     ''')
-    conn.commit()
     
-    cursor.execute("PRAGMA table_info(users)")
-    existing_cols = [col[1] for col in cursor.fetchall()]
-
     for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0")]:
-        if col not in existing_cols:
-            try:
-                cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
-                conn.commit()
-            except Exception:
-                pass
+        try:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
 
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
@@ -130,8 +129,6 @@ if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
 if "trend_bot_active" not in st.session_state:
     st.session_state.trend_bot_active = False
-if "locked_symbols" not in st.session_state:
-    st.session_state.locked_symbols = set()
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -160,7 +157,7 @@ st.markdown(
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
-        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">TREND BOT - PEŁNA PULA</div> """,
+        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-DYNAMIC BOT</div> """,
         unsafe_allow_html=True,
     )
 
@@ -311,16 +308,15 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
 futures_ex = get_futures_exchange()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 Ustawienia Strategii Trendu EMA")
+st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Ryzyka")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 20, 1) # Poprawione do 20
-top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Zarządzanie Kapitałem (Pełna Pula)")
-max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 5000.0, 70.0, 10.0)
+st.sidebar.markdown("### ⚖️ Dynamiczne Zarządzanie Ryzykiem i Dźwignią")
+risk_per_trade_pct = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.5, 5.0, 1.5, 0.5)
 use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od zmienności (ATR)", value=True)
 base_leverage = st.sidebar.slider("Bazowa max dźwignia", 1, 20, 5)
 
@@ -355,7 +351,6 @@ if emergency_kill:
 
     st.session_state.trend_bot_active = False
     st.session_state.trade_history = []
-    st.session_state.locked_symbols = set()
     st.success("🚨 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje.")
     time.sleep(2)
     st.rerun()
@@ -403,8 +398,6 @@ if futures_ex:
         active_positions_count = st.session_state.get("last_active_count", 0)
         total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
 
-st.session_state.locked_symbols = {s for s in st.session_state.locked_symbols if s in exchange_positions}
-
 # =====================================================================
 # KAFELKI METRYK
 # =====================================================================
@@ -428,11 +421,11 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Bot Trendu EMA (Pełna Pula na Pozycję)")
+st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
-        if st.button("🚀 Uruchom Automatyczny Skaner i Handel", type="primary", use_container_width=True):
+        if st.button("🚀 Uruchom Skaner Long/Short", type="primary", use_container_width=True):
             st.session_state.trend_bot_active = True
             st.rerun()
     else:
@@ -441,63 +434,29 @@ with col_btn:
             st.rerun()
 with col_status:
     if st.session_state.trend_bot_active:
-        st.success("STATUS: HANDEL AKTYWNY")
+        st.success("STATUS: SKANER AKTYWNY")
     else:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# PANCERNA FUNKCJA POBIERANIA TOP WOLUMENU
+# LOGIKA BOTA (LONG & SHORT + DYNAMIC RISK + OPTIONAL SL/TP)
 # =====================================================================
-def get_top_volume_crypto_symbols(exchange, limit_count=20):
+if futures_ex and st.session_state.trend_bot_active:
     try:
-        tickers = exchange.fetch_tickers()
-        valid_items = []
-        for s, t in tickers.items():
-            if not (s.endswith('/USDT:USDT') or s.endswith('/USDT')):
-                continue
-            base = s.split('/')[0]
-            if base in ['XAG', 'XAU', 'EUR', 'GBP', 'USD', 'USDC']:
-                continue
-            
-            vol = t.get('quoteVolume')
-            try:
-                vol_val = float(vol) if vol is not None else 0.0
-            except (ValueError, TypeError):
-                vol_val = 0.0
-                
-            if vol_val > 0:
-                valid_items.append((s, vol_val))
-                
-        valid_items.sort(key=lambda x: x[1], reverse=True)
-        top_list = [item[0] for item in valid_items[:limit_count]]
-        if len(top_list) > 0:
-            return top_list
-    except Exception:
-        pass
+        markets = futures_ex.load_markets()
+        usdt_symbols = [
+            s for s, m in markets.items()
+            if m.get('swap') and m.get('quote') == 'USDT' and m.get('active') and s.endswith(':USDT')
+        ]
         
-    return [
-        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT',
-        'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'LINK/USDT:USDT',
-        'DOT/USDT:USDT', 'NEAR/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT',
-        'SHIB/USDT:USDT', 'RENDER/USDT:USDT', 'FET/USDT:USDT', 'APT/USDT:USDT',
-        'AR/USDT:USDT', 'INJ/USDT:USDT', 'UNI/USDT:USDT', 'ATOM/USDT:USDT'
-    ]
-
-# =====================================================================
-# LOGIKA BOTA
-# =====================================================================
-if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
-    try:
-        top_symbols = get_top_volume_crypto_symbols(futures_ex, limit_count=top_scan_limit)
-        
-        # 1. Zarządzanie otwartymi pozycjami
+        # 1. Obsługa otwartych pozycji (zarządzanie trendem + opcjonalny awaryjny SL/TP)
         for sym, pos in list(exchange_positions.items()):
             contracts = float(pos.get('contracts', 0))
             if contracts <= 0:
                 continue
                 
             entry_price = float(pos.get('entryPrice', 0))
-            pos_side = pos.get('side', 'long')
+            pos_side = pos.get('side', 'long') # 'long' lub 'short'
             
             try:
                 ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
@@ -511,7 +470,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 
                 closed_position = False
                 
-                # A. Awaryjny SL/TP
+                # A. Opcjonalny awaryjny SL/TP (jeśli użytkownik włączył w panelu)
                 if use_optional_sltp and entry_price > 0:
                     if pos_side == 'long':
                         sl_price = entry_price * (1.0 - (safety_sl_pct / 100.0))
@@ -520,7 +479,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": "🛑 AWARYJNY SL (LONG)",
+                                "Typ": "🛑 AWARYJNY STOP-LOSS (LONG)",
                                 "Para": sym,
                                 "Cena": f"{current_price:.4f}",
                                 "Info": f"Cena pod SL ({sl_price:.4f})"
@@ -530,20 +489,20 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": "🎯 AWARYJNY TP (LONG)",
+                                "Typ": "🎯 AWARYJNY TAKE-PROFIT (LONG)",
                                 "Para": sym,
                                 "Cena": f"{current_price:.4f}",
                                 "Info": f"Cena nad TP ({tp_price:.4f})"
                             })
                             closed_position = True
-                    else:
+                    else: # short
                         sl_price = entry_price * (1.0 + (safety_sl_pct / 100.0))
                         tp_price = entry_price * (1.0 - (safety_tp_pct / 100.0))
                         if current_price >= sl_price:
                             futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": "🛑 AWARYJNY SL (SHORT)",
+                                "Typ": "🛑 AWARYJNY STOP-LOSS (SHORT)",
                                 "Para": sym,
                                 "Cena": f"{current_price:.4f}",
                                 "Info": f"Cena nad SL ({sl_price:.4f})"
@@ -553,47 +512,41 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": "🎯 AWARYJNY TP (SHORT)",
+                                "Typ": "🎯 AWARYJNY TAKE-PROFIT (SHORT)",
                                 "Para": sym,
                                 "Cena": f"{current_price:.4f}",
                                 "Info": f"Cena pod TP ({tp_price:.4f})"
                             })
                             closed_position = True
 
-                # B. Zamknięcie przy odwróceniu trendu
+                # B. Zamknięcie pozycji z powodu odwrócenia trendu EMA
                 if not closed_position:
                     if pos_side == 'long' and last_fast < last_slow:
                         futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": "📉 ZAMKNIĘCIE LONG (ODWRÓCENIE TRENDU)",
+                            "Typ": "📉 ZAMKNIĘCIE LONG (TREND SPADEK)",
                             "Para": sym,
                             "Cena": f"{current_price:.4f}",
                             "Info": "Fast EMA < Slow EMA"
                         })
-                        closed_position = True
                     elif pos_side == 'short' and last_fast > last_slow:
                         futures_ex.create_market_order(sym, 'buy', contracts, params={"reduceOnly": True})
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": "📈 ZAMKNIĘCIE SHORT (ODWRÓCENIE TRENDU)",
+                            "Typ": "📈 ZAMKNIĘCIE SHORT (TREND WZROST)",
                             "Para": sym,
                             "Cena": f"{current_price:.4f}",
                             "Info": "Fast EMA > Slow EMA"
                         })
-                        closed_position = True
-                
-                if closed_position and sym in st.session_state.locked_symbols:
-                    st.session_state.locked_symbols.remove(sym)
-
-                time.sleep(0.2)
+                time.sleep(0.3)
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji pełną pulą
+        # 2. Skanowanie nowych okazji (Long i Short) z dynamicznym ryzykiem i dźwignią
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
-            for sym in top_symbols:
-                if sym in exchange_positions or sym in st.session_state.locked_symbols:
+            for sym in usdt_symbols:
+                if sym in exchange_positions:
                     continue
                 if active_positions_count >= max_active_pairs:
                     break
@@ -604,6 +557,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
                     df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
                     
+                    # Obliczenie ATR do dynamicznej oceny ryzyka i zmienności
                     high_low = df['high'] - df['low']
                     high_close = np.abs(df['high'] - df['close'].shift())
                     low_close = np.abs(df['low'] - df['close'].shift())
@@ -614,12 +568,12 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     last_fast = df['fast_ema'].iloc[-1]
                     last_slow = df['slow_ema'].iloc[-1]
                     
+                    # Określenie kierunku: Long (wzrosty) lub Short (spadki)
                     is_bullish = last_fast > last_slow
                     is_bearish = last_fast < last_slow
                     
                     if is_bullish or is_bearish:
-                        st.session_state.locked_symbols.add(sym)
-
+                        # Dynamiczny dobór dźwigni i kwoty w zależności od zmienności (ATR) i ryzyka
                         if use_dynamic_leverage and atr > 0:
                             volatility_ratio = current_price / atr
                             calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
@@ -631,10 +585,11 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         except Exception:
                             pass
                             
-                        margin = min(max_capital_per_trade, fut_free * 0.98)
+                        # Obliczenie budżetu na podstawie procentu ryzyka kapitału
+                        risk_budget = fut_total * (risk_per_trade_pct / 100.0) * calculated_leverage
+                        budget = max(5.0, min(fut_free, risk_budget))
                         
-                        position_notional = margin * calculated_leverage
-                        contracts = position_notional / current_price
+                        contracts = (budget * calculated_leverage) / current_price
                         contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
                         
                         if contracts_prec > 0:
@@ -642,36 +597,34 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'buy', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (PEŁNA PULA)",
+                                    "Typ": "📈 NOWY LONG (WZROST)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Dźwignia: {calculated_leverage}x | Ryzyko: {risk_per_trade_pct}%"
                                 })
                             else:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (PEŁNA PULA)",
+                                    "Typ": "📉 NOWY SHORT (SPADEK)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Dźwignia: {calculated_leverage}x | Ryzyko: {risk_per_trade_pct}%"
                                 })
                             active_positions_count += 1
-                            time.sleep(0.3)
+                            time.sleep(0.5)
                             st.rerun()
                 except Exception:
                     pass
                     
     except Exception as e:
         st.error(f"Błąd skanera rynku: {e}")
-elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
-    st.sidebar.warning("⚠️ Limit otwartych par ustawiony na 0. Bot nie otwiera nowych pozycji.")
 
 # =====================================================================
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie (Long & Short)")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -682,27 +635,18 @@ if exchange_positions:
         contracts = float(pos.get("contracts", 0))
         unreal_pnl = float(pos.get("unrealizedPnl", 0))
         
-        notional = float(pos.get("notional", 0))
-        if notional == 0 and entry_p > 0:
-            notional = contracts * entry_p
-            
-        margin = float(pos.get("initialMargin", 0))
-        if margin == 0 and lev > 0 and notional > 0:
-            margin = notional / lev
-        
         pos_table_data.append({
             "Para": sym,
             "Strona": side,
-            "Zaangażowany Kapitał (Margin)": f"{margin:.2f} USDT",
-            "Wartość Pozycji (Notional)": f"{notional:.2f} USDT",
-            "Dźwignia": f"{lev:.0f}x",
+            "Kontrakty": contracts,
+            "Dźwignia": f"{lev}x",
             "Cena Wejścia": f"{entry_p:.4f}",
             "Cena Mark": f"{mark_p:.4f}",
             "PnL (USDT)": f"{unreal_pnl:+.2f} USDT"
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner czeka na sygnał wejścia w trend na czołowych parach.")
+    st.info("Brak otwartych pozycji. Skaner analizuje rynek w poszukiwaniu trendów wzrostowych i spadkowych.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
