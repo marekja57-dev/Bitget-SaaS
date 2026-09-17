@@ -100,7 +100,7 @@ if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 # =====================================================================
-# STAN SESJI (SESSION STATE)
+# STAN SESJI (SESSION STATE) - BEZPIECZNA INICJALIZACJA
 # =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -124,6 +124,14 @@ if "last_active_count" not in st.session_state:
     st.session_state.last_active_count = 0
 if "last_unrealized_pnl" not in st.session_state:
     st.session_state.last_unrealized_pnl = 0.0
+if "session_start_time" not in st.session_state:
+    st.session_state.session_start_time = datetime.now()
+if "trade_history" not in st.session_state:
+    st.session_state.trade_history = []
+if "scanner_active" not in st.session_state:
+    st.session_state.scanner_active = False
+if "futures_sniper_active" not in st.session_state:
+    st.session_state.futures_sniper_active = True
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -183,6 +191,7 @@ if not st.session_state.logged_in:
                 st.session_state.api_key = user_row[5] or ""
                 st.session_state.secret_key = user_row[6] or ""
                 st.session_state.passphrase = user_row[7] or ""
+                st.session_state.session_start_time = datetime.now()
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
             else:
@@ -219,15 +228,6 @@ if not st.session_state.logged_in:
 # =====================================================================
 # GŁÓWNA APLIKACJA (PO ZALOGOWANIU)
 # =====================================================================
-if "session_start_time" not in st.session_state:
-    st.session_start_time = datetime.now()
-if "trade_history" not in st.session_state:
-    st.session_state.trade_history = []
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
-if "futures_sniper_active" not in st.session_state:
-    st.session_state.futures_sniper_active = True
-
 def get_futures_exchange():
     if not st.session_state.api_key:
         return None
@@ -407,11 +407,11 @@ fut_free = st.session_state.get("last_fut_free", 0.0)
 fut_total = st.session_state.get("last_fut_total", 0.0)
 
 # =====================================================================
-# POBIERANIE POZYCIJ Z PAMIĘCIĄ PODRĘCZNĄ
+# POBIERANIE POZYCJI Z PAMIĘCIĄ PODRĘCZNĄ
 # =====================================================================
-total_unrealized_pnl = st.session_state.last_unrealized_pnl
-active_positions_count = st.session_state.last_active_count
-exchange_positions = st.session_state.last_exchange_positions
+total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
+active_positions_count = st.session_state.get("last_active_count", 0)
+exchange_positions = st.session_state.get("last_exchange_positions", {})
 
 if futures_ex:
     try:
@@ -434,9 +434,9 @@ if futures_ex:
         active_positions_count = temp_count
         total_unrealized_pnl = temp_pnl
     except Exception:
-        exchange_positions = st.session_state.last_exchange_positions
-        active_positions_count = st.session_state.last_active_count
-        total_unrealized_pnl = st.session_state.last_unrealized_pnl
+        exchange_positions = st.session_state.get("last_exchange_positions", {})
+        active_positions_count = st.session_state.get("last_active_count", 0)
+        total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
 
 # =====================================================================
 # GŁÓWNE KAFELKI METRYK
@@ -455,7 +455,8 @@ with col2:
         delta=f"Otwarte pozycje"
     )
 with col3:
-    elapsed = datetime.now() - st.session_state.session_start_time
+    session_start = st.session_state.get("session_start_time", datetime.now())
+    elapsed = datetime.now() - session_start
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -528,7 +529,6 @@ if futures_ex:
                     
                     close_side = "sell" if side == "long" else "buy"
                     
-                    # Snajper szybkiego zysku – zamyka po małym ruchu na plus
                     if pnl_pct >= float(quick_take_profit_pct):
                         futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
                         st.session_state.trade_history.insert(0, {
