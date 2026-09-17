@@ -100,7 +100,7 @@ if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 # =====================================================================
-# STAN SESJI (SESSION STATE)
+# STAN SESJI (SESSION STATE) I PAMIĘĆ PODRĘCZNA (ANTY-FLICKER)
 # =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -118,6 +118,12 @@ if "last_fut_free" not in st.session_state:
     st.session_state.last_fut_free = 0.0
 if "last_fut_total" not in st.session_state:
     st.session_state.last_fut_total = 0.0
+if "last_exchange_positions" not in st.session_state:
+    st.session_state.last_exchange_positions = {}
+if "last_active_count" not in st.session_state:
+    st.session_state.last_active_count = 0
+if "last_unrealized_pnl" not in st.session_state:
+    st.session_state.last_unrealized_pnl = 0.0
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -394,11 +400,8 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA FUTURES (Z BUFOREM ODPORNYM NA BŁĘDY API)
+# POBIERANIE SALDA FUTURES Z PAMIĘCIĄ PODRĘCZNĄ (ANTY-FLICKER)
 # =====================================================================
-fut_free = st.session_state.last_fut_free
-fut_total = st.session_state.last_fut_total
-
 if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance({"accountType": "usdt-futures"})
@@ -422,27 +425,47 @@ if futures_ex:
                 pass
         
         if temp_total > 0:
-            fut_free = temp_free
-            fut_total = temp_total
-            st.session_state.last_fut_free = fut_free
-            st.session_state.last_fut_total = fut_total
+            st.session_state.last_fut_free = temp_free
+            st.session_state.last_fut_total = temp_total
     except Exception:
         pass
 
-total_unrealized_pnl = 0.0
-active_positions_count = 0
-exchange_positions = {}
+fut_free = st.session_state.get("last_fut_free", 0.0)
+fut_total = st.session_state.get("last_fut_total", 0.0)
+
+# =====================================================================
+# POBIERANIE POZYCJI Z PAMIĘCIĄ PODRĘCZNĄ (ANTY-FLICKER / ZNIKANIE)
+# =====================================================================
+total_unrealized_pnl = st.session_state.last_unrealized_pnl
+active_positions_count = st.session_state.last_active_count
+exchange_positions = st.session_state.last_exchange_positions
+
 if futures_ex:
     try:
         positions = futures_ex.fetch_positions()
+        temp_positions = {}
+        temp_count = 0
+        temp_pnl = 0.0
         for p in positions:
             contracts = float(p.get("contracts", 0))
             if contracts > 0:
-                active_positions_count += 1
-                total_unrealized_pnl += float(p.get("unrealizedPnl", 0.0))
-                exchange_positions[p["symbol"]] = p
+                temp_count += 1
+                temp_pnl += float(p.get("unrealizedPnl", 0.0))
+                temp_positions[p["symbol"]] = p
+        
+        # Zapisz w sesji jako ostatni znany dobry stan
+        st.session_state.last_exchange_positions = temp_positions
+        st.session_state.last_active_count = temp_count
+        st.session_state.last_unrealized_pnl = temp_pnl
+
+        exchange_positions = temp_positions
+        active_positions_count = temp_count
+        total_unrealized_pnl = temp_pnl
     except Exception:
-        pass
+        # W razie chwilowego błędu API (rate limit / timeout) korzystamy z cache w sesji, nic nie znika!
+        exchange_positions = st.session_state.last_exchange_positions
+        active_positions_count = st.session_state.last_active_count
+        total_unrealized_pnl = st.session_state.last_unrealized_pnl
 
 # =====================================================================
 # GŁÓWNE KAFELKI METRYK
@@ -571,20 +594,16 @@ if enable_custom_sl_tp and futures_ex:
         pass
 
 # =====================================================================
-# EGZEKUCJA SNAJPERA NOWYCH LISTINGÓW ORAZ BOTA TREND-FOLLOWING
+# EGZEKUCJA Z BEZWZGLĘDNĄ BLOKADĄ WYŚCIGU (RACE CONDITION GUARD)
 # =====================================================================
+orders_opened_this_tick = 0
+active_symbols = list(exchange_positions.keys())
+
 if futures_ex:
     try:
-        real_positions = futures_ex.fetch_positions()
-        active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
-    except Exception:
-        active_symbols = []
-
-    try:
-        for pos in real_positions:
+        for sym, pos in exchange_positions.items():
             contracts = float(pos.get("contracts", 0))
             if contracts > 0:
-                sym = pos["symbol"]
                 side = pos.get("side", "")
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=analysis_tf, limit=30)
@@ -650,17 +669,10 @@ if futures_ex and st.session_state.futures_sniper_active:
             
             if valid_new_symbols and fut_free >= MIN_FUT_TRADE:
                 for sym in valid_new_symbols:
-                    # STRICT LIVE POSITION CHECK BEFORE ENTRY
-                    try:
-                        live_chk_pos = futures_ex.fetch_positions()
-                        live_active_list = [p["symbol"] for p in live_chk_pos if float(p.get("contracts", 0)) > 0]
-                    except Exception:
-                        live_active_list = []
-
-                    if len(live_active_list) >= max_active_futures_positions:
+                    if (len(active_symbols) + orders_opened_this_tick) >= max_active_futures_positions:
                         break
 
-                    if sym in live_active_list:
+                    if sym in active_symbols:
                         continue
                     
                     ticker = futures_ex.fetch_ticker(sym)
@@ -681,6 +693,7 @@ if futures_ex and st.session_state.futures_sniper_active:
                         except Exception:
                             futures_ex.create_order(sym, 'market', 'buy', float(contracts))
 
+                        orders_opened_this_tick += 1
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "Typ": "🎯 SNAJPER NOWEGO LISTINGU",
@@ -727,18 +740,11 @@ if futures_ex and st.session_state.trend_bot_fut_active:
         top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)
 
         for item in top_signal_pairs:
-            # STRICT LIVE POSITION CHECK BEFORE ENTRY
-            try:
-                live_chk_pos = futures_ex.fetch_positions()
-                live_active_list = [p["symbol"] for p in live_chk_pos if float(p.get("contracts", 0)) > 0]
-            except Exception:
-                live_active_list = []
-
-            if len(live_active_list) >= max_active_futures_positions:
+            if (len(active_symbols) + orders_opened_this_tick) >= max_active_futures_positions:
                 break
 
             sym = item["symbol"]
-            if sym in live_active_list:
+            if sym in active_symbols:
                 continue
 
             f_price = item["price"]
@@ -765,6 +771,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
                     except Exception:
                         futures_ex.create_order(sym, 'market', side, float(contracts))
 
+                    orders_opened_this_tick += 1
                     st.session_state.signal_cooldown[tf_key] = time.time()
                     st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
                     st.session_state.trade_history.insert(0, {
