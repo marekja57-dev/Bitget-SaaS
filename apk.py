@@ -10,7 +10,7 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Top Volume Long/Short Bot",
+    page_title="Bitget Futures - Trend Bot (Risk-Dynamic Capital)",
     layout="wide",
 )
 
@@ -160,7 +160,7 @@ st.markdown(
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
-        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-MANAGED BOT</div> """,
+        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">TREND BOT (RISK-DYNAMIC CAPITAL)</div> """,
         unsafe_allow_html=True,
     )
 
@@ -315,22 +315,21 @@ st.sidebar.markdown("### 📊 Ustawienia Strategii Trendu EMA")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 
-# DOMYŚLNIE 1h (index 4) ORAZ DODANE 30m
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "30m", "1h", "4h"], index=4)
 
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 10, 1)
+# Zwiększony zakres suwaka do 20 otwartych par jednocześnie
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie (sloty)", 1, 20, 1)
 top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
-max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 1000.0, 70.0, 5.0)
-risk_pct_per_trade = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.1, 10.0, 1.5, 0.1)
-use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od zmienności (ATR)", value=True)
-base_leverage = st.sidebar.slider("Bazowa max dźwignia", 1, 20, 5)
+st.sidebar.markdown("### ⚖️ Kapitał, Ryzyko i Dźwignia")
+max_capital_limit = st.sidebar.slider("Maksymalny margines na 1 pozycję (Limit - Ceiling, USDT)", 10.0, 1000.0, 70.0, 5.0)
+use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od ATR (do limitu)", value=True)
+base_leverage = st.sidebar.slider("Maksymalna dźwignia (Limit)", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛡️ Awaryjny SL / TP (Opcjonalny Wentyl Bezpieczeństwa)")
-use_optional_sltp = st.sidebar.checkbox("Włącz awaryjne SL/TP jako strażnika", value=False)
+st.sidebar.markdown("### 🛡️ Awaryjny SL / TP (Opcjonalny)")
+use_optional_sltp = st.sidebar.checkbox("Włącz awaryjne SL/TP", value=False)
 safety_sl_pct = st.sidebar.slider("Awaryjny Stop-Loss (%)", 1.0, 15.0, 4.0, 0.5)
 safety_tp_pct = st.sidebar.slider("Awaryjny Take-Profit (%)", 2.0, 40.0, 8.0, 0.5)
 
@@ -425,18 +424,18 @@ with col3:
     mins, secs = divmod(rem, 60)
     st.metric(label="⏰ Czas Sesji", value=f"{hours:02d}:{mins:02d}:{secs:02d}", delta=f"Interwał: {scan_interval}s")
 with col4:
-    st.metric(label="🎯 Aktywne Pozycje", value=f"{active_positions_count}", delta=f"Limit: {max_active_pairs}")
+    st.metric(label="🎯 Aktywne Pozycje", value=f"{active_positions_count}", delta=f"Limit slotów: {max_active_pairs}")
 
 st.markdown("---")
 
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Bot Trendu EMA (Zarządzanie Ryzykiem i Limitem USDT)")
+st.subheader("🤖 Bot Trendu EMA (Dynamiczny Margines pod Ryzyko + Twój Sufit)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
-        if st.button("🚀 Uruchom Automatyczny Skaner i Handel", type="primary", use_container_width=True):
+        if st.button("🚀 Uruchom Automatyczny Skaner", type="primary", use_container_width=True):
             st.session_state.trend_bot_active = True
             st.rerun()
     else:
@@ -488,7 +487,7 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
     ]
 
 # =====================================================================
-# LOGIKA BOTA (OPARTA NA ZAMKNIĘTYCH ŚWIECACH - ILOC[-2])
+# LOGIKA BOTA (ZAMKNIĘTA ŚWIECA + DYNAMICZNY MARGINES RYZYKA + LIMIT)
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
@@ -510,8 +509,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
                 
                 current_price = df['close'].iloc[-1]
-                
-                # Używamy iloc[-2] (ostatnia ZAMKNIĘTA świeca)
                 last_fast = df['fast_ema'].iloc[-2]
                 last_slow = df['slow_ema'].iloc[-2]
                 
@@ -596,7 +593,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji
+        # 2. Skanowanie i otwieranie nowych pozycji w wolnych slotach
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
@@ -626,6 +623,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                     if is_bullish or is_bearish:
                         st.session_state.locked_symbols.add(sym)
 
+                        # Dźwignia dynamiczna zależna od ATR (do limitu base_leverage)
                         if use_dynamic_leverage and atr > 0:
                             volatility_ratio = current_price / atr
                             calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
@@ -637,14 +635,15 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         except Exception:
                             pass
                             
-                        risk_based_margin = fut_total * (risk_pct_per_trade / 100.0)
-                        
-                        if max_capital_per_trade > 0:
-                            margin = min(risk_based_margin, max_capital_per_trade)
+                        # === DYNAMICZNY MARGINES DOPASOWANY DO RYZYKA (Z LIMITEM Z SUWAKA) ===
+                        if atr > 0 and current_price > 0:
+                            risk_factor = current_price / (atr * 40.0) 
+                            risk_factor = np.clip(risk_factor, 0.25, 1.0) 
+                            dynamic_margin = max_capital_limit * risk_factor
                         else:
-                            margin = risk_based_margin
-                            
-                        margin = min(margin, fut_free * 0.98)
+                            dynamic_margin = max_capital_limit
+
+                        margin = min(dynamic_margin, fut_free * 0.98, max_capital_limit)
                         
                         position_notional = margin * calculated_leverage
                         contracts = position_notional / current_price
@@ -658,7 +657,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                     "Typ": "📈 NOWY LONG (ZAMKNIĘTA ŚWIECA)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                 })
                             else:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
@@ -667,7 +666,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                     "Typ": "📉 NOWY SHORT (ZAMKNIĘTA ŚWIECA)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                 })
                             active_positions_count += 1
                             time.sleep(0.3)
@@ -706,8 +705,8 @@ if exchange_positions:
         pos_table_data.append({
             "Para": sym,
             "Strona": side,
-            "Zaangażowany Kapitał (Margin)": f"{margin:.2f} USDT",
-            "Wartość Pozycji (Notional)": f"{notional:.2f} USDT",
+            "Margines": f"{margin:.2f} USDT",
+            "Wartość Pozycji": f"{notional:.2f} USDT",
             "Dźwignia": f"{lev:.0f}x",
             "Cena Wejścia": f"{entry_p:.4f}",
             "Cena Mark": f"{mark_p:.4f}",
@@ -715,7 +714,7 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner czeka na sygnał wejścia w trend na czołowych parach.")
+    st.info("Brak otwartych pozycji. Skaner czeka na sygnał wejścia w trend.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
