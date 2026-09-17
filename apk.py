@@ -275,8 +275,6 @@ if "session_start_time" not in st.session_state:
 if "trade_history" not in st.session_state:
     st.session_state.trade_history = load_trade_history_from_db(st.session_state.user_id)
 
-if "signal_cooldown" not in st.session_state:
-    st.session_state.signal_cooldown = {}
 if "scanner_active" not in st.session_state:
     st.session_state.scanner_active = False
 if "active_trades" not in st.session_state:
@@ -390,19 +388,12 @@ futures_ex = get_futures_exchange()
 # USTAWIENIA
 # =====================================================================
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚙️ Ustawienia Futures")
+st.sidebar.markdown("### ⚙️ Ustawienia Trend-Following")
 max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Kwotowy)")
+st.sidebar.markdown("### 💰 Alokacja Kapitału")
 position_fixed_budget = st.sidebar.number_input("Maksymalny budżet na 1 pozycję (USDT)", min_value=5.0, max_value=1000.0, value=20.0, step=5.0)
-risk_reduction_enabled = st.sidebar.checkbox("🧠 Inteligentna redukcja kapitału przy wysokim ryzyku (zmienności)", value=True)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛑 Zarządzanie Ryzykiem (SL / TP)")
-use_sltp = st.sidebar.checkbox("Włącz ochronę SL / TP", value=True)
-stop_loss_pct = st.sidebar.slider("Stop Loss (%)", 0.5, 10.0, 2.0, 0.5)
-take_profit_pct = st.sidebar.slider("Take Profit (%)", 1.0, 50.0, 5.0, 0.5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
@@ -432,7 +423,7 @@ def toggle_listing_sniper():
 st.sidebar.checkbox("🟢 Aktywuj Auto-Snajper Listingowy", key="listing_cb", on_change=toggle_listing_sniper)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🧠 Interwał Analizy")
+st.sidebar.markdown("### 🧠 Interwał Analizy Trendu")
 spot_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4)
 
 st.sidebar.markdown("---")
@@ -470,13 +461,12 @@ if emergency_kill:
     st.session_state.trend_bot_fut_active = False
     st.session_state.listing_sniper_active = False
     st.session_state.active_trades = {}
-    st.session_state.signal_cooldown = {}
     st.success("🚨 KILL SWITCH WYKONANY. Zamknięto pozycje i wyłączono bota/snajpera.")
     time.sleep(2)
     st.rerun()
 
 # =====================================================================
-# POBIERANIE SALDA FUTURES Z PAMIĘCIĄ PODRĘCZNĄ (ANTY-ZEROWANIE)
+# POBIERANIE SALDA FUTURES
 # =====================================================================
 if futures_ex:
     try:
@@ -578,7 +568,7 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTEM FUTURES
 # =====================================================================
-st.subheader("🥾 Panel Sterowania Botem Futures i Snajperem")
+st.subheader("🥾 Panel Sterowania Botem Trend-Following")
 with st.container(border=True):
     col_b1, col_b2 = st.columns(2)
     with col_b1:
@@ -588,7 +578,7 @@ with st.container(border=True):
         def toggle_main_trend_fut():
             st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
 
-        st.checkbox("🔵 Automatyczny Bot Futures (Ciągły Handlowiec)", key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
+        st.checkbox("🔵 Czysty Trend-Following (Trzymaj do końca trendu)", key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
     with col_b2:
         if "main_cb_listing" not in st.session_state:
             st.session_state.main_cb_listing = st.session_state.listing_sniper_active
@@ -602,11 +592,11 @@ st.markdown("---")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.scanner_active:
-        if st.button("🚀 Uruchom Skaner i Snajpera w Pętli", type="primary", use_container_width=True):
+        if st.button("🚀 Uruchom Skaner i Trend-Following w Pętli", type="primary", use_container_width=True):
             st.session_state.scanner_active = True
             st.rerun()
     else:
-        if st.button("⏹️ Zatrzymaj Skaner i Snajpera", type="secondary", use_container_width=True):
+        if st.button("⏹️ Zatrzymaj Skaner i Trend-Following", type="secondary", use_container_width=True):
             st.session_state.scanner_active = False
             st.rerun()
 with col_status:
@@ -670,7 +660,7 @@ if futures_ex and st.session_state.listing_sniper_active:
         pass
 
 # =====================================================================
-# CIĄGŁA LOGIKA TRENDU: ZAMYKANIE PRZY ZMIANIE TRENDU + OTWIERANIE W SLOCIE
+# CZYSTY TREND-FOLLOWING: ZAMYKANIE TYLKO PRZY ZMIANIE TRENDU
 # =====================================================================
 if futures_ex:
     try:
@@ -704,21 +694,13 @@ if futures_ex:
                     should_close_fut = False
                     close_reason_fut = ""
 
-                    if use_sltp:
-                        if pnl_pct <= -stop_loss_pct:
-                            should_close_fut = True
-                            close_reason_fut = f"STOP LOSS HIT ({pnl_pct:+.2f}%)"
-                        elif pnl_pct >= take_profit_pct:
-                            should_close_fut = True
-                            close_reason_fut = f"TAKE PROFIT HIT ({pnl_pct:+.2f}%)"
-
-                    if not should_close_fut:
-                        if side == "long" and f_macd < f_sig:
-                            should_close_fut = True
-                            close_reason_fut = f"TREND REVERSAL EXIT LONG ({pnl_pct:+.2f}%)"
-                        elif side == "short" and f_macd > f_sig:
-                            should_close_fut = True
-                            close_reason_fut = f"TREND REVERSAL EXIT SHORT ({pnl_pct:+.2f}%)"
+                    # ZAMKNIĘCIE TYLKO WTEDY, GDY FAKTYCZNIE KOŃCZI SIĘ TREND
+                    if side == "long" and f_macd < f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"KONIEC TRENDU (LONG EXIT) [{pnl_pct:+.2f}%]"
+                    elif side == "short" and f_macd > f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"KONIEC TRENDU (SHORT EXIT) [{pnl_pct:+.2f}%]"
 
                     if should_close_fut:
                         close_side = "sell" if side == "long" else "buy"
@@ -779,16 +761,12 @@ if futures_ex:
                         f_sig = float(f_df["signal"].iloc[-1])
                         f_price = float(f_df["close"].iloc[-1])
 
-                        signal_strength = abs(f_macd - f_sig) / f_price
                         side = "buy" if f_macd > f_sig else "sell"
-
-                        evaluated_pairs.append({"symbol": sym, "price": f_price, "side": side, "strength": signal_strength, "volatility": f_vol})
+                        evaluated_pairs.append({"symbol": sym, "price": f_price, "side": side, "volatility": f_vol})
                     except Exception:
                         continue
 
-                top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)[:slots_available]
-
-                for item in top_signal_pairs:
+                for item in evaluated_pairs[:slots_available]:
                     sym = item["symbol"]
                     if sym in active_symbols or sym in st.session_state.active_trades:
                         continue
@@ -799,51 +777,39 @@ if futures_ex:
                     label = "LONG" if side == "buy" else "SHORT"
                    
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
-                    tf_key = f"trend_bot_fut_{sym}"
-                   
-                    if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 120:
-                        max_allowed_budget = position_fixed_budget
-                       
-                        if risk_reduction_enabled:
-                            risk_multiplier = max(0.3, min(1.0, 2.0 / f_vol)) if f_vol > 0 else 1.0
-                            allocated_budget = max_allowed_budget * risk_multiplier
-                        else:
-                            allocated_budget = max_allowed_budget
+                    budget = max(MIN_FUT_TRADE, position_fixed_budget)
+                    if budget > fut_free:
+                        budget = fut_free
 
-                        budget = max(MIN_FUT_TRADE, allocated_budget)
-                        if budget > fut_free:
-                            budget = fut_free
+                    if budget >= MIN_FUT_TRADE:
+                        st.session_state.active_trades[sym] = True
 
-                        if budget >= MIN_FUT_TRADE:
-                            st.session_state.active_trades[sym] = True
-                            st.session_state.signal_cooldown[tf_key] = time.time()
+                        try:
+                            futures_ex.set_leverage(bot_leverage, sym)
+                        except Exception:
+                            pass
 
-                            try:
-                                futures_ex.set_leverage(bot_leverage, sym)
-                            except Exception:
-                                pass
+                        contracts = (budget * bot_leverage) / f_price
+                        try:
+                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                            futures_ex.create_order(sym, 'market', side, contracts_prec)
+                        except Exception:
+                            futures_ex.create_order(sym, 'market', side, float(contracts))
 
-                            contracts = (budget * bot_leverage) / f_price
-                            try:
-                                contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                                futures_ex.create_order(sym, 'market', side, contracts_prec)
-                            except Exception:
-                                futures_ex.create_order(sym, 'market', side, float(contracts))
-
-                            t_item = {
-                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": f"BOT FUTURES {label}",
-                                "Para": sym,
-                                "Budżet": f"{budget:.2f} USDT",
-                                "Dźwignia": f"{bot_leverage}x",
-                                "Cena": f"{f_price:.4f}",
-                            }
-                            st.session_state.trade_history.insert(0, t_item)
-                            save_trade_to_db(st.session_state.user_id, t_item)
-                            
-                            current_active_count += 1
-                            if current_active_count >= max_active_futures_positions:
-                                break
+                        t_item = {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": f"TREND BOT {label}",
+                            "Para": sym,
+                            "Budżet": f"{budget:.2f} USDT",
+                            "Dźwignia": f"{bot_leverage}x",
+                            "Cena": f"{f_price:.4f}",
+                        }
+                        st.session_state.trade_history.insert(0, t_item)
+                        save_trade_to_db(st.session_state.user_id, t_item)
+                        
+                        current_active_count += 1
+                        if current_active_count >= max_active_futures_positions:
+                            break
             except Exception:
                 pass
 
@@ -878,7 +844,7 @@ if futures_ex:
                 margin = notional / lev if lev > 0 else 0
                 margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
-                status_desc = "🟢 Aktywna (Pozycja Otwarta)"
+                status_desc = "🟢 Aktywna (Trzymana w Trendzie)"
             else:
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=spot_tf, limit=30)
@@ -898,7 +864,7 @@ if futures_ex:
                     lev_val = f"{lev_num}x"
                     margin_val = "-"
                     pnl_val = "Oczekiwanie"
-                    status_desc = "⚡ Sygnał Gotowy"
+                    status_desc = "⚡ Szukanie Trendu"
                 except Exception:
                     lev_val = f"{manual_leverage}x"
 
@@ -907,7 +873,7 @@ if futures_ex:
                 "Cena": f"{float(t_data.get('last', 0)):.4f}",
                 "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
                 "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
-                "Strategia": "Futures Trend + Smart Risk",
+                "Strategia": "Pure Trend-Following",
                 "Strona": side_val,
                 "Dźwignia": lev_val,
                 "Marża": margin_val,
@@ -924,7 +890,7 @@ else:
     st.info("Skonfiguruj klucze API Futures w panelu bocznym i zapisz je, aby widzieć skaner i portfel.")
 
 # =====================================================================
-# HISTORIA ZAMKNIĘTYCH POZYCJI I Z/S (Z GIEŁDY BITGET) - POPRAWIONE
+# HISTORIA ZAMKNIĘTYCH POZYCJI I Z/S (Z GIEŁDY BITGET)
 # =====================================================================
 st.markdown("---")
 st.subheader("📜 Dziennik Zamkniętych Pozycji i Zysków/Strat (Z Giełdy)")
@@ -932,7 +898,6 @@ if futures_ex:
     try:
         closed_data = []
         
-        # 1. Próbujemy pobrać faktyczne zyski z historii dochodów (realized_pnl)
         try:
             incomes = futures_ex.fetch_income(params={"productType": "usdt-futures", "limit": 30})
             for inc in incomes:
@@ -952,7 +917,6 @@ if futures_ex:
         except Exception:
             pass
 
-        # 2. Jeśli fetch_income jest puste, pobieramy zlecenia i wyciągamy PnL z szerokiej puli pól Bitget
         if not closed_data:
             closed_orders = futures_ex.fetch_closed_orders(limit=30)
             for o in closed_orders:
