@@ -36,7 +36,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE (DOMYŚLNIE 15%)
+# INICJALIZACJA BAZY DANYCH SQLITE (DOMYŚLNIE 50 USDT)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -55,7 +55,7 @@ def init_db():
             sniper_active INTEGER DEFAULT 0,
             bot_scan_pairs INTEGER DEFAULT 15,
             max_active_positions INTEGER DEFAULT 5,
-            position_pct_allocation INTEGER DEFAULT 15
+            position_fixed_amount REAL DEFAULT 50.0
         ) 
     ''')
     
@@ -64,15 +64,12 @@ def init_db():
         ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0"), 
         ("bot_active", "INTEGER DEFAULT 0"), ("sniper_active", "INTEGER DEFAULT 0"),
         ("bot_scan_pairs", "INTEGER DEFAULT 15"), ("max_active_positions", "INTEGER DEFAULT 5"),
-        ("position_pct_allocation", "INTEGER DEFAULT 15")
+        ("position_fixed_amount", "REAL DEFAULT 50.0")
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
             pass
-
-    # Automatyczna aktualizacja starych rekordów z 20 na 15, jeśli użytkownik nie zmieniał
-    cursor.execute("UPDATE users SET position_pct_allocation = 15 WHERE position_pct_allocation = 20")
 
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
@@ -190,7 +187,7 @@ if not st.session_state.logged_in:
         if st.button("ZALOGUJ SIĘ", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_fixed_amount FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
             user_row = cursor.fetchone()
             conn.close()
 
@@ -211,7 +208,7 @@ if not st.session_state.logged_in:
                 st.session_state.new_listing_sniper_active = bool(user_row[9])
                 st.session_state.bot_scan_pairs = user_row[10] if user_row[10] is not None else 15
                 st.session_state.max_active_positions = user_row[11] if user_row[11] is not None else 5
-                st.session_state.position_pct_allocation = user_row[12] if user_row[12] is not None else 15
+                st.session_state.position_fixed_amount = user_row[12] if user_row[12] is not None else 50.0
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
             else:
@@ -231,7 +228,7 @@ if not st.session_state.logged_in:
                     is_adm = 1 if clean_reg in ADMIN_EMAILS else 0
                     is_paid = 1 if is_adm == 1 else 0
                     cursor.execute(
-                        "INSERT INTO users (email, password, is_admin, stripe_paid, position_pct_allocation) VALUES (?, ?, ?, ?, 15)",
+                        "INSERT INTO users (email, password, is_admin, stripe_paid, position_fixed_amount) VALUES (?, ?, ?, ?, 50.0)",
                         (reg_email.strip(), reg_pass, is_adm, is_paid)
                     )
                     conn.commit()
@@ -266,13 +263,13 @@ if "bot_scan_pairs" not in st.session_state:
     st.session_state.bot_scan_pairs = 15
 if "max_active_positions" not in st.session_state:
     st.session_state.max_active_positions = 5
-if "position_pct_allocation" not in st.session_state:
-    st.session_state.position_pct_allocation = 15
+if "position_fixed_amount" not in st.session_state:
+    st.session_state.position_fixed_amount = 50.0
 
 try:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE id = ?", (st.session_state.user_id,))
+    cursor.execute("SELECT bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_fixed_amount FROM users WHERE id = ?", (st.session_state.user_id,))
     r = cursor.fetchone()
     conn.close()
     if r:
@@ -280,7 +277,7 @@ try:
         st.session_state.new_listing_sniper_active = bool(r[1])
         st.session_state.bot_scan_pairs = r[2] if r[2] is not None else 15
         st.session_state.max_active_positions = r[3] if r[3] is not None else 5
-        st.session_state.position_pct_allocation = r[4] if r[4] is not None else 15
+        st.session_state.position_fixed_amount = r[4] if r[4] is not None else 50.0
 except Exception:
     pass
 
@@ -324,12 +321,12 @@ def background_trading_daemon():
         try:
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_pct_allocation FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
+            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions, position_fixed_amount FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
             active_users = cursor.fetchall()
             conn.close()
 
             for user in active_users:
-                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip, u_scan_pairs, u_max_pos, u_pos_alloc = user
+                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip, u_scan_pairs, u_max_pos, u_pos_amt = user
                 ex = get_futures_exchange(u_api, u_sec, u_pass)
                 if not ex:
                     continue
@@ -381,7 +378,7 @@ def background_trading_daemon():
                         tp_pct = 5.0
                         lev_mode = "🤖 Autonomiczny (max 10x)"
                         man_lev = 3
-                        pos_allocation = u_pos_alloc if u_pos_alloc is not None else 15.0
+                        fixed_budget_val = u_pos_amt if u_pos_amt is not None else 50.0
                         risk_red = True
                         min_trade = 5.0
                         limit_pairs = u_scan_pairs if u_scan_pairs is not None else 15
@@ -434,7 +431,6 @@ def background_trading_daemon():
                         active_symbols = [p["symbol"] for p in real_positions]
                         current_count = len(active_symbols)
 
-                        # Automatyczne otwieranie nowych pozycji w miejsce zamkniętych (w ramach limitu)
                         if current_count < max_active_pos and fut_free >= min_trade:
                             slots_avail = max_active_pos - current_count
                             best_candidates = sorted(
@@ -474,13 +470,12 @@ def background_trading_daemon():
                                 f_vol = item["volatility"]
                                 
                                 bot_lev = calculate_dynamic_leverage(sym, f_vol, lev_mode, man_lev)
-                                max_budget = fut_free * (pos_allocation / 100.0)
                                 
                                 if risk_red:
                                     r_mult = max(0.3, min(1.0, 2.0 / f_vol)) if f_vol > 0 else 1.0
-                                    budget = max_budget * r_mult
+                                    budget = fixed_budget_val * r_mult
                                 else:
-                                    budget = max_budget
+                                    budget = fixed_budget_val
 
                                 budget = max(min_trade, budget)
                                 if budget > fut_free:
@@ -603,20 +598,20 @@ def update_max_positions():
 max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, value=st.session_state.max_active_positions, key="slider_max_pos", on_change=update_max_positions)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Alokacja Kapitału (Domyślnie 15%)")
-def update_pos_allocation():
-    val = st.session_state.slider_pos_alloc
-    st.session_state.position_pct_allocation = val
+st.sidebar.markdown("### 💰 Kwota na Pozycję (Domyślnie 50 USDT)")
+def update_pos_amount():
+    val = st.session_state.slider_pos_amount
+    st.session_state.position_fixed_amount = val
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("UPDATE users SET position_pct_allocation = ? WHERE id = ?", (val, st.session_state.user_id))
+        cursor.execute("UPDATE users SET position_fixed_amount = ? WHERE id = ?", (val, st.session_state.user_id))
         conn.commit()
         conn.close()
     except Exception:
         pass
 
-position_pct_allocation = st.sidebar.slider("Maksymalny % wolnych środków na 1 pozycję", 5, 100, value=st.session_state.position_pct_allocation, step=5, key="slider_pos_alloc", on_change=update_pos_allocation)
+position_fixed_amount = st.sidebar.slider("Maksymalna kwota na 1 pozycję (USDT)", 5.0, 200.0, value=st.session_state.position_fixed_amount, step=5.0, key="slider_pos_amount", on_change=update_pos_amount)
 risk_reduction_enabled = st.sidebar.checkbox("🧠 Inteligentna redukcja kapitału przy wysokim ryzyku (zmienności)", value=True)
 
 st.sidebar.markdown("---")
