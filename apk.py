@@ -415,9 +415,6 @@ if emergency_kill:
     time.sleep(2)
     st.rerun()
 
-# =====================================================================
-# WYLICZENIE SALDA I POZYCJI FUTURES
-# =====================================================================
 # WYLICZENIE SALDA I POZYCJI FUTURES z zabezpieczeniem cache sesji
 if "cached_fut_free" not in st.session_state:
   st.session_state["cached_fut_free"] = 0.0
