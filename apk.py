@@ -375,20 +375,29 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA FUTURES
+# WYLICZENIE SALDA I POZYCJI FUTURES (ODPORNE NA BŁĘDY BITGET)
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
     try:
-        f_bal = futures_ex.fetch_balance()
+        f_bal = futures_ex.fetch_balance({"type": "swap"})
         if "USDT" in f_bal:
-            fut_free = float(f_bal["USDT"].get("free", 0.0))
-            fut_total = float(f_bal["USDT"].get("total", 0.0))
-        else:
-            fut_free = float(f_bal.get("free", {}).get("USDT", 0.0))
-            fut_total = float(f_bal.get("total", {}).get("USDT", 0.0))
+            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
     except Exception:
         pass
+
+    if fut_total == 0.0:
+        try:
+            f_bal2 = futures_ex.fetch_balance()
+            if "USDT" in f_bal2:
+                fut_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
+                fut_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
+            elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
+                fut_free = float(f_bal2["free"]["USDT"] or 0.0)
+                fut_total = float(f_bal2.get("total", {}).get("USDT", fut_free) or fut_free)
+        except Exception:
+            pass
 
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -403,29 +412,39 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI
+# GŁÓWNE KAFELKI (STABILNA SIATKA 2x2 - BRAK ROJZDÓW)
 # =====================================================================
-col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-with col1:
+c1, c2 = st.columns(2)
+with c1:
     st.metric(
         label="🔵 Portfel Futures", 
         value=f"{fut_total:.2f} USDT", 
         delta=f"Wolne: {fut_free:.2f} USDT"
     )
-with col2:
+with c2:
     st.metric(
         label="📊 Wyniki Futures (PnL)", 
         value=f"{total_unrealized_pnl:+.2f} USDT", 
-        delta=f"Aktywne: {active_positions_count}/{max_active_futures_positions}"
+        delta=f"Status: {'Aktywny' if st.session_state.scanner_active else 'Zatrzymany'}"
     )
-with col3:
+
+c3, c4 = st.columns(2)
+with c3:
+    st.metric(
+        label="📈 Sloty Futures", 
+        value=f"{active_positions_count} / {max_active_futures_positions}", 
+        delta="Aktywne / Maksymalne sloty"
+    )
+with c4:
     elapsed = datetime.now() - st.session_state.session_start_time
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    st.metric(label="⏰ Czas Sesji", value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", delta=f"Interwał: {scan_interval}s")
-with col4:
-    st.metric(label="🚀 Status Skanera", value="AKTYWNY" if st.session_state.scanner_active else "ZATRZYMANY")
+    st.metric(
+        label="⏰ Czas Sesji", 
+        value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", 
+        delta=f"Interwał: {scan_interval}s"
+    )
 
 st.markdown("---")
 
@@ -689,7 +708,7 @@ if futures_ex:
                 side_val = pos.get("side", "").upper()
                 lev_val = f"{float(pos.get('leverage', 1))}x"
                 notional = float(pos.get("notional", 0))
-                lev = float(pos.get("leverage", 1))
+                lev = float(pos.get('leverage', 1))
                 margin = notional / lev if lev > 0 else 0
                 margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
                 pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
