@@ -445,7 +445,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI METRYK (TYLKO FUTURES)
+# GŁÓWNE KAFELKI METRYK (TYLKO JEDEN CZYSTY RZĄD 4 KOLUMN)
 # =====================================================================
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
