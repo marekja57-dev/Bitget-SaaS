@@ -1,8 +1,7 @@
 from datetime import datetime
-import hashlib
 import json
 import os
-import sqlite3
+sqlite3 = __import__('sqlite3')
 import time
 import ccxt
 import pandas as pd
@@ -40,17 +39,17 @@ def is_user_paid():
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute(''' 
-        CREATE TABLE IF NOT EXISTS users ( 
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            email TEXT UNIQUE, 
-            password TEXT, 
-            is_admin INTEGER DEFAULT 0, 
-            stripe_paid INTEGER DEFAULT 0, 
-            api_key TEXT, 
-            secret_key TEXT, 
-            passphrase TEXT 
-        ) 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            password TEXT,
+            is_admin INTEGER DEFAULT 0,
+            stripe_paid INTEGER DEFAULT 0,
+            api_key TEXT,
+            secret_key TEXT,
+            passphrase TEXT
+        )
     ''')
     
     for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0")]:
@@ -124,32 +123,21 @@ if st.query_params.get("success") == "true":
         st.query_params.clear()
 
 # =====================================================================
-# STYLIZACJA WYGLĄDU (WYEGAZOWANE KAFELKI I RETRO / DARK)
+# STYLIZACJA WYGLĄDU
 # =====================================================================
 st.markdown(
-    """ <style> 
-    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); 
-    .stApp { background-color: #0d0b0a; } 
-    section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
-    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } 
-    .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } 
-    .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } 
-    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } 
-    div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } 
-    div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } 
-    
-    div[data-testid="stMetric"] { 
-        border: 2px solid #f3d57a; 
-        border-radius: 10px; 
-        padding: 12px 16px; 
-        background-color: rgba(243, 213, 122, 0.03); 
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); 
-        height: 105px; 
-        display: flex; 
-        flex-direction: column; 
-        justify-content: center; 
-    } 
-    div[data-testid="stMetric"] label { color: #f3d57a !important; font-size: 0.95rem !important; } 
+    """ <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
+    .stApp { background-color: #0d0b0a; }
+    section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
+    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
+    .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
+    .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
+    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
+    div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; }
+    div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); }
+    div[data-testid="stMetric"] { border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 16px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); height: 105px; display: flex; flex-direction: column; justify-content: center; }
+    div[data-testid="stMetric"] label { color: #f3d57a !important; font-size: 0.95rem !important; }
     </style> """,
     unsafe_allow_html=True,
 )
@@ -280,9 +268,9 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
 # =====================================================================
 st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
 if is_user_admin():
-    st.sidebar.markdown("🔴 **Rola: Administrator**")
+    st.sidebar.markdown("🔴 Rola: Administrator")
 else:
-    st.sidebar.markdown("🟢 **Rola: Klient SaaS**")
+    st.sidebar.markdown("🟢 Rola: Klient SaaS")
 
 if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
     st.session_state.logged_in = False
@@ -342,7 +330,7 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
 futures_ex = get_futures_exchange()
 
 # =====================================================================
-# USTAWIENIA (POWIĘKSZONE)
+# USTAWIENIA
 # =====================================================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔔 Powiadomienia Telegram")
@@ -384,12 +372,10 @@ leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)"
 manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3)
 
 # =====================================================================
-# SNAJPER NOWYCH LISTIGÓW (LISTING SNIPER) W PANELU BOCZNYM
+# SNAJPER NOWYCH LISTINGÓW
 # =====================================================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎯 Snajper Nowych Listingów")
-st.sidebar.markdown("<p style='font-size: 0.85rem; color: #aaa;'>Czeka na debiut nowych walut na giełdzie i strzela w sekundzie ich startu!</p>", unsafe_allow_html=True)
-
 listing_sniper_budget = st.sidebar.number_input("Kapitał na nowy listing (USDT)", min_value=5.0, value=25.0, step=5.0)
 listing_sniper_lev = st.sidebar.slider("Dźwignia Snajpera Listingowego", 1, 20, 5)
 
@@ -400,18 +386,12 @@ def toggle_listing_sniper():
     st.session_state.listing_sniper_active = st.session_state.listing_cb
     if st.session_state.listing_sniper_active and futures_ex:
         try:
-            # Inicjalizacja obecnych rynków przy uruchomieniu snajpera
             mks = futures_ex.fetch_markets()
             st.session_state.known_markets = {m["symbol"] for m in mks}
         except Exception:
             pass
 
 st.sidebar.checkbox("🟢 Aktywuj Auto-Snajper Listingowy", key="listing_cb", on_change=toggle_listing_sniper)
-
-if st.session_state.listing_sniper_active:
-    st.sidebar.success("🎯 Snajper czuwa na nowe pary!")
-else:
-    st.sidebar.info("⏸️ Snajper w stanie czuwania")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🧠 Interwał Analizy")
@@ -459,16 +439,21 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# SALDO FUTURES
+# NAPRAWIONE POBIERANIE SALDA FUTURES (USDT-FUTURES)
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
     try:
-        f_bal = futures_ex.fetch_balance()
-        fut_free = float(f_bal.get("free", {}).get("USDT", 0.0))
-        fut_total = float(f_bal.get("total", {}).get("USDT", 0.0))
+        f_bal = futures_ex.fetch_balance({"accountType": "usdt-futures"})
+        fut_free = float(f_bal.get("USDT", {}).get("free", f_bal.get("free", {}).get("USDT", 0.0)))
+        fut_total = float(f_bal.get("USDT", {}).get("total", f_bal.get("total", {}).get("USDT", 0.0)))
     except Exception:
-        pass
+        try:
+            f_bal = futures_ex.fetch_balance()
+            fut_free = float(f_bal.get("USDT", {}).get("free", f_bal.get("free", {}).get("USDT", 0.0)))
+            fut_total = float(f_bal.get("USDT", {}).get("total", f_bal.get("total", {}).get("USDT", 0.0)))
+        except Exception:
+            pass
 
 total_unrealized_pnl = 0.0
 active_positions_count = 0
@@ -485,24 +470,24 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI (RÓWNE I WYSTYLOWANE)
+# GŁÓWNE KAFELKI
 # =====================================================================
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     st.metric(
-        label="🔵 Portfel Futures", 
-        value=f"{fut_total:.2f} USDT", 
+        label="🔵 Portfel Futures",
+        value=f"{fut_total:.2f} USDT",
         delta=f"Wolne: {fut_free:.2f} USDT"
     )
 with col2:
     st.metric(
-        label="📊 Aktywne Pozycje", 
-        value=f"{active_positions_count} / {max_active_futures_positions}", 
+        label="📊 Aktywne Pozycje",
+        value=f"{active_positions_count} / {max_active_futures_positions}",
         delta=f"Wolne sloty: {max(0, max_active_futures_positions - active_positions_count)}"
     )
 with col3:
     st.metric(
-        label="📈 Wynik Niezrealizowany", 
+        label="📈 Wynik Niezrealizowany",
         value=f"{total_unrealized_pnl:+.2f} USDT"
     )
 with col4:
@@ -557,13 +542,13 @@ with col_status:
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# LOGIKA SNAJPERA NOWYCH LISTINGÓW (WYKRYWANIE NOWYCH PAR)
+# LOGIKA SNAJPERA NOWYCH LISTINGÓW
 # =====================================================================
 if futures_ex and st.session_state.listing_sniper_active:
     try:
         current_markets_data = futures_ex.fetch_markets()
         current_market_symbols = {m["symbol"] for m in current_markets_data if ":USDT" in m["symbol"] or "/USDT" in m["symbol"]}
-        
+       
         if not st.session_state.known_markets:
             st.session_state.known_markets = current_market_symbols
         else:
@@ -572,26 +557,25 @@ if futures_ex and st.session_state.listing_sniper_active:
                 for new_sym in newly_listed:
                     if "BULL" in new_sym or "BEAR" in new_sym:
                         continue
-                    # WYSTRZAŁ SNAJPERA NA NOWY LISTING!
                     try:
                         tickers_chk = futures_ex.fetch_tickers()
                         t_info = tickers_chk.get(new_sym, {})
                         launch_price = float(t_info.get("last", 0))
-                        
+                       
                         if launch_price > 0 and fut_free >= MIN_FUT_TRADE:
                             actual_budget = min(listing_sniper_budget, fut_free)
                             try:
                                 futures_ex.set_leverage(listing_sniper_lev, new_sym)
                             except Exception:
                                 pass
-                            
+                           
                             contracts = (actual_budget * listing_sniper_lev) / launch_price
                             try:
                                 contracts_prec = float(futures_ex.amount_to_precision(new_sym, contracts))
                                 futures_ex.create_order(new_sym, 'market', 'buy', contracts_prec)
                             except Exception:
                                 futures_ex.create_order(new_sym, 'market', 'buy', float(contracts))
-                            
+                           
                             st.session_state.trade_history.insert(0, {
                                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                                 "Typ": "🎯 LISTING SNIPER LONG",
@@ -600,17 +584,18 @@ if futures_ex and st.session_state.listing_sniper_active:
                                 "Dźwignia": f"{listing_sniper_lev}x",
                                 "Cena": f"{launch_price:.4f}",
                             })
-                            send_notification(f"🚨 [LISTING SNIPER] Wykryto nową walutę! Wystrzelono LONG na {new_sym} ({listing_sniper_lev}x, budżet: {actual_budget:.2f} USDT)")
-                    except Exception as ex_snip:
+                            send_notification(f"🚨 [LISTING SNIPER] Wykryto nową walutę! Wystrzelono LONG na {new_sym}")
+                    except Exception:
                         pass
             st.session_state.known_markets = current_market_symbols
     except Exception:
         pass
 
 # =====================================================================
-# LOGIKA FUTURES: SL / TP + TREND + INTELIGENTNE ZMNIEJSZANIE KAPITAŁU
+# CIĄGŁA LOGIKA FUTURES: TREND EXIT + AUTOMATYCZNE ZAPŁNIANIE WOLNYCH SLOTÓW
 # =====================================================================
 if futures_ex:
+    # 1. Zarządzanie wyjściami (zamykanie, gdy trend się odwraca lub działa SL/TP)
     try:
         current_positions = futures_ex.fetch_positions()
         for pos in current_positions:
@@ -623,13 +608,13 @@ if futures_ex:
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                    
+                   
                     f_macd = float(f_df["macd"].iloc[-1])
                     f_sig = float(f_df["signal"].iloc[-1])
                     mark_price = float(pos.get("markPrice", 0))
                     entry_price = float(pos.get("entryPrice", 0))
                     leverage = float(pos.get("leverage", 1))
-                    
+                   
                     if entry_price > 0 and mark_price > 0:
                         if side == "long":
                             pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
@@ -673,6 +658,7 @@ if futures_ex:
     except Exception:
         pass
 
+    # 2. Automatyczne otwieranie nowych pozycji w wolnych slotach (gdy bot jest włączony)
     if st.session_state.trend_bot_fut_active:
         try:
             real_positions = futures_ex.fetch_positions()
@@ -725,13 +711,13 @@ if futures_ex:
                     side = item["side"]
                     f_vol = item["volatility"]
                     label = "LONG" if side == "buy" else "SHORT"
-                    
+                   
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     tf_key = f"trend_bot_fut_{sym}"
-                    
+                   
                     if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 60:
                         max_allowed_budget = fut_free * (position_pct_allocation / 100.0)
-                        
+                       
                         if risk_reduction_enabled:
                             risk_multiplier = max(0.3, min(1.0, 2.0 / f_vol)) if f_vol > 0 else 1.0
                             allocated_budget = max_allowed_budget * risk_multiplier
@@ -765,7 +751,7 @@ if futures_ex:
                                 "Dźwignia": f"{bot_leverage}x",
                                 "Cena": f"{f_price:.4f}",
                             })
-                            send_notification(f"🥾 [BOT] Otwarto slot: {label} na {sym} ({bot_leverage}x, budżet: {budget:.2f} USDT, wol. {f_vol:.1f}%)")
+                            send_notification(f"🥾 [BOT] Otwarto slot: {label} na {sym} ({bot_leverage}x, budżet: {budget:.2f} USDT)")
                             current_active_count += 1
                             if current_active_count >= max_active_futures_positions:
                                 break
@@ -788,13 +774,13 @@ if futures_ex:
         for sym in top_fut_view:
             t_data = f_tickers.get(sym, {})
             pos = exchange_positions.get(sym)
-            
+           
             side_val = "-"
             lev_val = "-"
             margin_val = "-"
             pnl_val = "-"
             status_desc = "⏳ Oczekująca"
-            
+           
             if pos:
                 side_val = pos.get("side", "").upper()
                 lev_val = f"{float(pos.get('leverage', 1))}x"
@@ -811,13 +797,13 @@ if futures_ex:
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                     f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
-                    
+                   
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                    
+                   
                     f_macd = float(f_df["macd"].iloc[-1])
                     f_sig = float(f_df["signal"].iloc[-1])
-                    
+                   
                     side_val = "LONG" if f_macd > f_sig else "SHORT"
                     lev_num = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     lev_val = f"{lev_num}x"
