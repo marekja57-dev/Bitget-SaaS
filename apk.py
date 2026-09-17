@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE (Z SYNCHRONIZACJĄ STANU BOTA)
+# INICJALIZACJA BAZY DANYCH SQLITE
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -70,12 +70,12 @@ def init_db():
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
-    cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bot-bitget.pl",))
+    cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bitget.pl",))
     if not cursor.fetchone():
         admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
         cursor.execute(
             "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, 1, 1)",
-            ("admin@bot-bot-bitget.pl", admin_pass)
+            ("admin@bot-bitget.pl", admin_pass)
         )
     conn.commit()
     conn.close()
@@ -164,8 +164,9 @@ if "locked_symbols" not in st.session_state:
     st.session_state.locked_symbols = set()
 if "open_candles" not in st.session_state:
     st.session_state.open_candles = {}
+if "symbol_cooldowns" not in st.session_state:
+    st.session_state.symbol_cooldowns = {}
 
-# Synchronizacja z bazą danych
 if st.session_state.logged_in and st.session_state.user_id:
     st.session_state.trend_bot_active = get_db_bot_status(st.session_state.user_id)
 else:
@@ -298,7 +299,6 @@ else:
     st.sidebar.markdown("🟢 **Rola: Klient SaaS**")
 
 if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
-    # Wyłączenie bota przy wylogowaniu dla bezpieczeństwa
     if st.session_state.user_id:
         set_db_bot_status(st.session_state.user_id, False)
     st.session_state.logged_in = False
@@ -384,10 +384,9 @@ st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
 
 # =====================================================================
-# PANCERNY KILL SWITCH (ANULOWANIE ZLECEŃ + ZAMKNIĘCIE WSZYSTKIEGO)
+# PANCERNY KILL SWITCH
 # =====================================================================
 if emergency_kill:
-    # 1. Bezwzględne wyłączenie w bazie danych dla pewności
     if st.session_state.user_id:
         set_db_bot_status(st.session_state.user_id, False)
     st.session_state.trend_bot_active = False
@@ -431,6 +430,7 @@ if emergency_kill:
     })
     st.session_state.locked_symbols = set()
     st.session_state.open_candles = {}
+    st.session_state.symbol_cooldowns = {}
     
     if 'close_errors' in locals() and close_errors:
         st.error(f"🚨 KILL SWITCH wykonany z błędami: {close_errors}")
@@ -506,12 +506,11 @@ with col4:
 st.markdown("---")
 
 # =====================================================================
-# PANEL STEROWANIA BOTA (Z SYNCHRONIZACJĄ BAZY DANYCH)
+# PANEL STEROWANIA BOTA
 # =====================================================================
 st.subheader("🤖 Bot Trendu EMA (Dynamiczny Margines pod Ryzyko + Twój Sufit)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
-    # Pobierz aktualny stan bezpośrednio z bazy danych przed renderowaniem przycisku
     current_db_status = get_db_bot_status(st.session_state.user_id)
     st.session_state.trend_bot_active = current_db_status
 
@@ -532,7 +531,7 @@ with col_status:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# PANCERNA FUNKCJA POBIERANIA TOP WOLUMENU
+# FUNKCJA POBIERANIA TOP WOLUMENU
 # =====================================================================
 def get_top_volume_crypto_symbols(exchange, limit_count=20):
     try:
@@ -570,9 +569,10 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
     ]
 
 # =====================================================================
-# LOGIKA BOTA (Z WERYFIKACJĄ Bazy Danych W Trakcie Pętli)
+# LOGIKA BOTA (BEZ ST.RERUN() - CZYSTY PRZEBIEG)
 # =====================================================================
 db_active_check = get_db_bot_status(st.session_state.user_id)
+now_ts = time.time()
 
 if futures_ex and db_active_check and max_active_pairs > 0:
     try:
@@ -580,7 +580,6 @@ if futures_ex and db_active_check and max_active_pairs > 0:
         
         # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
-            # Podwójne sprawdzenie bazy w trakcie pętli
             if not get_db_bot_status(st.session_state.user_id):
                 break
 
@@ -679,6 +678,7 @@ if futures_ex and db_active_check and max_active_pairs > 0:
                         closed_position = True
                 
                 if closed_position:
+                    st.session_state.symbol_cooldowns[sym] = time.time() + 60
                     if sym in st.session_state.locked_symbols:
                         st.session_state.locked_symbols.remove(sym)
                     if sym in st.session_state.open_candles:
@@ -695,6 +695,12 @@ if futures_ex and db_active_check and max_active_pairs > 0:
                 for sym in top_symbols:
                     if not get_db_bot_status(st.session_state.user_id):
                         break
+                    
+                    # Sprawdź cooldown dla pary (60 sekund blokady po poprzedniej akcji)
+                    cooldown_until = st.session_state.symbol_cooldowns.get(sym, 0)
+                    if time.time() < cooldown_until:
+                        continue
+
                     if sym in exchange_positions or sym in st.session_state.locked_symbols:
                         continue
                     
@@ -768,8 +774,9 @@ if futures_ex and db_active_check and max_active_pairs > 0:
                                         "Cena": f"{current_price:.4f}",
                                         "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                     })
+                                # Ustawienie cooldownu, aby uniknąć natychmiastowego ponownego wejścia
+                                st.session_state.symbol_cooldowns[sym] = time.time() + 60
                                 time.sleep(0.3)
-                                st.rerun()
                     except Exception:
                         pass
                     
@@ -824,7 +831,7 @@ else:
     st.info("Brak akcji w tej sesji.")
 
 # =====================================================================
-# PĘTLA ODŚWIEŻANIA TŁA (Warunkowana stanem bazy danych)
+# PĘTLA ODŚWIEŻANIA TŁA
 # =====================================================================
 if get_db_bot_status(st.session_state.user_id):
     time.sleep(scan_interval)
