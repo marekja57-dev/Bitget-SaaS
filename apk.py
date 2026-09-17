@@ -321,6 +321,7 @@ fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
 max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 20, 5)
+top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
@@ -458,10 +459,8 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
         tickers = exchange.fetch_tickers()
         valid_items = []
         for s, t in tickers.items():
-            # Tylko swap USDT
             if not (s.endswith('/USDT:USDT') or s.endswith('/USDT')):
                 continue
-            # Wyklucz towary tradycyjne (np. XAG, XAU) oraz inne non-crypto
             base = s.split('/')[0]
             if base in ['XAG', 'XAU', 'EUR', 'GBP', 'USD', 'USDC']:
                 continue
@@ -475,7 +474,6 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
             if vol_val > 0:
                 valid_items.append((s, vol_val))
                 
-        # Sortowanie malejące po faktycznym wolumenie USDT
         valid_items.sort(key=lambda x: x[1], reverse=True)
         top_list = [item[0] for item in valid_items[:limit_count]]
         if len(top_list) > 0:
@@ -483,7 +481,6 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
     except Exception:
         pass
         
-    # Sztywna awaryjna lista topowych kryptowalut o potężnym obrocie
     return [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT',
         'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'LINK/USDT:USDT',
@@ -497,9 +494,7 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
 # =====================================================================
 if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
     try:
-        # Pobieramy dynamicznie topowe pary (liczba pobieranych zależy od suwaka max_active_pairs lub max 20)
-        fetch_limit = max(max_active_pairs, 10)
-        top_symbols = get_top_volume_crypto_symbols(futures_ex, limit_count=fetch_limit)
+        top_symbols = get_top_volume_crypto_symbols(futures_ex, limit_count=top_scan_limit)
         
         # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
