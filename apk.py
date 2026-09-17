@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE
+# INICJALIZACJA BAZY DANYCH SQLITE (Z SYNCHRONIZACJĄ STANU BOTA)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -52,7 +52,14 @@ def init_db():
     cursor.execute("PRAGMA table_info(users)")
     existing_cols = [col[1] for col in cursor.fetchall()]
 
-    for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0")]:
+    for col, col_type in [
+        ("api_key", "TEXT"), 
+        ("secret_key", "TEXT"), 
+        ("passphrase", "TEXT"), 
+        ("stripe_paid", "INTEGER DEFAULT 0"), 
+        ("is_admin", "INTEGER DEFAULT 0"),
+        ("bot_active", "INTEGER DEFAULT 0")
+    ]:
         if col not in existing_cols:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -63,17 +70,42 @@ def init_db():
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
-    cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bitget.pl",))
+    cursor.execute("SELECT * FROM users WHERE LOWER(TRIM(email)) = ?", ("admin@bot-bot-bitget.pl",))
     if not cursor.fetchone():
         admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
         cursor.execute(
             "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, 1, 1)",
-            ("admin@bot-bitget.pl", admin_pass)
+            ("admin@bot-bot-bitget.pl", admin_pass)
         )
     conn.commit()
     conn.close()
 
 init_db()
+
+def get_db_bot_status(user_id):
+    if not user_id:
+        return False
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT bot_active FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return bool(row[0]) if row else False
+    except Exception:
+        return False
+
+def set_db_bot_status(user_id, active: bool):
+    if not user_id:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET bot_active = ? WHERE id = ?", (1 if active else 0, user_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 def load_stripe_credentials():
     if os.path.exists(STRIPE_CONFIG_FILE):
@@ -128,12 +160,17 @@ if "session_start_time" not in st.session_state:
     st.session_state.session_start_time = datetime.now()
 if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
-if "trend_bot_active" not in st.session_state:
-    st.session_state.trend_bot_active = False
 if "locked_symbols" not in st.session_state:
     st.session_state.locked_symbols = set()
 if "open_candles" not in st.session_state:
     st.session_state.open_candles = {}
+
+# Synchronizacja z bazą danych
+if st.session_state.logged_in and st.session_state.user_id:
+    st.session_state.trend_bot_active = get_db_bot_status(st.session_state.user_id)
+else:
+    if "trend_bot_active" not in st.session_state:
+        st.session_state.trend_bot_active = False
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -176,7 +213,7 @@ if not st.session_state.logged_in:
         if st.button("ZALOGUJ SIĘ", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
             user_row = cursor.fetchone()
             conn.close()
 
@@ -193,6 +230,7 @@ if not st.session_state.logged_in:
                 st.session_state.api_key = user_row[5] or ""
                 st.session_state.secret_key = user_row[6] or ""
                 st.session_state.passphrase = user_row[7] or ""
+                st.session_state.trend_bot_active = bool(user_row[8])
                 st.session_state.session_start_time = datetime.now()
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
@@ -213,7 +251,7 @@ if not st.session_state.logged_in:
                     is_adm = 1 if clean_reg in ADMIN_EMAILS else 0
                     is_paid = 1 if is_adm == 1 else 0
                     cursor.execute(
-                        "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO users (email, password, is_admin, stripe_paid, bot_active) VALUES (?, ?, ?, ?, 0)",
                         (reg_email.strip(), reg_pass, is_adm, is_paid)
                     )
                     conn.commit()
@@ -260,6 +298,9 @@ else:
     st.sidebar.markdown("🟢 **Rola: Klient SaaS**")
 
 if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
+    # Wyłączenie bota przy wylogowaniu dla bezpieczeństwa
+    if st.session_state.user_id:
+        set_db_bot_status(st.session_state.user_id, False)
     st.session_state.logged_in = False
     st.session_state.user_email = ""
     st.session_state.is_admin = False
@@ -267,6 +308,7 @@ if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
     st.session_state.api_key = ""
     st.session_state.secret_key = ""
     st.session_state.passphrase = ""
+    st.session_state.trend_bot_active = False
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -345,9 +387,13 @@ emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="
 # PANCERNY KILL SWITCH (ANULOWANIE ZLECEŃ + ZAMKNIĘCIE WSZYSTKIEGO)
 # =====================================================================
 if emergency_kill:
+    # 1. Bezwzględne wyłączenie w bazie danych dla pewności
+    if st.session_state.user_id:
+        set_db_bot_status(st.session_state.user_id, False)
+    st.session_state.trend_bot_active = False
+
     if futures_ex:
         close_errors = []
-        # 1. Anuluj wszystkie otwarte zlecenia oczekujące
         try:
             open_orders = futures_ex.fetch_open_orders()
             for ord in open_orders:
@@ -358,7 +404,6 @@ if emergency_kill:
         except Exception:
             pass
 
-        # 2. Zamknij wszystkie otwarte pozycje z podwójną weryfikacją
         try:
             positions = futures_ex.fetch_positions()
             for p in positions:
@@ -368,24 +413,21 @@ if emergency_kill:
                     pos_side = str(p.get("side", "")).lower()
                     side = "sell" if pos_side == "long" else "buy"
                     try:
-                        # Próba z redukcją
                         futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
                     except Exception:
                         try:
-                            # Awaryjna próba bez flagi reduceOnly w razie odrzucenia przez giełdę
                             futures_ex.create_market_order(sym, side, contracts)
                         except Exception as e:
                             close_errors.append(f"{sym}: {e}")
         except Exception as e:
             close_errors.append(f"Fetch positions error: {e}")
 
-    st.session_state.trend_bot_active = False
     st.session_state.trade_history.insert(0, {
         "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
         "Typ": "🛑 KILL SWITCH",
         "Para": "WSZYSTKIE",
         "Cena": "-",
-        "Info": "Awaryjne zamknięcie giełdy wywołane przez użytkownika."
+        "Info": "Awaryjne zamknięcie giełdy i zablokowanie bota wywołane przez użytkownika."
     })
     st.session_state.locked_symbols = set()
     st.session_state.open_candles = {}
@@ -393,8 +435,8 @@ if emergency_kill:
     if 'close_errors' in locals() and close_errors:
         st.error(f"🚨 KILL SWITCH wykonany z błędami: {close_errors}")
     else:
-        st.success("🚨 KILL SWITCH WYKONANY SKUTECZNIE. Zamknięto pozycje i anulowano zlecenia.")
-    time.sleep(3)
+        st.success("🚨 KILL SWITCH WYKONANY SKUTECZNIE. Zamknięto pozycje, anulowano zlecenia i zatrzymano bota.")
+    time.sleep(2)
     st.rerun()
 
 # =====================================================================
@@ -440,7 +482,6 @@ if futures_ex:
         active_positions_count = st.session_state.get("last_active_count", 0)
         total_unrealized_pnl = st.session_state.get("last_unrealized_pnl", 0.0)
 
-# Synchronizacja blokady z realnymi pozycjami giełdowymi
 st.session_state.locked_symbols = {s for s in st.session_state.locked_symbols if s in exchange_positions}
 st.session_state.open_candles = {s: ts for s, ts in st.session_state.open_candles.items() if s in exchange_positions}
 
@@ -465,18 +506,24 @@ with col4:
 st.markdown("---")
 
 # =====================================================================
-# PANEL STEROWANIA BOTA
+# PANEL STEROWANIA BOTA (Z SYNCHRONIZACJĄ BAZY DANYCH)
 # =====================================================================
 st.subheader("🤖 Bot Trendu EMA (Dynamiczny Margines pod Ryzyko + Twój Sufit)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
+    # Pobierz aktualny stan bezpośrednio z bazy danych przed renderowaniem przycisku
+    current_db_status = get_db_bot_status(st.session_state.user_id)
+    st.session_state.trend_bot_active = current_db_status
+
     if not st.session_state.trend_bot_active:
         if st.button("🚀 Uruchom Automatyczny Skaner", type="primary", use_container_width=True):
             st.session_state.trend_bot_active = True
+            set_db_bot_status(st.session_state.user_id, True)
             st.rerun()
     else:
         if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
             st.session_state.trend_bot_active = False
+            set_db_bot_status(st.session_state.user_id, False)
             st.rerun()
 with col_status:
     if st.session_state.trend_bot_active:
@@ -523,14 +570,20 @@ def get_top_volume_crypto_symbols(exchange, limit_count=20):
     ]
 
 # =====================================================================
-# LOGIKA BOTA (ZAMKNIĘTA ŚWIECA + COOLDOWN + DYNAMICZNY MARGINES)
+# LOGIKA BOTA (Z WERYFIKACJĄ Bazy Danych W Trakcie Pętli)
 # =====================================================================
-if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
+db_active_check = get_db_bot_status(st.session_state.user_id)
+
+if futures_ex and db_active_check and max_active_pairs > 0:
     try:
         top_symbols = get_top_volume_crypto_symbols(futures_ex, limit_count=top_scan_limit)
         
         # 1. Zarządzanie otwartymi pozycjami
         for sym, pos in list(exchange_positions.items()):
+            # Podwójne sprawdzenie bazy w trakcie pętli
+            if not get_db_bot_status(st.session_state.user_id):
+                break
+
             contracts = float(pos.get('contracts', 0))
             if contracts <= 0:
                 continue
@@ -549,14 +602,12 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                 last_slow = df['slow_ema'].iloc[-2]
                 last_closed_ts = df['timestamp'].iloc[-2]
                 
-                # === BEZWZGLĘDNA OCHRONA ŚWIECY (CANDLE COOLDOWN) ===
                 opened_ts = st.session_state.open_candles.get(sym, 0)
                 if last_closed_ts == opened_ts:
                     continue
                 
                 closed_position = False
                 
-                # A. Awaryjny SL/TP
                 if use_optional_sltp and entry_price > 0:
                     if pos_side == 'long':
                         sl_price = entry_price * (1.0 - (safety_sl_pct / 100.0))
@@ -605,7 +656,6 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                             })
                             closed_position = True
 
-                # B. Zamknięcie przy odwróceniu trendu
                 if not closed_position:
                     if pos_side == 'long' and last_fast < last_slow:
                         futures_ex.create_market_order(sym, 'sell', contracts, params={"reduceOnly": True})
@@ -638,92 +688,93 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji w wolnych slotach
-        total_active_and_locked = len(exchange_positions) + len(st.session_state.locked_symbols)
-        if total_active_and_locked < max_active_pairs and fut_free >= 5.0:
-            for sym in top_symbols:
-                if sym in exchange_positions or sym in st.session_state.locked_symbols:
-                    continue
-                
-                if (len(exchange_positions) + len(st.session_state.locked_symbols)) >= max_active_pairs:
-                    break
+        # 2. Skanowanie i otwieranie nowych pozycji
+        if get_db_bot_status(st.session_state.user_id):
+            total_active_and_locked = len(exchange_positions) + len(st.session_state.locked_symbols)
+            if total_active_and_locked < max_active_pairs and fut_free >= 5.0:
+                for sym in top_symbols:
+                    if not get_db_bot_status(st.session_state.user_id):
+                        break
+                    if sym in exchange_positions or sym in st.session_state.locked_symbols:
+                        continue
                     
-                try:
-                    ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
-                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                    df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
-                    df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
-                    
-                    high_low = df['high'] - df['low']
-                    high_close = np.abs(df['high'] - df['close'].shift())
-                    low_close = np.abs(df['low'] - df['close'].shift())
-                    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-                    atr = tr.rolling(window=14).mean().iloc[-2]
-                    
-                    current_price = df['close'].iloc[-1]
-                    last_fast = df['fast_ema'].iloc[-2]
-                    last_slow = df['slow_ema'].iloc[-2]
-                    last_closed_ts = df['timestamp'].iloc[-2]
-                    
-                    is_bullish = last_fast > last_slow
-                    is_bearish = last_fast < last_slow
-                    
-                    if is_bullish or is_bearish:
-                        st.session_state.locked_symbols.add(sym)
-                        st.session_state.open_candles[sym] = last_closed_ts
-
-                        if use_dynamic_leverage and atr > 0:
-                            volatility_ratio = current_price / atr
-                            calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
-                        else:
-                            calculated_leverage = base_leverage
-                            
-                        try:
-                            futures_ex.set_leverage(calculated_leverage, sym)
-                        except Exception:
-                            pass
-                            
-                        if atr > 0 and current_price > 0:
-                            risk_factor = current_price / (atr * 40.0) 
-                            risk_factor = np.clip(risk_factor, 0.25, 1.0) 
-                            dynamic_margin = max_capital_limit * risk_factor
-                        else:
-                            dynamic_margin = max_capital_limit
-
-                        margin = min(dynamic_margin, fut_free * 0.98, max_capital_limit)
+                    if (len(exchange_positions) + len(st.session_state.locked_symbols)) >= max_active_pairs:
+                        break
                         
-                        position_notional = margin * calculated_leverage
-                        contracts = position_notional / current_price
-                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                    try:
+                        ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=timeframe_choice, limit=50)
+                        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                        df['fast_ema'] = df['close'].ewm(span=fast_ema_period, adjust=False).mean()
+                        df['slow_ema'] = df['close'].ewm(span=slow_ema_period, adjust=False).mean()
                         
-                        if contracts_prec > 0:
-                            if is_bullish:
-                                futures_ex.create_market_order(sym, 'buy', contracts_prec)
-                                st.session_state.trade_history.insert(0, {
-                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (ZAMKNIĘTA ŚWIECA)",
-                                    "Para": sym,
-                                    "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
-                                })
+                        high_low = df['high'] - df['low']
+                        high_close = np.abs(df['high'] - df['close'].shift())
+                        low_close = np.abs(df['low'] - df['close'].shift())
+                        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                        atr = tr.rolling(window=14).mean().iloc[-2]
+                        
+                        current_price = df['close'].iloc[-1]
+                        last_fast = df['fast_ema'].iloc[-2]
+                        last_slow = df['slow_ema'].iloc[-2]
+                        last_closed_ts = df['timestamp'].iloc[-2]
+                        
+                        is_bullish = last_fast > last_slow
+                        is_bearish = last_fast < last_slow
+                        
+                        if is_bullish or is_bearish:
+                            st.session_state.locked_symbols.add(sym)
+                            st.session_state.open_candles[sym] = last_closed_ts
+
+                            if use_dynamic_leverage and atr > 0:
+                                volatility_ratio = current_price / atr
+                                calculated_leverage = int(np.clip(volatility_ratio / 50.0, 1, base_leverage))
                             else:
-                                futures_ex.create_market_order(sym, 'sell', contracts_prec)
-                                st.session_state.trade_history.insert(0, {
-                                    "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (ZAMKNIĘTA ŚWIECA)",
-                                    "Para": sym,
-                                    "Cena": f"{current_price:.4f}",
-                                    "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
-                                })
-                            time.sleep(0.3)
-                            st.rerun()
-                except Exception:
-                    pass
+                                calculated_leverage = base_leverage
+                                
+                            try:
+                                futures_ex.set_leverage(calculated_leverage, sym)
+                            except Exception:
+                                pass
+                                
+                            if atr > 0 and current_price > 0:
+                                risk_factor = current_price / (atr * 40.0) 
+                                risk_factor = np.clip(risk_factor, 0.25, 1.0) 
+                                dynamic_margin = max_capital_limit * risk_factor
+                            else:
+                                dynamic_margin = max_capital_limit
+
+                            margin = min(dynamic_margin, fut_free * 0.98, max_capital_limit)
+                            
+                            position_notional = margin * calculated_leverage
+                            contracts = position_notional / current_price
+                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                            
+                            if contracts_prec > 0:
+                                if is_bullish:
+                                    futures_ex.create_market_order(sym, 'buy', contracts_prec)
+                                    st.session_state.trade_history.insert(0, {
+                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "Typ": "📈 NOWY LONG (ZAMKNIĘTA ŚWIECA)",
+                                        "Para": sym,
+                                        "Cena": f"{current_price:.4f}",
+                                        "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    })
+                                else:
+                                    futures_ex.create_market_order(sym, 'sell', contracts_prec)
+                                    st.session_state.trade_history.insert(0, {
+                                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "Typ": "📉 NOWY SHORT (ZAMKNIĘTA ŚWIECA)",
+                                        "Para": sym,
+                                        "Cena": f"{current_price:.4f}",
+                                        "Info": f"Margines (Dyn. ATR): {margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    })
+                                time.sleep(0.3)
+                                st.rerun()
+                    except Exception:
+                        pass
                     
     except Exception as e:
         st.error(f"Błąd skanera rynku: {e}")
-elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
-    st.sidebar.warning("⚠️ Limit otwartych par ustawiony na 0. Bot nie otwiera nowych pozycji.")
 
 # =====================================================================
 # WIDOK AKTYWNYCH POZYCJI
@@ -773,8 +824,8 @@ else:
     st.info("Brak akcji w tej sesji.")
 
 # =====================================================================
-# PĘTLA ODŚWIEŻANIA TŁA
+# PĘTLA ODŚWIEŻANIA TŁA (Warunkowana stanem bazy danych)
 # =====================================================================
-if st.session_state.trend_bot_active:
+if get_db_bot_status(st.session_state.user_id):
     time.sleep(scan_interval)
     st.rerun()
