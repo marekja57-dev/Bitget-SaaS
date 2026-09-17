@@ -452,7 +452,7 @@ with col_status:
         st.error("STATUS: ZATRZYMANY")
 
 # =====================================================================
-# PANCERNA FUNKCJA POBIERANIA TOP WOLUMENU (BEZ ŚMIECI I TOWARÓW)
+# PANCERNA FUNKCJA POBIERANIA TOP WOLUMENU
 # =====================================================================
 def get_top_volume_crypto_symbols(exchange, limit_count=20):
     try:
@@ -674,7 +674,7 @@ elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
     st.sidebar.warning("⚠️ Limit otwartych par ustawiony na 0. Bot nie otwiera nowych pozycji.")
 
 # =====================================================================
-# WIDOK AKTYWNYCH POZYCJI
+# WIDOK AKTYWNYCH POZYCJI (Z POPRAWIONYM KAPITAŁEM W USDT)
 # =====================================================================
 st.markdown("---")
 st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle Top Wolumen Crypto)")
@@ -688,11 +688,21 @@ if exchange_positions:
         contracts = float(pos.get("contracts", 0))
         unreal_pnl = float(pos.get("unrealizedPnl", 0))
         
+        # Pobieranie / obliczanie wartości i kapitału w USDT
+        notional = float(pos.get("notional", 0))
+        if notional == 0 and entry_p > 0:
+            notional = contracts * entry_p
+            
+        margin = float(pos.get("initialMargin", 0))
+        if margin == 0 and lev > 0 and notional > 0:
+            margin = notional / lev
+        
         pos_table_data.append({
             "Para": sym,
             "Strona": side,
-            "Kontrakty": contracts,
-            "Dźwignia": f"{lev}x",
+            "Zaangażowany Kapitał (Margin)": f"{margin:.2f} USDT",
+            "Wartość Pozycji (Notional)": f"{notional:.2f} USDT",
+            "Dźwignia": f"{lev:.0f}x",
             "Cena Wejścia": f"{entry_p:.4f}",
             "Cena Mark": f"{mark_p:.4f}",
             "PnL (USDT)": f"{unreal_pnl:+.2f} USDT"
