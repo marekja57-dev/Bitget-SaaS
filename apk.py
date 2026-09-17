@@ -35,7 +35,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE (POPRAWIONA KOLEJNOŚĆ)
+# INICJALIZACJA BAZY DANYCH SQLITE
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -49,7 +49,6 @@ def init_db():
     ''')
     conn.commit()
     
-    # Najpierw sprawdzamy i dodajemy kolumny, ZANIM zrobimy na nich jakikolwiek UPDATE
     cursor.execute("PRAGMA table_info(users)")
     existing_cols = [col[1] for col in cursor.fetchall()]
 
@@ -61,7 +60,6 @@ def init_db():
             except Exception:
                 pass
 
-    # Dopiero teraz, gdy kolumny na 100% istnieją, aktualizujemy uprawnienia
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
     
@@ -162,7 +160,7 @@ st.markdown(
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
-        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-DYNAMIC BOT</div> """,
+        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-MANAGED BOT</div> """,
         unsafe_allow_html=True,
     )
 
@@ -313,17 +311,17 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
 futures_ex = get_futures_exchange()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 Ustawienia Strategii Long / Short & Trendu")
+st.sidebar.markdown("### 📊 Ustawienia Strategii Trendu EMA")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 0, 20, 5)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 10, 1)
 top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
-max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 2000.0, 100.0, 10.0)
-risk_per_trade_pct = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.5, 5.0, 1.5, 0.5)
+max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 1000.0, 70.0, 5.0)
+risk_pct_per_trade = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.1, 10.0, 1.5, 0.1)
 use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od zmienności (ATR)", value=True)
 base_leverage = st.sidebar.slider("Bazowa max dźwignia", 1, 20, 5)
 
@@ -334,7 +332,7 @@ safety_sl_pct = st.sidebar.slider("Awaryjny Stop-Loss (%)", 1.0, 15.0, 4.0, 0.5)
 safety_tp_pct = st.sidebar.slider("Awaryjny Take-Profit (%)", 2.0, 40.0, 8.0, 0.5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔄 Skanowanie Rynku (Ściśle Top Wolumen Crypto)")
+st.sidebar.markdown("### 🔄 Skanowanie Rynku")
 scan_interval = st.sidebar.slider("Interwał pętli bota (s)", 3, 60, 5)
 
 st.sidebar.markdown("---")
@@ -431,7 +429,7 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Multi-Market Long & Short Bot + Dynamic Risk (Ściśle Top Wolumen Crypto)")
+st.subheader("🤖 Bot Trendu EMA (Zarządzanie Ryzykiem i Limitem USDT)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
@@ -593,7 +591,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji wyłącznie z TOP wolumenu
+        # 2. Skanowanie i otwieranie nowych pozycji zgodnie z ryzykiem i limitami USDT
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
@@ -634,10 +632,19 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         except Exception:
                             pass
                             
-                        risk_budget = fut_total * (risk_per_trade_pct / 100.0) * calculated_leverage
-                        budget = max(5.0, min(fut_free, risk_budget, max_capital_per_trade))
+                        # OBLICZANIE KAPITAŁU W OPARCIU O % RYZYKA I MAKSYMALNY LIMIT USDT
+                        risk_based_margin = fut_total * (risk_pct_per_trade / 100.0)
                         
-                        contracts = (budget * calculated_leverage) / current_price
+                        if max_capital_per_trade > 0:
+                            margin = min(risk_based_margin, max_capital_per_trade)
+                        else:
+                            margin = risk_based_margin
+                            
+                        # Nie pozwól zaangażować więcej niż faktycznie mamy wolnych środków
+                        margin = min(margin, fut_free * 0.98)
+                        
+                        position_notional = margin * calculated_leverage
+                        contracts = position_notional / current_price
                         contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
                         
                         if contracts_prec > 0:
@@ -645,19 +652,19 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'buy', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (TOP WOLUMEN)",
+                                    "Typ": "📈 NOWY LONG (ZARZĄDZANIE RYZYKIEM)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                 })
                             else:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (TOP WOLUMEN)",
+                                    "Typ": "📉 NOWY SHORT (ZARZĄDZANIE RYZYKIEM)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
-                                    "Info": f"Zaangażowano: ~{budget:.1f} USDT | Dźwignia: {calculated_leverage}x"
+                                    "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
                                 })
                             active_positions_count += 1
                             time.sleep(0.3)
@@ -674,7 +681,7 @@ elif futures_ex and st.session_state.trend_bot_active and max_active_pairs == 0:
 # WIDOK AKTYWNYCH POZYCJI
 # =====================================================================
 st.markdown("---")
-st.subheader("📋 Aktywne Pozycje Na Giełdzie (Ściśle Top Wolumen Crypto)")
+st.subheader("📋 Aktywne Pozycje Na Giełdzie")
 if exchange_positions:
     pos_table_data = []
     for sym, pos in exchange_positions.items():
@@ -705,7 +712,7 @@ if exchange_positions:
         })
     st.dataframe(pd.DataFrame(pos_table_data), use_container_width=True)
 else:
-    st.info("Brak otwartych pozycji. Skaner monitoruje wyłącznie ściśle wyselekcjonowane czołowe kryptowaluty pod względem faktycznego obrotu 24h.")
+    st.info("Brak otwartych pozycji. Skaner czeka na sygnał wejścia w trend na czołowych parach.")
 
 # =====================================================================
 # DZIENNIK ZDARZEŃ
