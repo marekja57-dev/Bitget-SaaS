@@ -52,11 +52,18 @@ def init_db():
             secret_key TEXT, 
             passphrase TEXT,
             bot_active INTEGER DEFAULT 0,
-            sniper_active INTEGER DEFAULT 0
+            sniper_active INTEGER DEFAULT 0,
+            bot_scan_pairs INTEGER DEFAULT 15,
+            max_active_positions INTEGER DEFAULT 5
         ) 
     ''')
     
-    for col, col_type in [("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0"), ("bot_active", "INTEGER DEFAULT 0"), ("sniper_active", "INTEGER DEFAULT 0")]:
+    for col, col_type in [
+        ("api_key", "TEXT"), ("secret_key", "TEXT"), ("passphrase", "TEXT"), 
+        ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0"), 
+        ("bot_active", "INTEGER DEFAULT 0"), ("sniper_active", "INTEGER DEFAULT 0"),
+        ("bot_scan_pairs", "INTEGER DEFAULT 15"), ("max_active_positions", "INTEGER DEFAULT 5")
+    ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
@@ -178,7 +185,7 @@ if not st.session_state.logged_in:
         if st.button("ZALOGUJ SIĘ", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
+            cursor.execute("SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE LOWER(TRIM(email)) = ?", (login_email.strip().lower(),))
             user_row = cursor.fetchone()
             conn.close()
 
@@ -197,6 +204,8 @@ if not st.session_state.logged_in:
                 st.session_state.passphrase = user_row[7] or ""
                 st.session_state.trend_bot_fut_active = bool(user_row[8])
                 st.session_state.new_listing_sniper_active = bool(user_row[9])
+                st.session_state.bot_scan_pairs = user_row[10] if user_row[10] is not None else 15
+                st.session_state.max_active_positions = user_row[11] if user_row[11] is not None else 5
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
             else:
@@ -247,16 +256,22 @@ if "trend_bot_fut_active" not in st.session_state:
     st.session_state.trend_bot_fut_active = False
 if "new_listing_sniper_active" not in st.session_state:
     st.session_state.new_listing_sniper_active = False
+if "bot_scan_pairs" not in st.session_state:
+    st.session_state.bot_scan_pairs = 15
+if "max_active_positions" not in st.session_state:
+    st.session_state.max_active_positions = 5
 
 try:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT bot_active, sniper_active FROM users WHERE id = ?", (st.session_state.user_id,))
+    cursor.execute("SELECT bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE id = ?", (st.session_state.user_id,))
     r = cursor.fetchone()
     conn.close()
     if r:
         st.session_state.trend_bot_fut_active = bool(r[0])
         st.session_state.new_listing_sniper_active = bool(r[1])
+        st.session_state.bot_scan_pairs = r[2] if r[2] is not None else 15
+        st.session_state.max_active_positions = r[3] if r[3] is not None else 5
 except Exception:
     pass
 
@@ -300,12 +315,12 @@ def background_trading_daemon():
         try:
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
+            cursor.execute("SELECT id, email, api_key, secret_key, passphrase, bot_active, sniper_active, bot_scan_pairs, max_active_positions FROM users WHERE (bot_active = 1 OR sniper_active = 1) AND api_key IS NOT NULL AND api_key != ''")
             active_users = cursor.fetchall()
             conn.close()
 
             for user in active_users:
-                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip = user
+                u_id, u_email, u_api, u_sec, u_pass, u_bot, u_snip, u_scan_pairs, u_max_pos = user
                 ex = get_futures_exchange(u_api, u_sec, u_pass)
                 if not ex:
                     continue
@@ -351,7 +366,7 @@ def background_trading_daemon():
                     # --- BOT TRENDU W TLE ---
                     if u_bot:
                         spot_tf = "1h"
-                        max_active_pos = 5
+                        max_active_pos = u_max_pos if u_max_pos is not None else 5
                         use_sltp = True
                         sl_pct = 2.0
                         tp_pct = 5.0
@@ -360,6 +375,7 @@ def background_trading_daemon():
                         pos_allocation = 20.0
                         risk_red = True
                         min_trade = 5.0
+                        limit_pairs = u_scan_pairs if u_scan_pairs is not None else 15
 
                         positions = ex.fetch_positions()
                         for pos in positions:
@@ -409,12 +425,13 @@ def background_trading_daemon():
                         active_symbols = [p["symbol"] for p in real_positions]
                         current_count = len(active_symbols)
 
+                        # Automatyczne otwieranie nowych pozycji w miejsce zamkniętych (w ramach limitu)
                         if current_count < max_active_pos and fut_free >= min_trade:
                             slots_avail = max_active_pos - current_count
                             best_candidates = sorted(
                                 [s for s, d in tickers.items() if (s.endswith(":USDT") or "/USDT:USDT" in s) and "BULL" not in s and "BEAR" not in s and s not in active_symbols],
                                 key=lambda x: tickers[x].get("quoteVolume", 0), reverse=True
-                            )[:15]
+                            )[:limit_pairs]
 
                             evaluated = []
                             for sym in best_candidates:
@@ -562,7 +579,19 @@ telegram_chat_id = st.sidebar.text_input("Telegram Chat ID")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Ustawienia Futures")
-max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, 5)
+def update_max_positions():
+    val = st.session_state.slider_max_pos
+    st.session_state.max_active_positions = val
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET max_active_positions = ? WHERE id = ?", (val, st.session_state.user_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, value=st.session_state.max_active_positions, key="slider_max_pos", on_change=update_max_positions)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Górny)")
@@ -608,7 +637,21 @@ spot_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Pętla Skanera w Tle")
 scan_interval = st.sidebar.slider("Interwał odświeżania widoku (s)", 1, 300, 3)
-max_fut_scan_pairs = st.sidebar.slider("📈 Liczba skanowanych par Futures", 5, 50, 15, 5)
+max_fut_scan_pairs = st.sidebar.slider("📈 Liczba skanowanych par Futures (Widok)", 5, 50, 15, 5)
+
+def update_bot_scan_pairs():
+    val = st.session_state.slider_bot_scan_pairs
+    st.session_state.bot_scan_pairs = val
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET bot_scan_pairs = ? WHERE id = ?", (val, st.session_state.user_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+st.sidebar.slider("🤖 Liczba par dla Bota w Tle", 5, 50, value=st.session_state.bot_scan_pairs, step=5, key="slider_bot_scan_pairs", on_change=update_bot_scan_pairs)
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
@@ -858,3 +901,4 @@ else:
 
 time.sleep(scan_interval)
 st.rerun()
+
