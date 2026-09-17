@@ -445,7 +445,7 @@ if futures_ex:
         pass
 
 # =====================================================================
-# GŁÓWNE KAFELKI METRYK (TYLKO JEDEN CZYSTY RZĄD 4 KOLUMN)
+# GŁÓWNE KAFELKI METRYK (PRZYWRÓCONO KAFELKĘ SLOTÓW POZYCJI)
 # =====================================================================
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
@@ -467,7 +467,11 @@ with col3:
     minutes, seconds = divmod(remainder, 60)
     st.metric(label="⏰ Czas Sesji", value=f"{hours:02d}:{minutes:02d}:{seconds:02d}", delta=f"Interwał: {scan_interval}s")
 with col4:
-    st.metric(label="⚡ Status Skanera", value="AKTYWNY" if st.session_state.scanner_active else "ZATRZYMANY", delta="Tryb Futures")
+    st.metric(
+        label="🎯 Sloty / Pozycje", 
+        value=f"{active_positions_count} / {max_active_futures_positions}", 
+        delta="Zajęte / Limit slotów"
+    )
 
 st.markdown("---")
 
@@ -851,3 +855,4 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_fut_active or st.session_state.futures_sniper_active:
     time.sleep(scan_interval)
     st.rerun()
+
