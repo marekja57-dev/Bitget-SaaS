@@ -758,16 +758,23 @@ if emergency_kill:
 fut_free, fut_total = 0.0, 0.0
 if futures_ex:
     try:
-        f_bal = futures_ex.fetch_balance()
-        # Obsługa standardowej struktury CCXT lub struktury bezpośredniej Bitget Futures
-        if "free" in f_bal and isinstance(f_bal["free"], dict) and f_bal["free"].get("USDT") is not None:
-            fut_free = float(f_bal["free"].get("USDT", 0.0) or 0.0)
-            fut_total = float(f_bal.get("total", {}).get("USDT", 0.0) or 0.0)
-        elif "USDT" in f_bal and isinstance(f_bal["USDT"], dict):
-            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
-            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
-    except Exception as e:
-        st.error(f"⚠️ Błąd odczytu salda: {e}")
+        # Próbujemy pobrać saldo ze sprecyzowanym typem konta Futures na Bitget
+        try:
+            f_bal = futures_ex.fetch_balance({"accountType": "usdt-futures"})
+        except Exception:
+            f_bal = futures_ex.fetch_balance()
+            
+        if isinstance(f_bal, dict):
+            if "USDT" in f_bal and isinstance(f_bal["USDT"], dict):
+                fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+                fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
+            elif "free" in f_bal and isinstance(f_bal["free"], dict):
+                fut_free = float(f_bal["free"].get("USDT", 0.0) or 0.0)
+                fut_total = float(f_bal.get("total", {}).get("USDT", 0.0) or 0.0)
+    except Exception:
+        # Cicha obsługa, żeby aplikacja nie wariowała na ekranie
+        pass
+
 
 
 total_unrealized_pnl = 0.0
