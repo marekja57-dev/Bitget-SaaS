@@ -10,7 +10,7 @@ import streamlit as st
 import stripe
 
 st.set_page_config(
-    page_title="Bitget Futures - Top Volume Long/Short Bot",
+    page_title="Bitget Futures - Top Volume Trend Bot",
     layout="wide",
 )
 
@@ -160,7 +160,7 @@ st.markdown(
 # =====================================================================
 if not st.session_state.logged_in:
     st.markdown(
-        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">LONG & SHORT RISK-MANAGED BOT</div> """,
+        """ <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title">BITGET FUTURES</div> <div class="retro-subtitle">TREND BOT - PEŁNA PULA</div> """,
         unsafe_allow_html=True,
     )
 
@@ -315,13 +315,12 @@ st.sidebar.markdown("### 📊 Ustawienia Strategii Trendu EMA")
 fast_ema_period = st.sidebar.slider("Szybka EMA", 3, 50, 9)
 slow_ema_period = st.sidebar.slider("Wolna EMA", 10, 200, 21)
 timeframe_choice = st.sidebar.selectbox("Interwał wykresu", ["1m", "5m", "15m", "1h", "4h"], index=1)
-max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 10, 1)
+max_active_pairs = st.sidebar.slider("Maks. otwartych par jednocześnie", 1, 20, 1) # Poprawione do 20
 top_scan_limit = st.sidebar.slider("Top par wolumenu do skanowania", 5, 50, 20)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚖️ Zarządzanie Ryzykiem i Kapitałem")
-max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 1000.0, 70.0, 5.0)
-risk_pct_per_trade = st.sidebar.slider("Ryzyko kapitału na pozycję (%)", 0.1, 10.0, 1.5, 0.1)
+st.sidebar.markdown("### 💰 Zarządzanie Kapitałem (Pełna Pula)")
+max_capital_per_trade = st.sidebar.slider("Maks. kwota na 1 pozycję (USDT)", 10.0, 5000.0, 70.0, 10.0)
 use_dynamic_leverage = st.sidebar.checkbox("Automatyczna dźwignia zależna od zmienności (ATR)", value=True)
 base_leverage = st.sidebar.slider("Bazowa max dźwignia", 1, 20, 5)
 
@@ -429,7 +428,7 @@ st.markdown("---")
 # =====================================================================
 # PANEL STEROWANIA BOTA
 # =====================================================================
-st.subheader("🤖 Bot Trendu EMA (Zarządzanie Ryzykiem i Limitem USDT)")
+st.subheader("🤖 Bot Trendu EMA (Pełna Pula na Pozycję)")
 col_btn, col_status = st.columns([2, 1])
 with col_btn:
     if not st.session_state.trend_bot_active:
@@ -591,7 +590,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
             except Exception:
                 pass
 
-        # 2. Skanowanie i otwieranie nowych pozycji zgodnie z ryzykiem i limitami USDT
+        # 2. Skanowanie i otwieranie nowych pozycji pełną pulą
         if active_positions_count < max_active_pairs and fut_free >= 5.0:
             for sym in top_symbols:
                 if sym in exchange_positions or sym in st.session_state.locked_symbols:
@@ -632,16 +631,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                         except Exception:
                             pass
                             
-                        # OBLICZANIE KAPITAŁU W OPARCIU O % RYZYKA I MAKSYMALNY LIMIT USDT
-                        risk_based_margin = fut_total * (risk_pct_per_trade / 100.0)
-                        
-                        if max_capital_per_trade > 0:
-                            margin = min(risk_based_margin, max_capital_per_trade)
-                        else:
-                            margin = risk_based_margin
-                            
-                        # Nie pozwól zaangażować więcej niż faktycznie mamy wolnych środków
-                        margin = min(margin, fut_free * 0.98)
+                        margin = min(max_capital_per_trade, fut_free * 0.98)
                         
                         position_notional = margin * calculated_leverage
                         contracts = position_notional / current_price
@@ -652,7 +642,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'buy', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📈 NOWY LONG (ZARZĄDZANIE RYZYKIEM)",
+                                    "Typ": "📈 NOWY LONG (PEŁNA PULA)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
@@ -661,7 +651,7 @@ if futures_ex and st.session_state.trend_bot_active and max_active_pairs > 0:
                                 futures_ex.create_market_order(sym, 'sell', contracts_prec)
                                 st.session_state.trade_history.insert(0, {
                                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Typ": "📉 NOWY SHORT (ZARZĄDZANIE RYZYKIEM)",
+                                    "Typ": "📉 NOWY SHORT (PEŁNA PULA)",
                                     "Para": sym,
                                     "Cena": f"{current_price:.4f}",
                                     "Info": f"Margines: ~{margin:.1f} USDT | Dźwignia: {calculated_leverage}x"
