@@ -475,6 +475,8 @@ elapsed = datetime.now() - st.session_state.session_start_time
 total_seconds = int(elapsed.total_seconds())
 hours, remainder = divmod(total_seconds, 3600)
 minutes, seconds = divmod(remainder, 60)
+total_unrealized_pnl = st.session_state.get('ceched_total_pnl', 0.0)
+active_positions_count = st.session_state.get('ceched_active_count', 0)
 
 st.markdown(f"""
     <div class="metrics-row">
