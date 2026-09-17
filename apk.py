@@ -158,7 +158,6 @@ if "user_id" not in st.session_state:
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
 
-# Pamięć podręczna salda (anty-zerowanie przy błędach API)
 if "last_fut_total" not in st.session_state:
     st.session_state.last_fut_total = 0.0
 if "last_fut_free" not in st.session_state:
@@ -391,31 +390,12 @@ futures_ex = get_futures_exchange()
 # USTAWIENIA
 # =====================================================================
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔔 Powiadomienia Telegram")
-enable_notifications = st.sidebar.checkbox("Włącz powiadomienia", value=True)
-telegram_bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
-telegram_chat_id = st.sidebar.text_input("Telegram Chat ID")
-
-def send_notification(message):
-    if enable_notifications:
-        st.toast(message, icon="🤖")
-        if telegram_bot_token and telegram_chat_id:
-            try:
-                import urllib.parse
-                import urllib.request
-                url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-                data = urllib.parse.urlencode({"chat_id": telegram_chat_id, "text": message}).encode("utf-8")
-                urllib.request.urlopen(url, data=data, timeout=3)
-            except Exception:
-                pass
-
-st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Ustawienia Futures")
 max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Górny)")
-position_pct_allocation = st.sidebar.slider("Maksymalny % wolnych środków na 1 pozycję", 5, 100, 20, 5)
+st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Kwotowy)")
+position_fixed_budget = st.sidebar.number_input("Maksymalny budżet na 1 pozycję (USDT)", min_value=5.0, max_value=1000.0, value=20.0, step=5.0)
 risk_reduction_enabled = st.sidebar.checkbox("🧠 Inteligentna redukcja kapitału przy wysokim ryzyku (zmienności)", value=True)
 
 st.sidebar.markdown("---")
@@ -491,8 +471,7 @@ if emergency_kill:
     st.session_state.listing_sniper_active = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
-    send_notification("🚨 [KILL SWITCH] Zamknięto pozycje i wyłączono bota/snajpera!")
-    st.success("🚨 KILL SWITCH WYKONANY.")
+    st.success("🚨 KILL SWITCH WYKONANY. Zamknięto pozycje i wyłączono bota/snajpera.")
     time.sleep(2)
     st.rerun()
 
@@ -543,14 +522,12 @@ if futures_ex:
 
         f_free_fetched, f_total_fetched = extract_bal(f_bal)
         
-        # Jeśli API zwróciło poprawne dane (> 0), zaktualizuj pamięć podręczną
         if f_total_fetched > 0.0 or f_free_fetched > 0.0:
             st.session_state.last_fut_total = f_total_fetched
             st.session_state.last_fut_free = f_free_fetched
     except Exception:
         pass
 
-# Przypisz saldo z pamięci podręcznej (dzięki temu błąd API nie wyczysści salda do zera)
 fut_total = st.session_state.last_fut_total
 fut_free = st.session_state.last_fut_free
 
@@ -685,7 +662,6 @@ if futures_ex and st.session_state.listing_sniper_active:
                             }
                             st.session_state.trade_history.insert(0, t_item)
                             save_trade_to_db(st.session_state.user_id, t_item)
-                            send_notification(f"🚨 [LISTING SNIPER] Wykryto nową walutę! Wystrzelono LONG na {new_sym}")
                     except Exception:
                         pass
             st.session_state.known_markets = current_market_symbols
@@ -696,7 +672,6 @@ if futures_ex and st.session_state.listing_sniper_active:
 # CIĄGŁA LOGIKA TRENDU: ZAMYKANIE PRZY ZMIANIE TRENDU + OTWIERANIE W SLOCIE
 # =====================================================================
 if futures_ex:
-    # 1. Sprawdzanie i zamykanie pozycji przy odwróceniu trendu lub SL/TP
     try:
         current_positions = futures_ex.fetch_positions()
         for pos in current_positions:
@@ -758,13 +733,11 @@ if futures_ex:
                         }
                         st.session_state.trade_history.insert(0, t_item)
                         save_trade_to_db(st.session_state.user_id, t_item)
-                        send_notification(f"🔵 [{close_reason_fut}] Zamknięto pozycję na {sym} z powodu zmiany trendu/rynku")
                 except Exception:
                     pass
     except Exception:
         pass
 
-    # 2. Automatyczne zapełnianie wolnych slotów nowymi pozycjami pod trend
     if st.session_state.trend_bot_fut_active:
         try:
             real_positions = futures_ex.fetch_positions()
@@ -822,7 +795,7 @@ if futures_ex:
                     tf_key = f"trend_bot_fut_{sym}"
                    
                     if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 60:
-                        max_allowed_budget = fut_free * (position_pct_allocation / 100.0)
+                        max_allowed_budget = position_fixed_budget
                        
                         if risk_reduction_enabled:
                             risk_multiplier = max(0.3, min(1.0, 2.0 / f_vol)) if f_vol > 0 else 1.0
@@ -861,7 +834,6 @@ if futures_ex:
                             st.session_state.trade_history.insert(0, t_item)
                             save_trade_to_db(st.session_state.user_id, t_item)
                             
-                            send_notification(f"🥾 [BOT] Otwarto slot: {label} na {sym} ({bot_leverage}x, budżet: {budget:.2f} USDT)")
                             current_active_count += 1
                             if current_active_count >= max_active_futures_positions:
                                 break
@@ -944,8 +916,48 @@ if futures_ex:
 else:
     st.info("Skonfiguruj klucze API Futures w panelu bocznym i zapisz je, aby widzieć skaner i portfel.")
 
+# =====================================================================
+# HISTORIA ZAMKNIĘTYCH POZYCJI I Z/S (Z GIEŁDY BITGET)
+# =====================================================================
 st.markdown("---")
-st.subheader("📜 Dziennik Transakcji Futures (Zapisany w bazie)")
+st.subheader("📜 Dziennik Zamkniętych Pozycji i Zysków/Strat (Z Giełdy)")
+if futures_ex:
+    try:
+        closed_orders = futures_ex.fetch_closed_orders(limit=30)
+        closed_data = []
+        for o in closed_orders:
+            symbol = o.get("symbol")
+            side = o.get("side")
+            price = o.get("average") or o.get("price") or 0.0
+            amount = o.get("amount") or 0.0
+            timestamp = o.get("timestamp")
+            dt_str = pd.to_datetime(timestamp, unit="ms").strftime("%Y-%m-%d %H:%M:%S") if timestamp else "-"
+            
+            info = o.get("info", {})
+            pnl = info.get("profit", info.get("pnl", "N/A"))
+            
+            closed_data.append({
+                "Czas": dt_str,
+                "Para": symbol,
+                "Strona": side,
+                "Cena Wykonania": f"{float(price):.4f}" if price else "-",
+                "Ilość": f"{float(amount):.4f}" if amount else "-",
+                "Zysk / Strata (USDT)": str(pnl)
+            })
+        if closed_data:
+            st.dataframe(pd.DataFrame(closed_data), use_container_width=True)
+        else:
+            st.info("Brak zamkniętych pozycji w historii giełdy.")
+    except Exception as e:
+        st.info(f"Brak danych lub oczekiwanie na połączenie z API giełdy dla historii: {e}")
+else:
+    st.info("Skonfiguruj klucze API, aby widzieć historię zamkniętych pozycji.")
+
+# =====================================================================
+# DZIENNIK TRANSAKCJI (LOKALNA BAZA)
+# =====================================================================
+st.markdown("---")
+st.subheader("📜 Dziennik Otwartych Transakcji w Sesji (Zapisany w bazie)")
 if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
