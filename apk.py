@@ -36,7 +36,7 @@ def is_user_paid():
     return bool(st.session_state.get("stripe_paid", False))
 
 # =====================================================================
-# INICJALIZACJA BAZY DANYCH SQLITE
+# INICJALIZACJA BAZY DANYCH SQLITE (DOMYŚLNIE 15%)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -55,7 +55,7 @@ def init_db():
             sniper_active INTEGER DEFAULT 0,
             bot_scan_pairs INTEGER DEFAULT 15,
             max_active_positions INTEGER DEFAULT 5,
-            position_pct_allocation INTEGER DEFAULT 20
+            position_pct_allocation INTEGER DEFAULT 15
         ) 
     ''')
     
@@ -64,12 +64,15 @@ def init_db():
         ("stripe_paid", "INTEGER DEFAULT 0"), ("is_admin", "INTEGER DEFAULT 0"), 
         ("bot_active", "INTEGER DEFAULT 0"), ("sniper_active", "INTEGER DEFAULT 0"),
         ("bot_scan_pairs", "INTEGER DEFAULT 15"), ("max_active_positions", "INTEGER DEFAULT 5"),
-        ("position_pct_allocation", "INTEGER DEFAULT 20")
+        ("position_pct_allocation", "INTEGER DEFAULT 15")
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
             pass
+
+    # Automatyczna aktualizacja starych rekordów z 20 na 15, jeśli użytkownik nie zmieniał
+    cursor.execute("UPDATE users SET position_pct_allocation = 15 WHERE position_pct_allocation = 20")
 
     for adm_email in ADMIN_EMAILS:
         cursor.execute("UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ?", (adm_email,))
@@ -208,7 +211,7 @@ if not st.session_state.logged_in:
                 st.session_state.new_listing_sniper_active = bool(user_row[9])
                 st.session_state.bot_scan_pairs = user_row[10] if user_row[10] is not None else 15
                 st.session_state.max_active_positions = user_row[11] if user_row[11] is not None else 5
-                st.session_state.position_pct_allocation = user_row[12] if user_row[12] is not None else 20
+                st.session_state.position_pct_allocation = user_row[12] if user_row[12] is not None else 15
                 st.success("Zalogowano pomyślnie!")
                 st.rerun()
             else:
@@ -228,7 +231,7 @@ if not st.session_state.logged_in:
                     is_adm = 1 if clean_reg in ADMIN_EMAILS else 0
                     is_paid = 1 if is_adm == 1 else 0
                     cursor.execute(
-                        "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO users (email, password, is_admin, stripe_paid, position_pct_allocation) VALUES (?, ?, ?, ?, 15)",
                         (reg_email.strip(), reg_pass, is_adm, is_paid)
                     )
                     conn.commit()
@@ -264,7 +267,7 @@ if "bot_scan_pairs" not in st.session_state:
 if "max_active_positions" not in st.session_state:
     st.session_state.max_active_positions = 5
 if "position_pct_allocation" not in st.session_state:
-    st.session_state.position_pct_allocation = 20
+    st.session_state.position_pct_allocation = 15
 
 try:
     conn = sqlite3.connect(DB_FILE)
@@ -277,7 +280,7 @@ try:
         st.session_state.new_listing_sniper_active = bool(r[1])
         st.session_state.bot_scan_pairs = r[2] if r[2] is not None else 15
         st.session_state.max_active_positions = r[3] if r[3] is not None else 5
-        st.session_state.position_pct_allocation = r[4] if r[4] is not None else 20
+        st.session_state.position_pct_allocation = r[4] if r[4] is not None else 15
 except Exception:
     pass
 
@@ -378,7 +381,7 @@ def background_trading_daemon():
                         tp_pct = 5.0
                         lev_mode = "🤖 Autonomiczny (max 10x)"
                         man_lev = 3
-                        pos_allocation = u_pos_alloc if u_pos_alloc is not None else 20.0
+                        pos_allocation = u_pos_alloc if u_pos_alloc is not None else 15.0
                         risk_red = True
                         min_trade = 5.0
                         limit_pairs = u_scan_pairs if u_scan_pairs is not None else 15
@@ -600,7 +603,7 @@ def update_max_positions():
 max_active_futures_positions = st.sidebar.slider("📈 Maksymalna liczba aktywnych pozycji", 1, 20, value=st.session_state.max_active_positions, key="slider_max_pos", on_change=update_max_positions)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Alokacja Kapitału (Limit Górny)")
+st.sidebar.markdown("### 💰 Alokacja Kapitału (Domyślnie 15%)")
 def update_pos_allocation():
     val = st.session_state.slider_pos_alloc
     st.session_state.position_pct_allocation = val
