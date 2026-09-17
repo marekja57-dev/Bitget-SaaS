@@ -335,10 +335,7 @@ if futures_ex and not st.session_state.known_markets:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Kapitał i Ryzyko Futures")
-allocation_mode = st.sidebar.radio("Zarządzanie wielkością pozycji", ["🤖 Inteligentny Auto-Dobór (Zmienność + Siła)", "🎛️ Stały procent portfela"])
-base_allocation_pct = st.sidebar.slider("Maksymalny udział kapitału na 1 pozycję (%)", 1, 30, 10)
-max_single_trade_usdt = st.sidebar.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
-
+max_single_trade_usdt = st.sidebar.number_input("🛡️ Kwota USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
 max_active_futures_positions = st.sidebar.slider("📈 Maks. aktywne pozycje Futures", 1, 20, 5)
 
 st.sidebar.markdown("---")
@@ -366,7 +363,7 @@ def toggle_scanner_from_sidebar():
 
 auto_scan_enabled = st.sidebar.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
 scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 1, 300, 3)
-max_fut_scan_pairs = st.sidebar.slider("📈 Liczba par Futures", 5, 50, 15, 5)
+max_fut_scan_pairs = st.sidebar.slider("📈 Liczba skanowanych par Futures", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
@@ -430,7 +427,6 @@ if futures_ex:
             st.session_state.last_fut_free = fut_free
             st.session_state.last_fut_total = fut_total
     except Exception:
-        # W razie chwilowego błędu API zachowujemy ostatnie poprawne saldo, zamiast zrywać do 0
         pass
 
 total_unrealized_pnl = 0.0
@@ -580,7 +576,6 @@ if futures_ex:
     except Exception:
         active_symbols = []
 
-    # Zamykanie pozycji przez trend exit
     try:
         for pos in real_positions:
             contracts = float(pos.get("contracts", 0))
@@ -632,7 +627,6 @@ if futures_ex:
     except Exception:
         pass
         
-# Snajper Nowych Listingów Futures (Wykrywanie całkowicie nowych par/kontraktów)
 if futures_ex and st.session_state.futures_sniper_active:
     try:
         current_markets = futures_ex.load_markets()
@@ -659,9 +653,7 @@ if futures_ex and st.session_state.futures_sniper_active:
                     f_price = float(ticker.get("last", 0))
                     if f_price > 0:
                         bot_leverage = calculate_dynamic_leverage(sym, 3.0, leverage_mode, manual_leverage)
-                        budget = max(MIN_FUT_TRADE, min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
-                        if budget > fut_free:
-                            budget = fut_free
+                        budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
 
                         try:
                             futures_ex.set_leverage(bot_leverage, sym)
@@ -687,7 +679,6 @@ if futures_ex and st.session_state.futures_sniper_active:
     except Exception:
         pass
 
-# Wykonanie Bota Trend-Following Futures
 if futures_ex and st.session_state.trend_bot_fut_active:
     if len(active_symbols) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
         try:
@@ -739,17 +730,7 @@ if futures_ex and st.session_state.trend_bot_fut_active:
 
                 tf_key = f"trend_bot_fut_{sym}"
                 if time.time() - st.session_state.signal_cooldown.get(tf_key, 0) > 90:
-                    risk_mult = 0.5 if f_vol > 3.5 else (0.8 if f_vol > 2.0 else 1.0)
-                    signal_mult = min(1.0, max(0.4, item["strength"] * 150))
-                    
-                    if "Inteligentny" in allocation_mode:
-                        calc_pct = max(1.0, min(30.0, base_allocation_pct * risk_mult * signal_mult))
-                    else:
-                        calc_pct = float(base_allocation_pct)
-
-                    budget = max(MIN_FUT_TRADE, min(fut_free * (calc_pct / 100.0), max_single_trade_usdt))
-                    if budget > fut_free:
-                        budget = fut_free
+                    budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
 
                     if budget >= MIN_FUT_TRADE:
                         try:
@@ -801,7 +782,7 @@ if futures_ex:
             pnl_val = "-"
             status_desc = "⏳ Oczekująca"
             
-            prop_budget = max(MIN_FUT_TRADE, min(fut_free * (base_allocation_pct / 100.0), max_single_trade_usdt))
+            prop_budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
             
             if pos:
                 side_val = pos.get("side", "").upper()
