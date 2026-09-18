@@ -442,21 +442,21 @@ if futures_ex:
                 fetched_successfully = True
     except Exception:
         pass
-  if not fetched_successfully or fut_total == 0.0:
-            try:
-                f_bal2 = futures_ex.fetch_balance()
-                if "USDT" in f_bal2:
-                    usdt_data2 = f_bal2["USDT"]
-                    fut_total = float(usdt_data2.get("total", 0.0) or 0.0)
-                    info_inf2 = usdt_data2.get("info", {})
-                    avail2 = float(info_inf2.get("available", 0.0) or info_inf2.get("availableBalance", 0.0) or 0.0)
-                    fut_free = avail2 if avail2 > 0 else max(0.0, fut_total - float(usdt_data2.get("used", 0.0) or 0.0))
-                    if fut_total > 0:
-                        fetched_successfully = True
-            except Exception:
-                pass
+
+    if not fetched_successfully or fut_total == 0.0:
+        try:
+            f_bal2 = futures_ex.fetch_balance()
+            if "USDT" in f_bal2:
+                usdt_data2 = f_bal2["USDT"]
+                fut_total = float(usdt_data2.get("total", 0.0) or 0.0)
+                info_inf2 = usdt_data2.get("info", {})
+                avail2 = float(info_inf2.get("available", 0.0) or info_inf2.get("availableBalance", 0.0) or 0.0)
+                fut_free = avail2 if avail2 > 0 else max(0.0, fut_total - float(usdt_data2.get("used", 0.0) or 0.0))
+                if fut_total > 0:
+                    fetched_successfully = True
         except Exception:
             pass
+
 
     if fetched_successfully and fut_total > 0:
         st.session_state.last_fut_total = fut_total
