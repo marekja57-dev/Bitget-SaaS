@@ -433,11 +433,8 @@ if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance({"type": "swap"})
         if "USDT" in f_bal:
-            usdt_data = f_bal["USDT"]
-            fut_total = float(usdt_data.get("total", 0.0) or 0.0)
-            info_inf = usdt_data.get("info", {})
-            avail = float(info_inf.get("available", 0.0) or info_inf.get("availableBalance", 0.0) or 0.0)
-            fut_free = avail if avail > 0 else max(0.0, fut_total - float(usdt_data.get("used", 0.0) or 0.0))
+            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
             if fut_total > 0:
                 fetched_successfully = True
     except Exception:
@@ -447,16 +444,17 @@ if futures_ex:
         try:
             f_bal2 = futures_ex.fetch_balance()
             if "USDT" in f_bal2:
-                usdt_data2 = f_bal2["USDT"]
-                fut_total = float(usdt_data2.get("total", 0.0) or 0.0)
-                info_inf2 = usdt_data2.get("info", {})
-                avail2 = float(info_inf2.get("available", 0.0) or info_inf2.get("availableBalance", 0.0) or 0.0)
-                fut_free = avail2 if avail2 > 0 else max(0.0, fut_total - float(usdt_data2.get("used", 0.0) or 0.0))
+                fut_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
+                fut_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
+                if fut_total > 0:
+                    fetched_successfully = True
+            elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
+                fut_free = float(f_bal2["free"]["USDT"] or 0.0)
+                fut_total = float(f_bal2.get("total", {}).get("USDT", fut_free) or fut_free)
                 if fut_total > 0:
                     fetched_successfully = True
         except Exception:
             pass
-
 
     if fetched_successfully and fut_total > 0:
         st.session_state.last_fut_total = fut_total
@@ -837,4 +835,3 @@ else:
 if st.session_state.scanner_active or st.session_state.trend_bot_fut_active:
     time.sleep(scan_interval)
     st.rerun()
-
