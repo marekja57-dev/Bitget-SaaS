@@ -531,13 +531,11 @@ with col_btn:
     if not st.session_state.scanner_active:
         if st.button("🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True):
             st.session_state.scanner_active = True
-            st.session_state.sidebar_auto_scan_cb = True
             st.rerun()
     else:
         if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
             st.session_state.scanner_active = False
             st.session_state.trend_bot_fut_active = False
-            st.session_state.sidebar_auto_scan_cb = False
             st.session_state.main_cb_trend_fut = False
             st.rerun()
 with col_status:
