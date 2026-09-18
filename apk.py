@@ -424,33 +424,41 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA I POZYCJI FUTURES (Z NAPRAWIONYM CACHOWANIEM)
+# WYLICZENIE SALDA I POZYCJI FUTURES (POPRAWIONE ODŁĄCZENIE MARŻY)
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
 fetched_successfully = False
 
 if futures_ex:
-    try:
-        f_bal = futures_ex.fetch_balance({"type": "swap"})
-        if "USDT" in f_bal:
-            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
-            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
-            if fut_total > 0:
-                fetched_successfully = True
-    except Exception:
-        pass
-
-    if not fetched_successfully or fut_total == 0.0:
+    for params in [{"type": "swap"}, {}]:
+        if fetched_successfully:
+            break
         try:
-            f_bal2 = futures_ex.fetch_balance()
-            if "USDT" in f_bal2:
-                fut_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
-                fut_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
-                if fut_total > 0:
-                    fetched_successfully = True
-            elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
-                fut_free = float(f_bal2["free"]["USDT"] or 0.0)
-                fut_total = float(f_bal2.get("total", {}).get("USDT", fut_free) or fut_free)
+            f_bal = futures_ex.fetch_balance(params)
+            if "USDT" in f_bal:
+                usdt_data = f_bal["USDT"]
+                fut_total = float(usdt_data.get("total", 0.0) or 0.0)
+                info_inf = usdt_data.get("info", {})
+                
+                avail = float(
+                    info_inf.get("available", 0.0) or 
+                    info_inf.get("availableBalance", 0.0) or 
+                    0.0
+                )
+                used = float(
+                    usdt_data.get("used", 0.0) or 
+                    info_inf.get("locked", 0.0) or 
+                    info_inf.get("marginLocked", 0.0) or 
+                    0.0
+                )
+                
+                if avail > 0:
+                    fut_free = avail
+                elif fut_total > 0 and used > 0:
+                    fut_free = max(0.0, fut_total - used)
+                else:
+                    fut_free = float(usdt_data.get("free", 0.0) or fut_total)
+
                 if fut_total > 0:
                     fetched_successfully = True
         except Exception:
@@ -460,7 +468,6 @@ if futures_ex:
         st.session_state.last_fut_total = fut_total
         st.session_state.last_fut_free = fut_free
     else:
-        # Fallback do ostatniego znanego salda zamiast zera
         fut_total = st.session_state.last_fut_total
         fut_free = st.session_state.last_fut_free
 
