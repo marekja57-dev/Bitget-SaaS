@@ -442,11 +442,7 @@ if futures_ex:
                 fetched_successfully = True
     except Exception:
         pass
-
-    if not fetched_successfully or fut_total == 0.0:
-        try:
-            f_bal2 = futures_ex.fetch_balance()
-             if not fetched_successfully or fut_total == 0.0:
+  if not fetched_successfully or fut_total == 0.0:
             try:
                 f_bal2 = futures_ex.fetch_balance()
                 if "USDT" in f_bal2:
