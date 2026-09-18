@@ -433,8 +433,11 @@ if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance({"type": "swap"})
         if "USDT" in f_bal:
-            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
-            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
+              usdt_data = f_bal["USDT"]
+        fut_total = float(usdt_data.get("total", 0.0) or 0.0)
+        info_inf = usdt_data.get("info", {})
+        avail = float(info_inf.get("available", 0.0) or info_inf.get("availableBalance", 0.0) or 0.0)
+        fut_free = avail if avail > 0 else max(0.0, fut_total - float(usdt_data.get("used", 0.0) or 0.0))
             if fut_total > 0:
                 fetched_successfully = True
     except Exception:
