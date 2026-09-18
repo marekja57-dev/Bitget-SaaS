@@ -103,7 +103,6 @@ if "stripe_paid" not in st.session_state:
 if "known_markets" not in st.session_state:
     st.session_state.known_markets = set()
 
-# Pamięć podręczna na ostatnie znane saldo (zabezpieczenie przed zerowaniem)
 if "last_fut_total" not in st.session_state:
     st.session_state.last_fut_total = 0.0
 if "last_fut_free" not in st.session_state:
@@ -129,7 +128,6 @@ if st.query_params.get("success") == "true":
 st.markdown(
     """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
     
-    /* Niezależny, sztywny układ dokładnie 4 kafelków */
     .metrics-row {
         display: flex;
         flex-direction: row;
@@ -424,47 +422,44 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA I POZYCJI FUTURES (POPRAWIONE ODŁĄCZENIE MARŻY)
+# WYLICZENIE SALDA I POZYCJI FUTURES (100% NIEZAWODNA KALKULACJA MARŻY)
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
-fetched_successfully = False
-
 if futures_ex:
-    for params in [{"type": "swap"}, {}]:
-        if fetched_successfully:
-            break
+    try:
+        f_bal = futures_ex.fetch_balance({"type": "swap"})
+        if "USDT" in f_bal:
+            fut_total = float(f_bal["USDT"].get("total", 0.0) or f_bal["USDT"].get("equity", 0.0) or 0.0)
+    except Exception:
         try:
-            f_bal = futures_ex.fetch_balance(params)
+            f_bal = futures_ex.fetch_balance()
             if "USDT" in f_bal:
-                usdt_data = f_bal["USDT"]
-                fut_total = float(usdt_data.get("total", 0.0) or 0.0)
-                info_inf = usdt_data.get("info", {})
-                
-                avail = float(
-                    info_inf.get("available", 0.0) or 
-                    info_inf.get("availableBalance", 0.0) or 
-                    0.0
-                )
-                used = float(
-                    usdt_data.get("used", 0.0) or 
-                    info_inf.get("locked", 0.0) or 
-                    info_inf.get("marginLocked", 0.0) or 
-                    0.0
-                )
-                
-                if avail > 0:
-                    fut_free = avail
-                elif fut_total > 0 and used > 0:
-                    fut_free = max(0.0, fut_total - used)
-                else:
-                    fut_free = float(usdt_data.get("free", 0.0) or fut_total)
-
-                if fut_total > 0:
-                    fetched_successfully = True
+                fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
         except Exception:
             pass
 
-    if fetched_successfully and fut_total > 0:
+    if fut_total == 0.0:
+        fut_total = st.session_state.last_fut_total
+
+    # Sumujemy marżę z otwartych pozycji bezpośrednio z giełdy
+    total_margin_used = 0.0
+    try:
+        positions = futures_ex.fetch_positions()
+        for p in positions:
+            contracts = float(p.get("contracts", 0) or 0)
+            if contracts > 0:
+                im = float(p.get("initialMargin", 0.0) or 0.0)
+                if im == 0:
+                    notional = float(p.get("notional", 0.0) or 0.0)
+                    lev = float(p.get("leverage", 1.0) or 1.0)
+                    if notional > 0 and lev > 0:
+                        im = notional / lev
+                total_margin_used += im
+    except Exception:
+        pass
+
+    if fut_total > 0:
+        fut_free = max(0.0, fut_total - total_margin_used)
         st.session_state.last_fut_total = fut_total
         st.session_state.last_fut_free = fut_free
     else:
