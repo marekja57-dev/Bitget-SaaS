@@ -103,6 +103,7 @@ if "stripe_paid" not in st.session_state:
 if "known_markets" not in st.session_state:
     st.session_state.known_markets = set()
 
+# Pamięć podręczna na ostatnie znane saldo (zabezpieczenie przed zerowaniem)
 if "last_fut_total" not in st.session_state:
     st.session_state.last_fut_total = 0.0
 if "last_fut_free" not in st.session_state:
@@ -128,6 +129,7 @@ if st.query_params.get("success") == "true":
 st.markdown(
     """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } 
     
+    /* Niezależny, sztywny układ dokładnie 4 kafelków */
     .metrics-row {
         display: flex;
         flex-direction: row;
@@ -422,47 +424,43 @@ if emergency_kill:
     st.rerun()
 
 # =====================================================================
-# WYLICZENIE SALDA I POZYCJI FUTURES (100% NIEZAWODNA KALKULACJA MARŻY)
+# WYLICZENIE SALDA I POZYCJI FUTURES (Z NAPRAWIONYM CACHOWANIEM)
 # =====================================================================
 fut_free, fut_total = 0.0, 0.0
+fetched_successfully = False
+
 if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance({"type": "swap"})
         if "USDT" in f_bal:
-            fut_total = float(f_bal["USDT"].get("total", 0.0) or f_bal["USDT"].get("equity", 0.0) or 0.0)
-    except Exception:
-        try:
-            f_bal = futures_ex.fetch_balance()
-            if "USDT" in f_bal:
-                fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
-        except Exception:
-            pass
-
-    if fut_total == 0.0:
-        fut_total = st.session_state.last_fut_total
-
-    # Sumujemy marżę z otwartych pozycji bezpośrednio z giełdy
-    total_margin_used = 0.0
-    try:
-        positions = futures_ex.fetch_positions()
-        for p in positions:
-            contracts = float(p.get("contracts", 0) or 0)
-            if contracts > 0:
-                im = float(p.get("initialMargin", 0.0) or 0.0)
-                if im == 0:
-                    notional = float(p.get("notional", 0.0) or 0.0)
-                    lev = float(p.get("leverage", 1.0) or 1.0)
-                    if notional > 0 and lev > 0:
-                        im = notional / lev
-                total_margin_used += im
+            fut_free = float(f_bal["USDT"].get("free", 0.0) or 0.0)
+            fut_total = float(f_bal["USDT"].get("total", 0.0) or 0.0)
+            if fut_total > 0:
+                fetched_successfully = True
     except Exception:
         pass
 
-    if fut_total > 0:
-        fut_free = max(0.0, fut_total - total_margin_used)
+    if not fetched_successfully or fut_total == 0.0:
+        try:
+            f_bal2 = futures_ex.fetch_balance()
+            if "USDT" in f_bal2:
+                fut_free = float(f_bal2["USDT"].get("free", 0.0) or 0.0)
+                fut_total = float(f_bal2["USDT"].get("total", 0.0) or 0.0)
+                if fut_total > 0:
+                    fetched_successfully = True
+            elif "free" in f_bal2 and "USDT" in f_bal2["free"]:
+                fut_free = float(f_bal2["free"]["USDT"] or 0.0)
+                fut_total = float(f_bal2.get("total", {}).get("USDT", fut_free) or fut_free)
+                if fut_total > 0:
+                    fetched_successfully = True
+        except Exception:
+            pass
+
+    if fetched_successfully and fut_total > 0:
         st.session_state.last_fut_total = fut_total
         st.session_state.last_fut_free = fut_free
     else:
+        # Fallback do ostatniego znanego salda zamiast zera
         fut_total = st.session_state.last_fut_total
         fut_free = st.session_state.last_fut_free
 
@@ -533,13 +531,11 @@ with col_btn:
     if not st.session_state.scanner_active:
         if st.button("🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True):
             st.session_state.scanner_active = True
-            st.session_state.sidebar_auto_scan_cb = True
             st.rerun()
     else:
         if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
             st.session_state.scanner_active = False
             st.session_state.trend_bot_fut_active = False
-            st.session_state.sidebar_auto_scan_cb = False
             st.session_state.main_cb_trend_fut = False
             st.rerun()
 with col_status:
