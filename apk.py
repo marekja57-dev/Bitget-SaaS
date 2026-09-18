@@ -533,11 +533,11 @@ with col_btn:
             st.session_state.scanner_active = True
             st.rerun()
     else:
-        if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
-            st.session_state.scanner_active = False
-            st.session_state.trend_bot_fut_active = False
-            st.session_state.main_cb_trend_fut = False
-            st.rerun()
+ if st.button("Zatrzymaj Skaner", type="secondary", use_container_width=True):
+    st.session_state.scanner_active = False
+    st.session_state.pop("trend_bot_fut_active", None)
+    st.session_state.pop("main_cb_trend_fut", None)
+    st.rerun()
 with col_status:
     if st.session_state.scanner_active:
         st.success("STATUS: AKTYWNY")
