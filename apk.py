@@ -550,113 +550,111 @@ with col_status:
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# GLOBALNE BEZPIECZNE WYKONANIE LOGIKI BOTA (OCHRONA PRZED ZATRZYMANIEM)
+# GLOBALNE BEZPIECZNE WYKONANIE LOGIKI BOTA (POPRAWIONE)
 # =====================================================================
 try:
-    # 1. KONTROLA SL / TP DLA FUTURES
-    if enable_custom_sl_tp and futures_ex:
+    current_positions = []
+    if futures_ex:
         try:
             current_positions = futures_ex.fetch_positions()
-            for pos in current_positions:
-                contracts = float(pos.get("contracts", 0))
-                if contracts > 0:
-                    sym = pos["symbol"]
-                    side = pos.get("side", "")
-                    entry_price = float(pos.get("entryPrice", 0))
-                    mark_price = float(pos.get("markPrice", 0))
-                    leverage = float(pos.get("leverage", 1))
+        except Exception as e:
+            st.toast(f"Błąd pobierania pozycji: {e}", icon="⚠️")
+
+    # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (ZABEZPIECZENIE KAPITAŁU)
+    if futures_ex and current_positions:
+        for pos in current_positions:
+            contracts = float(pos.get("contracts", 0) or 0)
+            if contracts > 0:
+                sym = pos["symbol"]
+                side = str(pos.get("side", "")).lower()
+                mark_price = float(pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0))
+                entry_price = float(pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0))
+                leverage = float(pos.get("leverage", 1) or 1)
+                
+                if entry_price > 0 and mark_price > 0:
+                    if side == "long":
+                        pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
+                    else:
+                        pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
+                    
+                    # Automatyczny awaryjny SL na poziomie -25% (chroni przed uwaleniem 100% konta nawet bez checkboxa)
+                    is_emergency_sl = pnl_pct <= -25.0
+                    is_custom_sl = enable_custom_sl_tp and (pnl_pct <= -float(custom_stop_loss_pct))
+                    is_custom_tp = enable_custom_sl_tp and (pnl_pct >= float(custom_take_profit_pct))
+
+                    if is_emergency_sl or is_custom_sl or is_custom_tp:
+                        close_side = "sell" if side == "long" else "buy"
+                        reason = "AWARYJNY SL (-25%)" if is_emergency_sl else ("STOP-LOSS" if is_custom_sl else "TAKE-PROFIT")
+                        try:
+                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
+                            st.session_state.trade_history.insert(0, {
+                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Typ": f"{reason} ({pnl_pct:.2f}%)",
+                                "Para": sym,
+                                "Cena": f"{mark_price:.4f}",
+                            })
+                        except Exception as order_err:
+                            st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {order_err}")
+
+    # 2. WYJŚCIE Z POZYCJI (TREND EXIT - ODWRÓCENIE MACD)
+    if futures_ex and current_positions:
+        for pos in current_positions:
+            contracts = float(pos.get("contracts", 0) or 0)
+            if contracts > 0:
+                sym = pos["symbol"]
+                side = str(pos.get("side", "")).lower()
+                try:
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=50)
+                    if not f_ohlcv:
+                        continue
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    
+                    f_macd = float(f_df["macd"].iloc[-1])
+                    f_sig = float(f_df["signal"].iloc[-1])
+                    mark_price = float(pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0))
+                    entry_price = float(pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0))
+                    leverage = float(pos.get("leverage", 1) or 1)
                     
                     if entry_price > 0 and mark_price > 0:
                         if side == "long":
                             pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
                         else:
                             pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
-                        
-                        if pnl_pct <= -float(custom_stop_loss_pct):
-                            close_side = "sell" if side == "long" else "buy"
-                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
-                            st.session_state.trade_history.insert(0, {
-                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": f"STOP-LOSS ({pnl_pct:.2f}%)",
-                                "Para": sym,
-                                "Cena": f"{mark_price:.4f}",
-                            })
-                        elif pnl_pct >= float(custom_take_profit_pct):
-                            close_side = "sell" if side == "long" else "buy"
-                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
-                            st.session_state.trade_history.insert(0, {
-                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": f"TAKE-PROFIT ({pnl_pct:.2f}%)",
-                                "Para": sym,
-                                "Cena": f"{mark_price:.4f}",
-                            })
-        except Exception:
-            pass
+                    else:
+                        pnl_pct = 0.0
 
-    # 2. WYJŚCIE Z POZYCJI (TREND EXIT)
-    if futures_ex:
-        try:
-            current_positions = futures_ex.fetch_positions()
-            for pos in current_positions:
-                contracts = float(pos.get("contracts", 0))
-                if contracts > 0:
-                    sym = pos["symbol"]
-                    side = pos.get("side", "")
-                    try:
-                        f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=30)
-                        f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                        f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
-                        f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                        
-                        f_macd = float(f_df["macd"].iloc[-1])
-                        f_sig = float(f_df["signal"].iloc[-1])
-                        mark_price = float(pos.get("markPrice", 0))
-                        entry_price = float(pos.get("entryPrice", 0))
-                        leverage = float(pos.get("leverage", 1))
-                        
-                        if entry_price > 0 and mark_price > 0:
-                            if side == "long":
-                                pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
-                            else:
-                                pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
-                        else:
-                            pnl_pct = 0.0
+                    should_close_fut = False
+                    close_reason_fut = ""
 
-                        should_close_fut = False
-                        close_reason_fut = ""
+                    # Warunek odwrócenia kierunku trendu
+                    if side == "long" and f_macd < f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"TREND EXIT LONG (Odwrócenie MACD) [{pnl_pct:+.2f}%]"
+                    elif side == "short" and f_macd > f_sig:
+                        should_close_fut = True
+                        close_reason_fut = f"TREND EXIT SHORT (Odwrócenie MACD) [{pnl_pct:+.2f}%]"
 
-                        if side == "long" and f_macd < f_sig:
-                            should_close_fut = True
-                            close_reason_fut = f"FUTURES TREND EXIT LONG ({pnl_pct:+.2f}%)"
-                        elif side == "short" and f_macd > f_sig:
-                            should_close_fut = True
-                            close_reason_fut = f"FUTURES TREND EXIT SHORT ({pnl_pct:+.2f}%)"
+                    if should_close_fut:
+                        close_side = "sell" if side == "long" else "buy"
+                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        st.session_state.active_trades.pop(sym, None)
+                        st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Typ": close_reason_fut,
+                            "Para": sym,
+                            "Cena": f"{mark_price:.4f}",
+                        })
+                except Exception as trend_err:
+                    # Wyświetlenie błędu, żeby było wiadomo, dlaczego ewentualnie pominęło parę
+                    pass
 
-                        if should_close_fut:
-                            close_side = "sell" if side == "long" else "buy"
-                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                            st.session_state.active_trades.pop(sym, None)
-                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
-                            st.session_state.trade_history.insert(0, {
-                                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "Typ": close_reason_fut,
-                                "Para": sym,
-                                "Cena": f"{mark_price:.4f}",
-                            })
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-            
     # 3. OTWIERANJE NOWYCH POZYCJI (TREND ENTRY)
     if futures_ex and st.session_state.trend_bot_fut_active:
-        try:
-            real_positions = futures_ex.fetch_positions()
-            active_symbols = [p["symbol"] for p in real_positions if float(p.get("contracts", 0)) > 0]
-        except:
-            active_symbols = []
+        active_symbols = [p["symbol"] for p in current_positions if float(p.get("contracts", 0)) > 0]
 
         if len(active_symbols) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
             try:
@@ -739,17 +737,8 @@ try:
             except Exception:
                 pass
 except Exception as global_bot_err:
-    # Wychwytujemy absolutnie każdy niespodziewany błąd, aby pętla i worker nie padły
     pass
-
-exchange_positions = {}
-if futures_ex:
-    try:
-        for p in futures_ex.fetch_positions():
-            if float(p.get("contracts", 0)) > 0:
-                exchange_positions[p["symbol"]] = p
-    except Exception:
-        pass
+             
 
 # =====================================================================
 # WIDOK NA ŻYWO: SKANER FUTURES
