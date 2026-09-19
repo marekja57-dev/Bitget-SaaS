@@ -743,26 +743,113 @@ except Exception as global_bot_err:
 # =====================================================================
 # WIDOK NA ŻYWO: SKANER FUTURES
 # =====================================================================
-try:
-  tickers = futures_ex.fetch_tickers()
-  top_fut_view = []
-  for symbol, t in tickers.items():
-    if ':USDT' in symbol:
-      vol = t.get('quoteVolume') or t.get('info', {}).get('quoteVolume') or 0
-      top_fut_view.append({
-          'Para': symbol,
-          'Wolumen USDT': float(vol),
-          'Cena': t.get('last')
+
+st.markdown("---")
+st.subheader("📈 Top Par Futures (Skaner i Status)")
+
+if futures_ex:
+  try:
+    f_tickers = futures_ex.fetch_tickers()
+    # Mapowanie aktualnych pozycji z zabezpieczeniem przed błędami nazewnictwa
+    pos_map = {p["symbol"]: p for p in current_positions}
+
+    top_fut_view = sorted(
+        [
+            sym
+            for sym, data in f_tickers.items()
+            if (sym.endswith(":USDT") or "/USDT:USDT" in sym)
+            and "BULL" not in sym
+            and "BEAR" not in sym
+        ],
+        key=lambda x: f_tickers[x].get("quoteVolume", 0),
+        reverse=True,
+    )[:10]
+
+    fut_data_list = []
+    for sym in top_fut_view:
+      t_data = f_tickers.get(sym, {})
+      pos = pos_map.get(sym)
+
+      side_val = "-"
+      lev_val = "-"
+      margin_val = "-"
+      pnl_val = "-"
+      status_desc = "⏳ Oczekująca"
+
+      prop_budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
+
+      if pos:
+        side_val = pos.get("side", "").upper()
+        lev_val = f"{float(pos.get('leverage', 1))}x"
+        notional = float(pos.get("notional", 0))
+        lev = float(pos.get("leverage", 1))
+        margin = notional / lev if lev > 0 else 0
+        margin_val = (
+            f"{margin:.2f} USDT"
+            if margin > 0
+            else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
+        )
+        pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
+        status_desc = "🟢 Aktywna (Pozycja Otwarta)"
+      else:
+        try:
+          f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=30)
+          time.sleep(0.01)
+          f_df = pd.DataFrame(
+              f_ohlcv,
+              columns=["timestamp", "open", "high", "low", "close", "volume"],
+          )
+          f_df["volatility_pct"] = (
+              (f_df["high"] - f_df["low"]) / f_df["close"]
+          ).rolling(14).mean() * 100
+          f_vol = (
+              float(f_df["volatility_pct"].iloc[-1])
+              if not pd.isna(f_df["volatility_pct"].iloc[-1])
+              else 2.0
+          )
+
+          f_df["macd"] = (
+              f_df["close"].ewm(span=12, adjust=False).mean()
+              - f_df["close"].ewm(span=26, adjust=False).mean()
+          )
+          f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+
+          f_macd = float(f_df["macd"].iloc[-1])
+          f_sig = float(f_df["signal"].iloc[-1])
+
+          side_val = "LONG" if f_macd > f_sig else "SHORT"
+          lev_num = calculate_dynamic_leverage(
+              sym, f_vol, leverage_mode, manual_leverage
+          )
+          lev_val = f"{lev_num}x"
+          margin_val = f"{prop_budget:.2f} USDT"
+          pnl_val = "Oczekiwanie na warunek"
+          status_desc = "⚡ Sygnał Gotowy"
+        except Exception:
+          lev_val = f"{manual_leverage}x"
+          margin_val = f"{prop_budget:.2f} USDT"
+
+      fut_data_list.append({
+          "Para": sym,
+          "Cena": f"{float(t_data.get('last', 0)):.4f}",
+          "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
+          "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
+          "Strategia": "Futures Trend-Following (MACD + EMA)",
+          "Strona": side_val,
+          "Dźwignia": lev_val,
+          "Budżet": margin_val,
+          "Wynik PnL": pnl_val,
+          "Status Pozycji": status_desc,
       })
 
-  if top_fut_view:
-    top_fut_view.sort(key=lambda x: x['Wolumen USDT'], reverse=True)
-    st.dataframe(top_fut_view[:10], use_container_width=True)
-  else:
-    st.info("Brak aktywnych par kontraktów USDT do wyświetlenia.")
-except Exception as e:
-  st.error(f"Błąd ładowania danych skanera: {e}")
-
+    if fut_data_list:
+      st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
+    else:
+      st.info("Brak danych Futures do wyświetlenia.")
+  except Exception as scanner_err:
+    st.error(f"Błąd ładowania danych skanera: {scanner_err}")
+else:
+  st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
 
 
 st.markdown("---")
