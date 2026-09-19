@@ -18,6 +18,8 @@ DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 import streamlit as st
 
+import streamlit as st
+
 # Przełącznik języka w pasku bocznym
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
@@ -98,6 +100,7 @@ else:
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
 
+  
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
