@@ -18,12 +18,6 @@ DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 import streamlit as st
 
-# Inicjalizacja stanu sesji logowania
-if "logged_in" not in st.session_state:
-  st.session_state.logged_in = False
-
-lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
-
 # ==========================================
 # 1. EKRAN STARTOWY / LOGOWANIA (PRZED ZALOGOWANIEM)
 # ==========================================
