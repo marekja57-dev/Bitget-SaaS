@@ -16,13 +16,15 @@ st.set_page_config(
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
-import streamlit as st
-
 # Przełącznik języka w pasku bocznym
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
 if lang == "Polski":
-  st.title("🚀 Bitget Futures Bot SaaS")
+  st.markdown(
+      '<h1 style="color: #FFD700; font-weight: 700; margin-bottom: 0px;">🚀'
+      " Bitget Futures Bot SaaS</h1>",
+      unsafe_allow_html=True,
+  )
   st.markdown(
       "### Profesjonalny, zautomatyzowany handel kryptowalutami na rynku"
       " Futures"
@@ -39,9 +41,13 @@ if lang == "Polski":
         " EMA)**, dynamicznie dobiera dźwignię do zmienności rynku i chroni"
         " Twój kapitał dzięki precyzyjnemu zarządzaniu ryzykiem."
     )
-    st.info(
-        "Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać"
-        " pozycjami."
+    st.markdown(
+        """
+        <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 16px; margin: 15px 0;">
+            <span style="color: #FFD700; font-size: 15px; font-weight: 500;">🔒 Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać pozycjami.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
   with tab2:
@@ -62,7 +68,11 @@ if lang == "Polski":
         """)
 
 else:
-  st.title("🚀 Bitget Futures Bot SaaS")
+  st.markdown(
+      '<h1 style="color: #FFD700; font-weight: 700; margin-bottom: 0px;">🚀'
+      " Bitget Futures Bot SaaS</h1>",
+      unsafe_allow_html=True,
+  )
   st.markdown(
       "### Professional, automated cryptocurrency trading on the Futures market"
   )
@@ -76,9 +86,13 @@ else:
         " strategy, dynamically adjusts leverage based on market volatility,"
         " and protects your capital through precise risk management."
     )
-    st.info(
-        "Log in to the main dashboard to launch the scanner and manage your"
-        " positions."
+    st.markdown(
+        """
+        <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 16px; margin: 15px 0;">
+            <span style="color: #FFD700; font-size: 15px; font-weight: 500;">🔒 Log in to the main dashboard to launch the scanner and manage your positions.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
   with tab2:
@@ -97,11 +111,6 @@ else:
         * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
-
-st.set_page_config(
-    page_title="Bitget Futures SaaS",
-    layout="wide",
-)
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
