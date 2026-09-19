@@ -16,16 +16,87 @@ st.set_page_config(
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
-from datetime import datetime
-import hashlib
-import json
-import os
-import sqlite3
-import time
-import ccxt
-import pandas as pd
 import streamlit as st
-import stripe
+
+# Przełącznik języka w pasku bocznym
+lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
+
+if lang == "Polski":
+  st.title("🚀 Bitget Futures Bot SaaS")
+  st.markdown(
+      "### Profesjonalny, zautomatyzowany handel kryptowalutami na rynku"
+      " Futures"
+  )
+
+  tab1, tab2, tab3 = st.tabs(
+      ["🏠 Strona Główna", "📖 Instrukcja Obsługi", "📄 Regulamin"]
+  )
+
+  with tab1:
+    st.subheader("Dlaczego warto?")
+    st.write(
+        "Nasz bot opiera się na zaawansowanej strategii **Trend-Following (MACD +"
+        " EMA)**, dynamicznie dobiera dźwignię do zmienności rynku i chroni"
+        " Twój kapitał dzięki precyzyjnemu zarządzaniu ryzykiem."
+    )
+    st.info(
+        "Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać"
+        " pozycjami."
+    )
+
+  with tab2:
+    st.subheader("Instrukcja Obsługi krok po kroku")
+    st.markdown("""
+        1. **Konfiguracja API:** Wejdź na giełdę Bitget, wygeneruj klucze API (z uprawnieniami do Futures) i wprowadź je w panelu bota.
+        2. **Ustawienie Budżetu:** Zdefiniuj maksymalny budżet na pojedynczą transakcję (`max_single_trade_usdt`), aby kontrolować ryzyko.
+        3. **Wybór Strategii:** Wybierz tryb dźwigni (automatyczny lub manualny) oraz uruchom skaner na żywo.
+        4. **Monitorowanie:** Obserwuj statusy pozycji (`⏳ Oczekująca`, `🟢 Aktywna`, `⚡ Sygnał Gotowy`) w czasie rzeczywistym.
+        """)
+
+  with tab3:
+    st.subheader("Regulamin Serwisu i Zasady Bezpieczeństwa")
+    st.write("""
+        * **Charakter narzędzia:** Aplikacja ma charakter analityczno-edukacyjny i wspomagający automatyzację handlu.
+        * **Ryzyko rynkowe:** Handel kontraktami Futures wiąże się z wysokim ryzykiem utraty kapitału. Użytkownik handluje na własną odpowiedzialność.
+        * **Bezpieczeństwo środków:** Administrator nie ma dostępu do wypłaty środków z giełdy Bitget – operacje odbywają się wyłącznie poprzez klucze API Użytkownika.
+        """)
+
+else:
+  st.title("🚀 Bitget Futures Bot SaaS")
+  st.markdown(
+      "### Professional, automated cryptocurrency trading on the Futures market"
+  )
+
+  tab1, tab2, tab3 = st.tabs(["🏠 Home", "📖 User Manual", "📄 Terms & Conditions"])
+
+  with tab1:
+    st.subheader("Why Choose Us?")
+    st.write(
+        "Our bot relies on an advanced **Trend-Following (MACD + EMA)**"
+        " strategy, dynamically adjusts leverage based on market volatility,"
+        " and protects your capital through precise risk management."
+    )
+    st.info(
+        "Log in to the main dashboard to launch the scanner and manage your"
+        " positions."
+    )
+
+  with tab2:
+    st.subheader("Step-by-Step User Manual")
+    st.markdown("""
+        1. **API Setup:** Go to the Bitget exchange, generate API keys (with Futures permissions), and enter them into the bot panel.
+        2. **Budget Configuration:** Define the maximum budget per single trade (`max_single_trade_usdt`) to manage risk.
+        3. **Strategy Selection:** Choose your leverage mode (automatic or manual) and start the live scanner.
+        4. **Monitoring:** Watch real-time position statuses (`⏳ Pending`, `🟢 Active`, `⚡ Signal Ready`).
+        """)
+
+  with tab3:
+    st.subheader("Terms of Service & Risk Disclaimer")
+    st.write("""
+        * **Nature of the tool:** The application is intended for analytical, educational, and trade automation support purposes.
+        * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
+        * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
+        """)
 
 st.set_page_config(
     page_title="Bitget Futures SaaS",
