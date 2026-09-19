@@ -21,8 +21,9 @@ lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
 if lang == "Polski":
   st.markdown(
-      '<h1 style="color: #FFD700; font-weight: 700; margin-bottom: 0px;">🚀'
-      " Bitget Futures Bot SaaS</h1>",
+      '<h1 style="color: #FFD700; font-weight: 700; text-transform: uppercase;'
+      ' letter-spacing: 1.5px; font-size: 28px; margin-bottom:'
+      ' 0px;">BITGET FUTURES BOT SAAS</h1>',
       unsafe_allow_html=True,
   )
   st.markdown(
@@ -43,8 +44,10 @@ if lang == "Polski":
     )
     st.markdown(
         """
-        <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 16px; margin: 15px 0;">
-            <span style="color: #FFD700; font-size: 15px; font-weight: 500;">🔒 Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać pozycjami.</span>
+        <div style="display: flex; justify-content: center; margin: 15px 0;">
+            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 20px; text-align: center; width: fit-content;">
+                <span style="color: #FFD700; font-size: 14px; font-weight: 500;">🔒 Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać pozycjami.</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -69,8 +72,9 @@ if lang == "Polski":
 
 else:
   st.markdown(
-      '<h1 style="color: #FFD700; font-weight: 700; margin-bottom: 0px;">🚀'
-      " Bitget Futures Bot SaaS</h1>",
+      '<h1 style="color: #FFD700; font-weight: 700; text-transform: uppercase;'
+      ' letter-spacing: 1.5px; font-size: 28px; margin-bottom:'
+      ' 0px;">BITGET FUTURES BOT SAAS</h1>',
       unsafe_allow_html=True,
   )
   st.markdown(
@@ -88,8 +92,10 @@ else:
     )
     st.markdown(
         """
-        <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 16px; margin: 15px 0;">
-            <span style="color: #FFD700; font-size: 15px; font-weight: 500;">🔒 Log in to the main dashboard to launch the scanner and manage your positions.</span>
+        <div style="display: flex; justify-content: center; margin: 15px 0;">
+            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 20px; text-align: center; width: fit-content;">
+                <span style="color: #FFD700; font-size: 14px; font-weight: 500;">🔒 Log in to the main dashboard to launch the scanner and manage your positions.</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -111,6 +117,8 @@ else:
         * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
+     
+   
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
