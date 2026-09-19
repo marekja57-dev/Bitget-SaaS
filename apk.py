@@ -22,12 +22,10 @@ lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 if lang == "Polski":
   st.markdown(
       """
-        <div style="text-align: center; margin-top: 20px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 64px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
-        </div>
-        <div style="display: flex; justify-content: center; margin-bottom: 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.05); padding: 12px 24px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.15);">
-                <div style="color: #DFB15B; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
+        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 25px 35px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 15px rgba(223, 177, 91, 0.12), 0 4px 12px rgba(0,0,0,0.4); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 44px; line-height: 1.2; margin-bottom: 12px;">BITGET FUTURES BOT SAAS</div>
+                <div style="color: #DFB15B; font-size: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
             </div>
         </div>
         """,
@@ -76,12 +74,10 @@ if lang == "Polski":
 else:
   st.markdown(
       """
-        <div style="text-align: center; margin-top: 20px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 64px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
-        </div>
-        <div style="display: flex; justify-content: center; margin-bottom: 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.05); padding: 12px 24px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.15);">
-                <div style="color: #DFB15B; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Professional, automated cryptocurrency trading on the Futures market</div>
+        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 25px 35px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 15px rgba(223, 177, 91, 0.12), 0 4px 12px rgba(0,0,0,0.4); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 44px; line-height: 1.2; margin-bottom: 12px;">BITGET FUTURES BOT SAAS</div>
+                <div style="color: #DFB15B; font-size: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Professional, automated cryptocurrency trading on the Futures market</div>
             </div>
         </div>
         """,
@@ -124,12 +120,6 @@ else:
         * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
-    
-       
-
-     
-   
-
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
