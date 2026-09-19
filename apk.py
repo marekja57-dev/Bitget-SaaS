@@ -19,8 +19,6 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 # ==========================================
 # 1. STRONA STARTOWA / LOGOWANIA
 # ==========================================
-# (Umieść to tam, gdzie użytkownik nie jest jeszcze zalogowany)
-
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
 if lang == "Polski":
@@ -28,7 +26,7 @@ if lang == "Polski":
       """
         <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
             <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 20px 30px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.1), 0 4px 10px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 36px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES</div>
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 34px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES</div>
                 <div style="color: #DFB15B; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>
             </div>
         </div>
@@ -36,12 +34,10 @@ if lang == "Polski":
       unsafe_allow_html=True,
   )
 
-  # Tutaj znajduje się Twój formularz logowania (np. st.text_input dla maila i hasła)
   st.subheader("LOGOWANIE DO PANELU KLIENTA")
   email = st.text_input("Adres e-mail")
   password = st.text_input("Hasło", type="password")
   if st.button("ZALOGUJ SIĘ"):
-    # Logika logowania...
     pass
 
 else:
@@ -49,7 +45,7 @@ else:
       """
         <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
             <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 20px 30px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.1), 0 4px 10px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 36px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES</div>
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 34px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES</div>
                 <div style="color: #DFB15B; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">AUTONOMOUS TRADING SYSTEM</div>
             </div>
         </div>
@@ -67,14 +63,12 @@ else:
 # ==========================================
 # 2. GŁÓWNY PANEL (PO ZALOGOWANIU)
 # ==========================================
-# (Umieść to w sekcji, która wyświetla się po pomyślnym zalogowaniu użytkownika)
-
 if lang == "Polski":
   st.markdown(
       """
-        <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 25px;">
+        <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
             <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 20px 30px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.1), 0 4px 10px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 36px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES BOT SAAS</div>
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 32px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES BOT SAAS</div>
                 <div style="color: #DFB15B; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
             </div>
         </div>
@@ -101,7 +95,7 @@ if lang == "Polski":
             </div>
         </div>
         """,
-        unsafe_allow_html=True,
+      unsafe_allow_html=True,
     )
 
   with tab2:
@@ -124,9 +118,9 @@ if lang == "Polski":
 else:
   st.markdown(
       """
-        <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 25px;">
+        <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
             <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 20px 30px; border-radius: 10px; text-align: center; width: 100%; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.1), 0 4px 10px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 36px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES BOT SAAS</div>
+                <div style="color: #DFB15B; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; font-size: 32px; line-height: 1.2; margin-bottom: 8px;">BITGET FUTURES BOT SAAS</div>
                 <div style="color: #DFB15B; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Professional, automated cryptocurrency trading on the Futures market</div>
             </div>
         </div>
@@ -151,7 +145,7 @@ else:
             </div>
         </div>
         """,
-        unsafe_allow_html=True,
+      unsafe_allow_html=True,
     )
 
   with tab2:
@@ -170,6 +164,8 @@ else:
         * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
+
+
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
