@@ -22,11 +22,13 @@ lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 if lang == "Polski":
   st.markdown(
       """
-        <div style="text-align: center; margin-top: 10px; margin-bottom: 5px;">
-            <h1 style="color: #D4AF37; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 38px; margin: 0;">BITGET FUTURES BOT SAAS</h1>
+        <div style="text-align: center; margin-top: 20px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 64px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
         </div>
-        <div style="text-align: center; margin-bottom: 25px;">
-            <p style="color: #C0C0C0; font-size: 18px; font-weight: 400; margin: 0;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</p>
+        <div style="display: flex; justify-content: center; margin-bottom: 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.05); padding: 12px 24px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.15);">
+                <div style="color: #DFB15B; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
+            </div>
         </div>
         """,
       unsafe_allow_html=True,
@@ -46,8 +48,8 @@ if lang == "Polski":
     st.markdown(
         """
         <div style="display: flex; justify-content: center; margin: 20px 0;">
-            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content;">
-                <span style="color: #D4AF37; font-size: 15px; font-weight: 600;">🔒 Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać pozycjami.</span>
+            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Zaloguj się do panelu głównego, aby uruchomić skaner i zarządzać pozycjami.</span>
             </div>
         </div>
         """,
@@ -74,11 +76,13 @@ if lang == "Polski":
 else:
   st.markdown(
       """
-        <div style="text-align: center; margin-top: 10px; margin-bottom: 5px;">
-            <h1 style="color: #D4AF37; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 38px; margin: 0;">BITGET FUTURES BOT SAAS</h1>
+        <div style="text-align: center; margin-top: 20px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 64px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
         </div>
-        <div style="text-align: center; margin-bottom: 25px;">
-            <p style="color: #C0C0C0; font-size: 18px; font-weight: 400; margin: 0;">Professional, automated cryptocurrency trading on the Futures market</p>
+        <div style="display: flex; justify-content: center; margin-bottom: 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.05); padding: 12px 24px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 12px rgba(223, 177, 91, 0.15);">
+                <div style="color: #DFB15B; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Professional, automated cryptocurrency trading on the Futures market</div>
+            </div>
         </div>
         """,
       unsafe_allow_html=True,
@@ -96,8 +100,8 @@ else:
     st.markdown(
         """
         <div style="display: flex; justify-content: center; margin: 20px 0;">
-            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content;">
-                <span style="color: #D4AF37; font-size: 15px; font-weight: 600;">🔒 Log in to the main dashboard to launch the scanner and manage your positions.</span>
+            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Log in to the main dashboard to launch the scanner and manage your positions.</span>
             </div>
         </div>
         """,
@@ -120,6 +124,8 @@ else:
         * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
         * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
         """)
+    
+       
 
      
    
