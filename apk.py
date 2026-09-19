@@ -16,159 +16,179 @@ st.set_page_config(
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
-# ==========================================
-# 1. STRONA STARTOWA / LOGOWANIA
-# ==========================================
+import streamlit as st
+
+# Inicjalizacja stanu sesji logowania
+if "logged_in" not in st.session_state:
+  st.session_state.logged_in = False
+
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
-if lang == "Polski":
-  st.markdown(
-      """
-        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 30px 40px; border-radius: 10px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 44px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6); margin-bottom: 14px;">BITGET FUTURES</div>
-                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>
-            </div>
-        </div>
-        """,
-      unsafe_allow_html=True,
-  )
-
-  st.subheader("LOGOWANIE DO PANELU KLIENTA")
-  email = st.text_input("Adres e-mail")
-  password = st.text_input("Hasło", type="password")
-  if st.button("ZALOGUJ SIĘ"):
-    pass
-
-else:
-  st.markdown(
-      """
-        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 30px 40px; border-radius: 10px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 44px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6); margin-bottom: 14px;">BITGET FUTURES</div>
-                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">AUTONOMOUS TRADING SYSTEM</div>
-            </div>
-        </div>
-        """,
-      unsafe_allow_html=True,
-  )
-
-  st.subheader("CLIENT DASHBOARD LOGIN")
-  email = st.text_input("E-mail address")
-  password = st.text_input("Password", type="password")
-  if st.button("LOG IN"):
-    pass
-
-
 # ==========================================
-# 2. GŁÓWNY PANEL (PO ZALOGOWANIU)
+# 1. EKRAN STARTOWY / LOGOWANIA (PRZED ZALOGOWANIEM)
 # ==========================================
-if lang == "Polski":
-  st.markdown(
-      """
-        <div style="text-align: center; margin-top: 15px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 52px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
-        </div>
-        <div style="display: flex; justify-content: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 10px 22px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1);">
-                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
-            </div>
-        </div>
-        """,
-      unsafe_allow_html=True,
-  )
-
-  tab1, tab2, tab3 = st.tabs(
-      ["🏠 Strona Główna", "📖 Instrukcja Obsługi", "📄 Regulamin"]
-  )
-
-  with tab1:
-    st.subheader("Dlaczego warto?")
-    st.write(
-        "Nasz bot opiera się na zaawansowanej strategii **Trend-Following (MACD +"
-        " EMA)**, dynamicznie dobiera dźwignię do zmienności rynku i chroni"
-        " Twój kapitał dzięki precyzyjnemu zarządzaniu ryzykiem."
-    )
+if not st.session_state.logged_in:
+  if lang == "Polski":
     st.markdown(
         """
-        <div style="display: flex; justify-content: center; margin: 20px 0;">
-            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Panel operacyjny aktywny. Zarządzaj pozycjami i skanerem.</span>
+        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 30px 40px; border-radius: 8px; text-align: center; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1), 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 48px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6); margin-bottom: 12px;">BITGET FUTURES</div>
+                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 3px rgba(0,0,0,0.4);">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-  with tab2:
-    st.subheader("Instrukcja Obsługi krok po kroku")
-    st.markdown("""
-        1. **Konfiguracja API:** Wejdź na giełdę Bitget, wygeneruj klucze API (z uprawnieniami do Futures) i wprowadź je w panelu bota.
-        2. **Ustawienie Budżetu:** Zdefiniuj maksymalny budżet na pojedynczą transakcję (`max_single_trade_usdt`), aby kontrolować ryzyko.
-        3. **Wybór Strategii:** Wybierz tryb dźwigni (automatyczny lub manualny) oraz uruchom skaner na żywo.
-        4. **Monitorowanie:** Obserwuj statusy pozycji (`⏳ Oczekująca`, `🟢 Aktywna`, `⚡ Sygnał Gotowy`) w czasie rzeczywistym.
-        """)
+    st.subheader("LOGOWANIE DO PANELU KLIENTA")
+    email = st.text_input("Adres e-mail")
+    password = st.text_input("Hasło", type="password")
 
-  with tab3:
-    st.subheader("Regulamin Serwisu i Zasady Bezpieczeństwa")
-    st.write("""
-        * **Charakter narzędzia:** Aplikacja ma charakter analityczno-edukacyjny i wspomagający automatyzację handlu.
-        * **Ryzyko rynkowe:** Handel kontraktami Futures wiąże się z wysokim ryzykiem utraty kapitału. Użytkownik handluje na własną odpowiedzialność.
-        * **Bezpieczeństwo środków:** Administrator nie ma dostępu do wypłaty środków z giełdy Bitget – operacje odbywają się wyłącznie poprzez klucze API Użytkownika.
-        """)
+    if st.button("ZALOGUJ SIĘ"):
+      st.session_state.logged_in = True
+      st.rerun()
 
+  else:
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 30px 40px; border-radius: 8px; text-align: center; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1), 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 48px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6); margin-bottom: 12px;">BITGET FUTURES</div>
+                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 3px rgba(0,0,0,0.4);">AUTONOMOUS TRADING SYSTEM</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.subheader("CLIENT DASHBOARD LOGIN")
+    email = st.text_input("E-mail address")
+    password = st.text_input("Password", type="password")
+
+    if st.button("LOG IN"):
+      st.session_state.logged_in = True
+      st.rerun()
+
+# ==========================================
+# 2. GŁÓWNY PANEL (PO ZALOGOWANIU)
+# ==========================================
 else:
-  st.markdown(
-      """
+  if lang == "Polski":
+    st.markdown(
+        """
         <div style="text-align: center; margin-top: 15px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
             <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 52px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
         </div>
         <div style="display: flex; justify-content: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 10px 22px; border-radius: 6px; display: inline-block; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1);">
-                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Professional, automated cryptocurrency trading on the Futures market</div>
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 12px 26px; border-radius: 8px; display: inline-block; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1), 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 3px rgba(0,0,0,0.4);">Profesjonalny, zautomatyzowany handel kryptowalutami na rynku Futures</div>
             </div>
         </div>
         """,
-      unsafe_allow_html=True,
-  )
-
-  tab1, tab2, tab3 = st.tabs(["🏠 Home", "📖 User Manual", "📄 Terms & Conditions"])
-
-  with tab1:
-    st.subheader("Why Choose Us?")
-    st.write(
-        "Our bot relies on an advanced **Trend-Following (MACD + EMA)**"
-        " strategy, dynamically adjusts leverage based on market volatility,"
-        " and protects your capital through precise risk management."
+        unsafe_allow_html=True,
     )
+
+    if st.sidebar.button("Wyloguj się"):
+      st.session_state.logged_in = False
+      st.rerun()
+
+    tab1, tab2, tab3 = st.tabs(
+        ["🏠 Strona Główna", "📖 Instrukcja Obsługi", "📄 Regulamin"]
+    )
+
+    with tab1:
+      st.subheader("Dlaczego warto?")
+      st.write(
+          "Nasz bot opiera się na zaawansowanej strategii **Trend-Following (MACD"
+          " + EMA)**, dynamicznie dobiera dźwignię do zmienności rynku i chroni"
+          " Twój kapitał dzięki precyzyjnemu zarządzaniu ryzykiem."
+      )
+      st.markdown(
+          """
+            <div style="display: flex; justify-content: center; margin: 20px 0;">
+                <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                    <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Panel operacyjny aktywny. Zarządzaj pozycjami i skanerem.</span>
+                </div>
+            </div>
+            """,
+          unsafe_allow_html=True,
+      )
+
+    with tab2:
+      st.subheader("Instrukcja Obsługi krok po kroku")
+      st.markdown("""
+            1. **Konfiguracja API:** Wejdź na giełdę Bitget, wygeneruj klucze API (z uprawnieniami do Futures) i wprowadź je w panelu bota.
+            2. **Ustawienie Budżetu:** Zdefiniuj maksymalny budżet na pojedynczą transakcję (`max_single_trade_usdt`), aby kontrolować ryzyko.
+            3. **Wybór Strategii:** Wybierz tryb dźwigni (automatyczny lub manualny) oraz uruchom skaner na żywo.
+            4. **Monitorowanie:** Obserwuj statusy pozycji (`⏳ Oczekująca`, `🟢 Aktywna`, `⚡ Sygnał Gotowy`) w czasie rzeczywistym.
+            """)
+
+    with tab3:
+      st.subheader("Regulamin Serwisu i Zasady Bezpieczeństwa")
+      st.write("""
+            * **Charakter narzędzia:** Aplikacja ma charakter analityczno-edukacyjny i wspomagający automatyzację handlu.
+            * **Ryzyko rynkowe:** Handel kontraktami Futures wiąże się z wysokim ryzykiem utraty kapitału. Użytkownik handluje na własną odpowiedzialność.
+            * **Bezpieczeństwo środków:** Administrator nie ma dostępu do wypłaty środków z giełdy Bitget – operacje odbywają się wyłącznie poprzez klucze API Użytkownika.
+            """)
+
+  else:
     st.markdown(
         """
-        <div style="display: flex; justify-content: center; margin: 20px 0;">
-            <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Operational panel active. Manage positions and scanner.</span>
+        <div style="text-align: center; margin-top: 15px; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="color: #DFB15B; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; font-size: 52px; line-height: 1.1; text-shadow: 2px 2px 6px rgba(0,0,0,0.6);">BITGET FUTURES BOT SAAS</div>
+        </div>
+        <div style="display: flex; justify-content: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="border: 2px solid #DFB15B; background: rgba(223, 177, 91, 0.04); padding: 12px 26px; border-radius: 8px; display: inline-block; box-shadow: inset 0 0 10px rgba(223, 177, 91, 0.1), 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="color: #DFB15B; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 3px rgba(0,0,0,0.4);">Professional, automated cryptocurrency trading on the Futures market</div>
             </div>
         </div>
         """,
-      unsafe_allow_html=True,
+        unsafe_allow_html=True,
     )
 
-  with tab2:
-    st.subheader("Step-by-Step User Manual")
-    st.markdown("""
-        1. **API Setup:** Go to the Bitget exchange, generate API keys (with Futures permissions), and enter them into the bot panel.
-        2. **Budget Configuration:** Define the maximum budget per single trade (`max_single_trade_usdt`) to manage risk.
-        3. **Strategy Selection:** Choose your leverage mode (automatic or manual) and start the live scanner.
-        4. **Monitoring:** Watch real-time position statuses (`⏳ Pending`, `🟢 Active`, `⚡ Signal Ready`).
-        """)
+    if st.sidebar.button("Log out"):
+      st.session_state.logged_in = False
+      st.rerun()
 
-  with tab3:
-    st.subheader("Terms of Service & Risk Disclaimer")
-    st.write("""
-        * **Nature of the tool:** The application is intended for analytical, educational, and trade automation support purposes.
-        * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
-        * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
-        """)
+    tab1, tab2, tab3 = st.tabs(
+        ["🏠 Home", "📖 User Manual", "📄 Terms & Conditions"]
+    )
 
+    with tab1:
+      st.subheader("Why Choose Us?")
+      st.write(
+          "Our bot relies on an advanced **Trend-Following (MACD + EMA)**"
+          " strategy, dynamically adjusts leverage based on market volatility,"
+          " and protects your capital through precise risk management."
+      )
+      st.markdown(
+          """
+            <div style="display: flex; justify-content: center; margin: 20px 0;">
+                <div style="background-color: #0e1117; border: 1px solid #303545; border-radius: 8px; padding: 12px 24px; text-align: center; width: fit-content; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                    <span style="color: #DFB15B; font-size: 15px; font-weight: 600;">🔒 Operational panel active. Manage positions and scanner.</span>
+                </div>
+            </div>
+            """,
+          unsafe_allow_html=True,
+      )
+
+    with tab2:
+      st.subheader("Step-by-Step User Manual")
+      st.markdown("""
+            1. **API Setup:** Go to the Bitget exchange, generate API keys (with Futures permissions), and enter them into the bot panel.
+            2. **Budget Configuration:** Define the maximum budget per single trade (`max_single_trade_usdt`) to manage risk.
+            3. **Strategy Selection:** Choose your leverage mode (automatic or manual) and start the live scanner.
+            4. **Monitoring:** Watch real-time position statuses (`⏳ Pending`, `🟢 Active`, `⚡ Signal Ready`).
+            """)
+
+    with tab3:
+      st.subheader("Terms of Service & Risk Disclaimer")
+      st.write("""
+            * **Nature of the tool:** The application is intended for analytical, educational, and trade automation support purposes.
+            * **Market risk:** Futures trading carries a high risk of capital loss. The user trades entirely at their own risk.
+            * **Asset security:** The administrator has no access to withdraw funds from the Bitget exchange – all operations are executed strictly via the User's API keys.
+            """)
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
