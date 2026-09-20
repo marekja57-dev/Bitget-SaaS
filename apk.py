@@ -1,4 +1,4 @@
-from datetime import datetime
+rom datetime import datetime
 import hashlib
 import json
 import os
@@ -16,9 +16,6 @@ st.set_page_config(
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
-
-# Przełącznik języka w pasku bocznym
-lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
 # =====================================================================
 # FUNKCJE POMOCNICZE (ŻELAZNY NADPIS ADMINISTRATORA)
@@ -182,11 +179,11 @@ st.markdown(
         font-size: 0.75rem;
         color: #e6c687;
     }
-    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } 
-    .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } 
-    .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } 
-    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } 
-    div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } 
+    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
+    .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
+    .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
+    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
+    div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; }
     div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } </style> """,
     unsafe_allow_html=True,
 )
@@ -268,6 +265,39 @@ if "active_trades" not in st.session_state:
     st.session_state.active_trades = {}
 if "trend_bot_fut_active" not in st.session_state:
     st.session_state.trend_bot_fut_active = False
+
+# --- JĘZYK I REGULAMIN WYŁĄCZNIE W PANELU BOCZNYM ---
+if "lang" not in st.session_state:
+    st.session_state.lang = "Polski"
+
+st.session_state.lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"], key="lang_selector")
+
+if st.session_state.lang == "Polski":
+    with st.sidebar.expander("📖 Instrukcja Obsługi i Regulamin"):
+        st.sidebar.markdown("""
+        1. Jak zacząć:
+        1. Wpisz klucze API Bitget w panelu.
+        2. Opłać subskrypcję Stripe.
+        3. Wybierz pary walut i strategię.
+        4. Włącz auto-skanowanie / handel.
+        
+        2. Regulamin:
+        * Handel na giełdzie wiąże się z ryzykiem utraty kapitału.
+        * Narzędzie służy do celów analitycznych i automatyzacji.
+        """)
+else:
+    with st.sidebar.expander("📖 User Manual & Terms"):
+        st.sidebar.markdown("""
+        1. Getting Started:
+        1. Enter Bitget API keys.
+        2. Complete Stripe subscription.
+        3. Choose pairs and strategy.
+        4. Enable auto-scanning / trading.
+        
+        2. Terms of Service:
+        * Crypto trading involves high risk.
+        * Software is provided as an analytical tool.
+        """)
 
 def get_exchange():
     if not st.session_state.api_key:
