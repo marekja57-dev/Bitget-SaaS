@@ -20,47 +20,6 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 # Przełącznik języka w pasku bocznym
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
-# Elegancka trójwymiarowa ramka retro na samej górze
-st.markdown(
-    """
-    <div style="
-        border: 3px solid #f1c40f; 
-        padding: 25px; 
-        text-align: center; 
-        background: linear-gradient(135deg, #111111 0%, #1a1a1a 100%); 
-        border-radius: 12px; 
-        box-shadow: 0 8px 20px rgba(0,0,0,0.7), inset 0 0 15px rgba(241,196,15,0.2);
-        max-width: 750px;
-        margin: 20px auto;
-    ">
-        <h1 style="
-            color: #f1c40f; 
-            font-family: 'Courier New', monospace; 
-            letter-spacing: 3px; 
-            font-weight: 900; 
-            font-size: 40px;
-            margin: 0;
-            text-shadow: 3px 3px 0px #000000, 5px 5px 0px #c0392b;
-        ">BITGET FUTURES</h1>
-        <p style="
-            color: #ffffff; 
-            font-family: 'Courier New', monospace; 
-            font-size: 14px; 
-            letter-spacing: 2px;
-            margin-top: 12px; 
-            margin-bottom: 0;
-            text-transform: uppercase;
-        ">AUTONOMICZNY SYSTEM TRANSAKCYJNY</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-if lang == "Polish":
-    tab1, tab2, tab3 = st.tabs(["🏠 Strona Główna", "📖 Instrukcja Obsługi", "📜 Regulamin"])
-else:
-    tab1, tab2, tab3 = st.tabs(["🏠 Home", "📖 User Manual", "📜 Terms & Conditions"])
-
 # =====================================================================
 # FUNKCJE POMOCNICZE (ŻELAZNY NADPIS ADMINISTRATORA)
 # =====================================================================
