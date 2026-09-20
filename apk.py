@@ -1269,7 +1269,7 @@ fut_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h"
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Pętla Skanera")
 if "sidebar_auto_scan_cb" not in st.session_state:
-    st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
+    st.session_state.sidebar_auto_scan_cb = st.session_state.get("scanner_active", False)
 
 def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
