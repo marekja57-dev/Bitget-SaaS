@@ -16,17 +16,17 @@ st.set_page_config(
 
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
-import streamlit as st
+if lang == "Polish":
+    st.title("Bitget Futures Bot SaaS")
+    st.markdown(
+        "### Profesjonalny, zautomatyzowany handel kryptowalutami na rynku"
+        " Futures"
+    )
 
 # Przełącznik języka w pasku bocznym
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
-if lang == "Polski":
-  st.title("🚀 Bitget Futures Bot SaaS")
-  st.markdown(
-      "### Profesjonalny, zautomatyzowany handel kryptowalutami na rynku"
-      " Futures"
-  )
+
 
   tab1, tab2, tab3 = st.tabs(
       ["🏠 Strona Główna", "📖 Instrukcja Obsługi", "📄 Regulamin"]
