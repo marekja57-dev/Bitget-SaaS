@@ -9,10 +9,6 @@ import pandas as pd
 import streamlit as st
 import stripe
 
-st.set_page_config(
-    page_title="Bitget Futures SaaS",
-    layout="wide",
-)
 import sqlite3
 import time
 import ccxt
@@ -31,7 +27,7 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 # Przełącznik języka w pasku bocznym
 lang = st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"])
 
-# Elegancka trójwymiarowa ramka retro
+# Elegancka trójwymiarowa ramka retro na samej górze
 st.markdown(
     """
     <div style="
