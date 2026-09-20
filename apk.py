@@ -1176,13 +1176,13 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
 # =====================================================================
 # PANEL BOCZNY (SIDEBAR)
 # =====================================================================
-st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
+st.sidebar.markdown(f"### 👤 ({st.session_state.user_email})")
 if is_user_admin():
-    st.sidebar.markdown("🔴 **Rola: Administrator**")
+    st.sidebar.markdown("**Rola: Administrator**")
 else:
-    st.sidebar.markdown("🟢 **Rola: Klient SaaS**")
+    st.sidebar.markdown("**Rola: Klient SaaS**")
 
-if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
+if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True, key="sidebar_wyloguj_btn"):
     st.session_state.logged_in = False
     st.session_state.user_email = ""
     st.session_state.is_admin = False
@@ -1195,13 +1195,13 @@ if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True):
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💳 Strefa Subskrypcji")
 if is_user_admin() or is_user_paid():
-    st.sidebar.success("✅ Subskrypcja aktywna (Dostęp Pełny)")
+    st.sidebar.success("Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-    st.sidebar.link_button("💳 OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w00kecL1sfbCk0c13oA00")
+    st.sidebar.link_button("OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w0kecLiSfbc8c13qA88")
 
 if is_user_admin():
-    with st.sidebar.expander("🛠️ Konfiguracja Stripe (Admin)"):
+    with st.sidebar.expander("⚙️ Konfiguracja Stripe (Admin)"):
         input_s_pk = st.text_input("Stripe Publishable Key", value=stripe_pk_val, type="password")
         input_s_sk = st.text_input("Stripe Secret Key", value=stripe_sk_val, type="password")
         input_s_price = st.text_input("Stripe Price ID (np. price_...)", value=stripe_price_id_val)
@@ -1219,7 +1219,7 @@ input_api = st.sidebar.text_input("Bitget API Key", value=st.session_state.api_k
 input_secret = st.sidebar.text_input("Bitget Secret Key", value=st.session_state.secret_key, type="password")
 input_pass = st.sidebar.text_input("Bitget Passphrase", value=st.session_state.passphrase, type="password")
 
-if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
+if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True, key="sidebar_zapisz_klucze_btn"):
     if input_api and input_secret and input_pass:
         st.session_state.api_key = input_api
         st.session_state.secret_key = input_secret
@@ -1232,7 +1232,7 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True):
         )
         conn.commit()
         conn.close()
-        st.success("✅ Klucze zapisane w bazie!")
+        st.success("Klucze zapisane w bazie!")
         st.rerun()
     else:
         st.error("Wypełnij wszystkie pola kluczy.")
@@ -1247,9 +1247,9 @@ if futures_ex and not st.session_state.known_markets:
         pass
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚙️ Kapitał i Ryzyko")
-max_single_trade_usdt = st.sidebar.number_input("🛡️ Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
-max_active_futures_positions = st.sidebar.slider("📈 Maks. aktywne pozycje Futures", 1, 20, 5)
+st.sidebar.markdown("### 💰 Kapitał i Ryzyko")
+max_single_trade_usdt = st.sidebar.number_input("Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0)
+max_active_futures_positions = st.sidebar.slider("Maks. aktywne pozycje Futures", 1, 20, 5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🛡️ Opcjonalne Limity SL / TP")
@@ -1259,11 +1259,11 @@ custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 1
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
-leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🎛️ Ręczny"])
+leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🛡️ Ręczny"])
 manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🧠 Timeframe Analizy")
+st.sidebar.markdown("### ⏱️ Timeframe Analizy")
 fut_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4)
 
 st.sidebar.markdown("---")
@@ -1276,11 +1276,10 @@ def toggle_scanner_from_sidebar():
 
 auto_scan_enabled = st.sidebar.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
 scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 1, 300, 3)
-max_fut_scan_pairs = st.sidebar.slider("📈 Liczba par Futures", 5, 50, 15, 5)
+max_fut_scan_pairs = st.sidebar.slider("Liczba par Futures", 5, 50, 15, 5)
 
 st.sidebar.markdown("---")
-emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True)
-
+emergency_kill = st.sidebar.button("🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)", type="primary", use_container_width=True, key="sidebar_kill_switch_btn")
 if emergency_kill:
     if futures_ex:
         try:
@@ -1303,9 +1302,10 @@ if emergency_kill:
     st.session_state.main_cb_trend_fut = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
-    st.success("🚨 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
+    st.success("🛑 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
     time.sleep(2)
     st.rerun()
+
 
 # =====================================================================
 # WYLICZENIE SALDA I POZYCJI FUTURES (100% NIEZAWODNA KALKULACJA MARŻY)
