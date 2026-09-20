@@ -112,12 +112,6 @@ def is_user_admin():
         return True
     return bool(st.session_state.get("is_admin", False))
 
-def is_user_paid():
-    email = str(st.session_state.get("user_email", "")).strip().lower()
-    if email in ADMIN_EMAILS:
-        return True
-    return bool(st.session_state.get("stripe_paid", False))
-
 # =====================================================================
 # INICJALIZACJA BAZY DANYCH SQLITE
 # =====================================================================
