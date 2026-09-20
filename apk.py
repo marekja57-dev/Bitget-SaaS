@@ -122,6 +122,10 @@ if "last_fut_total" not in st.session_state:
     st.session_state.last_fut_total = 0.0
 if "last_fut_free" not in st.session_state:
     st.session_state.last_fut_free = 0.0
+if "session_start_balance" not in st.session_state:
+    st.session_state.session_start_balance = 0.0
+if "session_baseline_locked" not in st.session_state:
+    st.session_state.session_baseline_locked = False
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -410,10 +414,19 @@ max_single_trade_usdt = st.sidebar.number_input("Maksymalnie USDT na 1 pozycję"
 max_active_futures_positions = st.sidebar.slider("Maks. aktywne pozycje Futures", 1, 20, 5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛡️ Opcjonalne Limity SL / TP")
+st.sidebar.markdown("### 🛡️ Awaryjne SL / TP (Pojedyncza pozycja)")
 enable_custom_sl_tp = st.sidebar.checkbox("Włącz awaryjne limity SL / TP (%)", value=False)
-custom_stop_loss_pct = st.sidebar.slider("Maksymalna strata (Stop-Loss %)", 1, 30, 5)
-custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 100, 15)
+custom_stop_loss_pct = st.sidebar.slider("Maksymalna strata (Stop-Loss %)", 1, 50, 5)
+custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 200, 15)
+
+# =====================================================================
+# GLOBALNY TP / SL CAŁEJ SESJI (REGULOWANY SUWAKAMI W DANYM MOMENCIE)
+# =====================================================================
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🌐 Globalny TP / SL Całej Sesji")
+enable_global_session_limit = st.sidebar.checkbox("Włącz globalny limit sesji (%)", value=True)
+global_session_tp_pct = st.sidebar.slider("Globalny zysk sesji (Take-Profit %)", 1, 100, 10)
+global_session_sl_pct = st.sidebar.slider("Globalna strata sesji (Stop-Loss %)", 1, 50, 5)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
@@ -431,6 +444,8 @@ if "sidebar_auto_scan_cb" not in st.session_state:
 
 def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
+    if st.session_state.scanner_active:
+        st.session_state.session_baseline_locked = False
 
 auto_scan_enabled = st.sidebar.checkbox("Włącz auto-skanowanie w tle", key="sidebar_auto_scan_cb", on_change=toggle_scanner_from_sidebar)
 scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 1, 300, 3)
@@ -459,6 +474,8 @@ if emergency_kill:
     st.session_state.main_cb_trend_fut = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
+    st.session_state.session_start_balance = 0.0
+    st.session_state.session_baseline_locked = False
     st.success("🛑 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
     time.sleep(2)
     st.rerun()
@@ -484,11 +501,13 @@ if fut_total == 0.0:
     fut_total = st.session_state.last_fut_total
 
 total_margin_used = 0.0
+active_positions_count = 0
 try:
     positions = futures_ex.fetch_positions() if futures_ex else []
     for p in positions:
         contracts = float(p.get("contracts", 0) or 0)
         if contracts > 0:
+            active_positions_count += 1
             im = float(p.get("initialMargin", 0.0) or 0.0)
             if im == 0:
                 notional = float(p.get("notional", 0.0) or 0.0)
@@ -503,18 +522,22 @@ if fut_total > 0:
     fut_free = max(0.0, fut_total - total_margin_used)
     st.session_state.last_fut_total = fut_total
     st.session_state.last_fut_free = fut_free
+    
+    # DYNAMICZNE USTALANIE I BLOKOWANIE BAZY PO PEŁNYM OTWARCIU SESJI
+    if st.session_state.scanner_active and not st.session_state.session_baseline_locked:
+        st.session_state.session_start_balance = fut_total
+        if active_positions_count >= max_active_futures_positions:
+            st.session_state.session_baseline_locked = True
 else:
     fut_total = st.session_state.last_fut_total
     fut_free = st.session_state.last_fut_free
 
 total_unrealized_pnl = 0.0
-active_positions_count = 0
 if futures_ex:
     try:
         positions = futures_ex.fetch_positions()
         for p in positions:
             if float(p.get("contracts", 0)) > 0:
-                active_positions_count += 1
                 total_unrealized_pnl += float(p.get("unrealizedPnl", 0.0))
     except Exception:
         pass
@@ -527,6 +550,10 @@ total_seconds = int(elapsed.total_seconds())
 hours, remainder = divmod(total_seconds, 3600)
 minutes, seconds = divmod(remainder, 60)
 
+session_pnl_pct_display = 0.0
+if st.session_state.session_start_balance > 0 and fut_total > 0:
+    session_pnl_pct_display = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
+
 st.markdown(f"""
 <div class="metrics-row">
     <div class="metric-card">
@@ -535,9 +562,9 @@ st.markdown(f"""
         <div class="metric-delta">Wolne: {fut_free:.2f} USDT</div>
     </div>
     <div class="metric-card">
-        <div class="metric-label">📊 Wyniki Futures (PnL)</div>
-        <div class="metric-value">{total_unrealized_pnl:+.2f} USDT</div>
-        <div class="metric-delta">Status: {'Aktywny' if st.session_state.scanner_active else 'Zatrzymany'}</div>
+        <div class="metric-label">📊 Wyniki Sesji (PnL %)</div>
+        <div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
+        <div class="metric-delta">Pnl USDT: {total_unrealized_pnl:+.2f} USDT</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">📈 Sloty Futures</div>
@@ -560,6 +587,8 @@ with st.container(border=True):
 
     def toggle_main_trend_fut():
         st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
+        if st.session_state.trend_bot_fut_active and fut_total > 0:
+            st.session_state.session_baseline_locked = False
 
     st.checkbox("🔵 Uruchom Bota Futures", key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
     if st.session_state.trend_bot_fut_active:
@@ -574,6 +603,7 @@ with st.container(border=True):
             if st.button("🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True):
                 st.session_state.scanner_active = True
                 st.session_state.sidebar_auto_scan_cb = True
+                st.session_state.session_baseline_locked = False
                 st.rerun()
         else:
             if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
@@ -581,6 +611,8 @@ with st.container(border=True):
                 st.session_state.trend_bot_fut_active = False
                 st.session_state.sidebar_auto_scan_cb = False
                 st.session_state.main_cb_trend_fut = False
+                st.session_state.session_start_balance = 0.0
+                st.session_state.session_baseline_locked = False
                 st.rerun()
     with col_status:
         if st.session_state.scanner_active:
@@ -601,7 +633,36 @@ try:
         except Exception as e:
             st.toast(f"Błąd pobierania pozycji: {e}", icon="⚠️")
 
-    # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT
+    # 0. GLOBALNY TP / SL CAŁEJ SESJI ( BAZOWANY NA BAZIE PO PEŁNYM OTWARCIU LUB BIEŻĄCEJ REGULACJI)
+    if enable_global_session_limit and st.session_state.session_start_balance > 0 and fut_total > 0:
+        session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
+        if session_pnl_pct >= global_session_tp_pct or session_pnl_pct <= -global_session_sl_pct:
+            is_tp = session_pnl_pct >= global_session_tp_pct
+            reason = f"GLOBALNY SESJA TAKE-PROFIT (+{global_session_tp_pct}%)" if is_tp else f"GLOBALNY SESJA STOP-LOSS (-{global_session_sl_pct}%)"
+            
+            if futures_ex and current_positions:
+                for p in current_positions:
+                    contracts = float(p.get("contracts", 0) or 0)
+                    if contracts > 0:
+                        sym = p["symbol"]
+                        side = "sell" if p.get("side") == "long" else "buy"
+                        try:
+                            futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                        except Exception:
+                            pass
+            
+            st.session_state.trade_history.insert(0, {
+                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "Typ": f"{reason} [Wynik: {session_pnl_pct:+.2f}%]",
+                "Para": "WSZYSTKIE",
+                "Cena": f"{fut_total:.2f} USDT",
+            })
+            
+            st.session_state.session_start_balance = fut_total
+            st.session_state.session_baseline_locked = False
+            st.session_state.active_trades = {}
+
+    # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (Pojedyncza pozycja)
     if futures_ex and current_positions:
         for pos in current_positions:
             contracts = float(pos.get("contracts", 0) or 0)
@@ -693,7 +754,12 @@ try:
 
     # 3. OTWIERANJE NOWYCH POZYCJI (TREND ENTRY)
     if futures_ex and st.session_state.trend_bot_fut_active:
-        active_symbols = [p["symbol"] for p in current_positions if float(p.get("contracts", 0)) > 0]
+        try:
+            fresh_pos = futures_ex.fetch_positions()
+            active_symbols = [p["symbol"] for p in fresh_pos if float(p.get("contracts", 0)) > 0]
+        except Exception:
+            active_symbols = [p["symbol"] for p in current_positions if float(p.get("contracts", 0)) > 0]
+
         if len(active_symbols) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
             try:
                 f_tickers = futures_ex.fetch_tickers()
@@ -726,9 +792,19 @@ try:
 
                 top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)[:max_active_futures_positions]
                 for item in top_signal_pairs:
-                    if len(active_symbols) >= max_active_futures_positions:
+                    try:
+                        check_pos = futures_ex.fetch_positions()
+                        active_symbols_now = [p["symbol"] for p in check_pos if float(p.get("contracts", 0)) > 0]
+                    except Exception:
+                        active_symbols_now = active_symbols
+
+                    if len(active_symbols_now) >= max_active_futures_positions:
                         break
+
                     sym = item["symbol"]
+                    if sym in active_symbols_now:
+                        continue
+
                     f_price = item["price"]
                     side = item["side"]
                     f_vol = item["volatility"]
@@ -736,32 +812,39 @@ try:
 
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     tf_key = f"trend_bot_fut_{sym}"
-                    budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
-                    if budget > fut_free:
-                        budget = fut_free
-                    if budget >= MIN_FUT_TRADE:
-                        try:
-                            futures_ex.set_leverage(bot_leverage, sym)
-                        except Exception:
-                            pass
-                        contracts = (budget * bot_leverage) / f_price
-                        try:
-                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                            futures_ex.create_order(sym, 'market', side, contracts_prec)
-                        except Exception:
-                            futures_ex.create_order(sym, 'market', side, float(contracts))
-
-                        st.session_state.signal_cooldown[tf_key] = time.time() + 180
-                        st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
-                        st.session_state.trade_history.insert(0, {
-                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": f"BOT FUTURES {label}",
-                            "Para": sym,
-                            "Budżet": f"{budget:.2f} USDT",
-                            "Dźwignia": f"{bot_leverage}x",
-                            "Cena": f"{f_price:.4f}",
-                        })
+                    
+                    budget = min(fut_free, max_single_trade_usdt)
+                    if budget < MIN_FUT_TRADE:
                         break
+
+                    try:
+                        futures_ex.set_leverage(bot_leverage, sym)
+                    except Exception:
+                        pass
+
+                    contracts = (budget * bot_leverage) / f_price
+                    try:
+                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        if contracts_prec <= 0:
+                            contracts_prec = float(contracts)
+                        futures_ex.create_order(sym, 'market', side, contracts_prec)
+                    except Exception:
+                        try:
+                            futures_ex.create_order(sym, 'market', side, float(contracts))
+                        except Exception:
+                            continue
+
+                    st.session_state.signal_cooldown[tf_key] = time.time() + 300
+                    st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
+                    st.session_state.trade_history.insert(0, {
+                        "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Typ": f"BOT FUTURES {label}",
+                        "Para": sym,
+                        "Budżet": f"{budget:.2f} USDT",
+                        "Dźwignia": f"{bot_leverage}x",
+                        "Cena": f"{f_price:.4f}",
+                    })
+                    break
             except Exception:
                 pass
 except Exception:
@@ -791,7 +874,7 @@ if futures_ex:
             margin_val = "-"
             pnl_val = "-"
             status_desc = "⏳ Oczekująca"
-            prop_budget = max(MIN_FUT_TRADE, min(fut_free, max_single_trade_usdt))
+            prop_budget = min(fut_free, max_single_trade_usdt)
 
             if pos:
                 side_val = pos.get("side", "").upper()
