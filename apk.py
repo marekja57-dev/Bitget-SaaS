@@ -459,9 +459,16 @@ if emergency_kill:
                     sym = p["symbol"]
                     side = "sell" if p.get("side") == "long" else "buy"
                     try:
-                        futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                        # Poprawka precyzji wolumenu dla giełdy przy Kill Switchu
+                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        if contracts_prec <= 0:
+                            contracts_prec = contracts
+                        futures_ex.create_order(sym, 'market', side, contracts_prec, params={"reduceOnly": True})
                     except Exception:
-                        pass
+                        try:
+                            futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                        except Exception:
+                            pass
         except Exception:
             pass
     st.session_state.scanner_active = False
@@ -642,9 +649,15 @@ try:
                         sym = p["symbol"]
                         side = "sell" if p.get("side") == "long" else "buy"
                         try:
-                            futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                            if contracts_prec <= 0:
+                                contracts_prec = contracts
+                            futures_ex.create_order(sym, 'market', side, contracts_prec, params={"reduceOnly": True})
                         except Exception:
-                            pass
+                            try:
+                                futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
+                            except Exception:
+                                pass
              
             st.session_state.trade_history.insert(0, {
                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -684,7 +697,10 @@ try:
                     close_side = "sell" if side == "long" else "buy"
                     reason = "AWARYJNY SL (-25%)" if is_emergency_sl else ("STOP-LOSS" if is_custom_sl else "TAKE-PROFIT")
                     try:
-                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        if contracts_prec <= 0:
+                            contracts_prec = contracts
+                        futures_ex.create_order(sym, 'market', close_side, contracts_prec, params={"reduceOnly": True})
                         st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -693,7 +709,11 @@ try:
                             "Cena": f"{mark_price:.4f}",
                         })
                     except Exception as order_err:
-                        st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {order_err}")
+                        try:
+                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
+                        except Exception as inner_err:
+                            st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {inner_err}")
 
     # 2. WYJŚCIE Z POZYCJI (TREND EXIT - ODWRÓCENIE MACD LUB PRZEBICIE EMA 50)
     if futures_ex and current_positions:
@@ -730,8 +750,7 @@ try:
 
                     should_close_fut = False
                     close_reason_fut = ""
-                    
-                    # Ulepszone warunki wyjścia: przecięcie MACD lub przejście ceny po złej stronie EMA 50
+                     
                     if side == "long" and (f_macd < f_sig or f_close < f_ema50):
                         should_close_fut = True
                         close_reason_fut = f"TREND EXIT LONG (Zmiana trendu) [{pnl_pct:+.2f}%]"
@@ -741,7 +760,14 @@ try:
 
                     if should_close_fut:
                         close_side = "sell" if side == "long" else "buy"
-                        futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+                        try:
+                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                            if contracts_prec <= 0:
+                                contracts_prec = contracts
+                            futures_ex.create_order(sym, 'market', close_side, contracts_prec, params={"reduceOnly": True})
+                        except Exception:
+                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
+
                         st.session_state.active_trades.pop(sym, None)
                         st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
                         st.session_state.trade_history.insert(0, {
@@ -780,7 +806,7 @@ try:
                         f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                         f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                         f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
-                        
+                         
                         f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                         f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
                         f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
@@ -790,13 +816,12 @@ try:
                         f_price = float(f_df["close"].iloc[-1])
                         f_ema50 = float(f_df["ema50"].iloc[-1])
 
-                        # FILTR TRENDU: Otwieramy LONG tylko gdy cena > EMA50 i MACD > Signal. SHORT gdy cena < EMA50 i MACD < Signal.
                         if f_macd > f_sig and f_price > f_ema50:
                             side = "buy"
                         elif f_macd < f_sig and f_price < f_ema50:
                             side = "sell"
                         else:
-                            continue # Odrzucamy fałszywe sygnały w trendzie bocznym
+                            continue
 
                         signal_strength = abs(f_macd - f_sig) / f_price
                         evaluated_pairs.append({"symbol": sym, "price": f_price, "side": side, "strength": signal_strength, "volatility": f_vol})
@@ -965,4 +990,3 @@ if st.session_state.scanner_active or st.session_state.trend_bot_fut_active:
         time.sleep(scan_interval)
     except Exception:
         pass
-    st.rerun()
