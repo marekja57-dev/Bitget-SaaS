@@ -270,7 +270,6 @@ if "active_trades" not in st.session_state:
 if "trend_bot_fut_active" not in st.session_state:
     st.session_state.trend_bot_fut_active = False
 
-# --- JĘZYK I REGULAMIN WYŁĄCZNIE W PANELU BOCZNYM ---
 if "lang" not in st.session_state:
     st.session_state.lang = "Polski"
 
@@ -284,7 +283,7 @@ if st.session_state.lang == "Polski":
         2. Opłać subskrypcję Stripe.
         3. Wybierz pary walut i strategię.
         4. Włącz auto-skanowanie / handel.
-        
+         
         2. Regulamin:
         * Handel na giełdzie wiąże się z ryzykiem utraty kapitału.
         * Narzędzie służy do celów analitycznych i automatyzacji.
@@ -297,7 +296,7 @@ else:
         2. Complete Stripe subscription.
         3. Choose pairs and strategy.
         4. Enable auto-scanning / trading.
-        
+         
         2. Terms of Service:
         * Crypto trading involves high risk.
         * Software is provided as an analytical tool.
@@ -419,9 +418,6 @@ enable_custom_sl_tp = st.sidebar.checkbox("Włącz awaryjne limity SL / TP (%)",
 custom_stop_loss_pct = st.sidebar.slider("Maksymalna strata (Stop-Loss %)", 1, 50, 5)
 custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 200, 15)
 
-# =====================================================================
-# GLOBALNY TP / SL CAŁEJ SESJI (REGULOWANY SUWAKAMI W DANYM MOMENCIE)
-# =====================================================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🌐 Globalny TP / SL Całej Sesji")
 enable_global_session_limit = st.sidebar.checkbox("Włącz globalny limit sesji (%)", value=True)
@@ -468,15 +464,18 @@ if emergency_kill:
                         pass
         except Exception:
             pass
-    st.session_state.reset_requested = True
+    st.session_state.scanner_active = False
+    st.session_state.trend_bot_fut_active = False
+    st.session_state.sidebar_auto_scan_cb = False
+    st.session_state.main_cb_trend_fut = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
     st.session_state.session_baseline_locked = False
-
     st.success("🛑 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
     time.sleep(2)
     st.rerun()
+
 # =====================================================================
 # WYLICZENIE SALDA I POZYCJI FUTURES
 # =====================================================================
@@ -519,8 +518,7 @@ if fut_total > 0:
     fut_free = max(0.0, fut_total - total_margin_used)
     st.session_state.last_fut_total = fut_total
     st.session_state.last_fut_free = fut_free
-    
-    # DYNAMICZNE USTALANIE I BLOKOWANIE BAZY PO PEŁNYM OTWARCIU SESJI
+     
     if st.session_state.scanner_active and not st.session_state.session_baseline_locked:
         st.session_state.session_start_balance = fut_total
         if active_positions_count >= max_active_futures_positions:
@@ -589,7 +587,7 @@ with st.container(border=True):
 
     st.checkbox("🔵 Uruchom Bota Futures", key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
     if st.session_state.trend_bot_fut_active:
-        st.success("🟢 Bot Futures Aktywny")
+        st.success("🟢 Bot Futures Aktywny (Z filtrem trendu EMA 50)")
     else:
         st.info("🔴 Bot Futures Zatrzymany")
 
@@ -620,7 +618,7 @@ with st.container(border=True):
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI
+# LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI (Z ULEPSZONYM FILTREM TRENDU)
 # =====================================================================
 try:
     current_positions = []
@@ -630,13 +628,13 @@ try:
         except Exception as e:
             st.toast(f"Błąd pobierania pozycji: {e}", icon="⚠️")
 
-    # 0. GLOBALNY TP / SL CAŁEJ SESJI ( BAZOWANY NA BAZIE PO PEŁNYM OTWARCIU LUB BIEŻĄCEJ REGULACJI)
+    # 0. GLOBALNY TP / SL CAŁEJ SESJI
     if enable_global_session_limit and st.session_state.session_start_balance > 0 and fut_total > 0:
         session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
         if session_pnl_pct >= global_session_tp_pct or session_pnl_pct <= -global_session_sl_pct:
             is_tp = session_pnl_pct >= global_session_tp_pct
             reason = f"GLOBALNY SESJA TAKE-PROFIT (+{global_session_tp_pct}%)" if is_tp else f"GLOBALNY SESJA STOP-LOSS (-{global_session_sl_pct}%)"
-            
+             
             if futures_ex and current_positions:
                 for p in current_positions:
                     contracts = float(p.get("contracts", 0) or 0)
@@ -647,14 +645,14 @@ try:
                             futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
                         except Exception:
                             pass
-            
+             
             st.session_state.trade_history.insert(0, {
                 "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "Typ": f"{reason} [Wynik: {session_pnl_pct:+.2f}%]",
                 "Para": "WSZYSTKIE",
                 "Cena": f"{fut_total:.2f} USDT",
             })
-            
+             
             st.session_state.session_start_balance = fut_total
             st.session_state.session_baseline_locked = False
             st.session_state.active_trades = {}
@@ -697,7 +695,7 @@ try:
                     except Exception as order_err:
                         st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {order_err}")
 
-    # 2. WYJŚCIE Z POZYCJI (TREND EXIT - ODWRÓCENIE MACD)
+    # 2. WYJŚCIE Z POZYCJI (TREND EXIT - ODWRÓCENIE MACD LUB PRZEBICIE EMA 50)
     if futures_ex and current_positions:
         for pos in current_positions:
             contracts = float(pos.get("contracts", 0) or 0)
@@ -705,15 +703,19 @@ try:
                 sym = pos["symbol"]
                 side = str(pos.get("side", "")).lower()
                 try:
-                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=50)
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
                     if not f_ohlcv:
                         continue
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
 
                     f_macd = float(f_df["macd"].iloc[-1])
                     f_sig = float(f_df["signal"].iloc[-1])
+                    f_close = float(f_df["close"].iloc[-1])
+                    f_ema50 = float(f_df["ema50"].iloc[-1])
+
                     mark_price = float(pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0))
                     entry_price = float(pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0))
                     leverage = float(pos.get("leverage", 1) or 1)
@@ -728,12 +730,14 @@ try:
 
                     should_close_fut = False
                     close_reason_fut = ""
-                    if side == "long" and f_macd < f_sig:
+                    
+                    # Ulepszone warunki wyjścia: przecięcie MACD lub przejście ceny po złej stronie EMA 50
+                    if side == "long" and (f_macd < f_sig or f_close < f_ema50):
                         should_close_fut = True
-                        close_reason_fut = f"TREND EXIT LONG (Odwrócenie MACD) [{pnl_pct:+.2f}%]"
-                    elif side == "short" and f_macd > f_sig:
+                        close_reason_fut = f"TREND EXIT LONG (Zmiana trendu) [{pnl_pct:+.2f}%]"
+                    elif side == "short" and (f_macd > f_sig or f_close > f_ema50):
                         should_close_fut = True
-                        close_reason_fut = f"TREND EXIT SHORT (Odwrócenie MACD) [{pnl_pct:+.2f}%]"
+                        close_reason_fut = f"TREND EXIT SHORT (Zmiana trendu) [{pnl_pct:+.2f}%]"
 
                     if should_close_fut:
                         close_side = "sell" if side == "long" else "buy"
@@ -749,7 +753,7 @@ try:
                 except Exception:
                     pass
 
-    # 3. OTWIERANJE NOWYCH POZYCJI (TREND ENTRY)
+    # 3. OTWIERANJE NOWYCH POZYCJI (TREND ENTRY Z FILTREM EMA 50)
     if futures_ex and st.session_state.trend_bot_fut_active:
         try:
             fresh_pos = futures_ex.fetch_positions()
@@ -771,18 +775,30 @@ try:
                     if time.time() < st.session_state.signal_cooldown.get(tf_key, 0):
                         continue
                     try:
-                        f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=50)
+                        f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
                         time.sleep(0.02)
                         f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                         f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                         f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
+                        
                         f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                         f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                        f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
+
                         f_macd = float(f_df["macd"].iloc[-1])
                         f_sig = float(f_df["signal"].iloc[-1])
                         f_price = float(f_df["close"].iloc[-1])
+                        f_ema50 = float(f_df["ema50"].iloc[-1])
+
+                        # FILTR TRENDU: Otwieramy LONG tylko gdy cena > EMA50 i MACD > Signal. SHORT gdy cena < EMA50 i MACD < Signal.
+                        if f_macd > f_sig and f_price > f_ema50:
+                            side = "buy"
+                        elif f_macd < f_sig and f_price < f_ema50:
+                            side = "sell"
+                        else:
+                            continue # Odrzucamy fałszywe sygnały w trendzie bocznym
+
                         signal_strength = abs(f_macd - f_sig) / f_price
-                        side = "buy" if f_macd > f_sig else "sell"
                         evaluated_pairs.append({"symbol": sym, "price": f_price, "side": side, "strength": signal_strength, "volatility": f_vol})
                     except Exception:
                         continue
@@ -809,7 +825,7 @@ try:
 
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     tf_key = f"trend_bot_fut_{sym}"
-                    
+                     
                     budget = min(fut_free, max_single_trade_usdt)
                     if budget < MIN_FUT_TRADE:
                         break
@@ -835,7 +851,7 @@ try:
                     st.session_state.active_trades[sym] = {"entry_price": f_price, "side": side, "contracts": contracts, "leverage": bot_leverage}
                     st.session_state.trade_history.insert(0, {
                         "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Typ": f"BOT FUTURES {label}",
+                        "Typ": f"BOT FUTURES {label} (EMA+MACD)",
                         "Para": sym,
                         "Budżet": f"{budget:.2f} USDT",
                         "Dźwignia": f"{bot_leverage}x",
@@ -852,6 +868,7 @@ except Exception:
 # =====================================================================
 st.markdown("---")
 st.subheader("📈 Top Par Futures (Skaner i Status)")
+
 if futures_ex:
     try:
         f_tickers = futures_ex.fetch_tickers()
@@ -884,21 +901,32 @@ if futures_ex:
                 status_desc = "🟢 Aktywna (Pozycja Otwarta)"
             else:
                 try:
-                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=30)
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
                     time.sleep(0.01)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                     f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
+
                     f_macd = float(f_df["macd"].iloc[-1])
                     f_sig = float(f_df["signal"].iloc[-1])
-                    side_val = "LONG" if f_macd > f_sig else "SHORT"
+                    f_price = float(f_df["close"].iloc[-1])
+                    f_ema50 = float(f_df["ema50"].iloc[-1])
+
+                    if f_macd > f_sig and f_price > f_ema50:
+                        side_val = "LONG (Sygnał)"
+                    elif f_macd < f_sig and f_price < f_ema50:
+                        side_val = "SHORT (Sygnał)"
+                    else:
+                        side_val = "OCZEKIWANIE (Brak trendu)"
+
                     lev_num = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     lev_val = f"{lev_num}x"
                     margin_val = f"{prop_budget:.2f} USDT"
                     pnl_val = "Oczekiwanie na warunek"
-                    status_desc = "⚡ Sygnał Gotowy"
+                    status_desc = "⚡ Skaner Aktywny"
                 except Exception:
                     lev_val = f"{manual_leverage}x"
                     margin_val = f"{prop_budget:.2f} USDT"
@@ -908,7 +936,7 @@ if futures_ex:
                 "Cena": f"{float(t_data.get('last', 0)):.4f}",
                 "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
                 "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
-                "Strategia": "Futures Trend-Following (MACD + EMA)",
+                "Strategia": "Trend-Following (MACD + EMA 50)",
                 "Strona": side_val,
                 "Dźwignia": lev_val,
                 "Budżet": margin_val,
