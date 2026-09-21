@@ -106,6 +106,9 @@ stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID",
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
+# =====================================================================
+# INICJALIZACJA STANU SESSION STATE
+# =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_email" not in st.session_state:
@@ -126,6 +129,14 @@ if "session_start_balance" not in st.session_state:
     st.session_state.session_start_balance = 0.0
 if "session_baseline_locked" not in st.session_state:
     st.session_state.session_baseline_locked = False
+
+if "scanner_active" not in st.session_state:
+    st.session_state.scanner_active = False
+if "trend_bot_fut_active" not in st.session_state:
+    st.session_state.trend_bot_fut_active = False
+
+st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
+st.session_state.main_cb_trend_fut = st.session_state.trend_bot_fut_active
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -263,12 +274,8 @@ if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
 if "signal_cooldown" not in st.session_state:
     st.session_state.signal_cooldown = {}
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
 if "active_trades" not in st.session_state:
     st.session_state.active_trades = {}
-if "trend_bot_fut_active" not in st.session_state:
-    st.session_state.trend_bot_fut_active = False
 
 if "lang" not in st.session_state:
     st.session_state.lang = "Polski"
@@ -279,10 +286,10 @@ if st.session_state.lang == "Polski":
     with st.sidebar.expander("📖 Instrukcja Obsługi i Regulamin"):
         st.sidebar.markdown("""
         1. Jak zacząć:
-        1. Wpisz klucze API Bitget w panelu.
-        2. Opłać subskrypcję Stripe.
-        3. Wybierz pary walut i strategię.
-        4. Włącz auto-skanowanie / handel.
+        * Wpisz klucze API Bitget w panelu.
+        * Opłać subskrypcję Stripe.
+        * Wybierz pary walut i strategię.
+        * Włącz auto-skanowanie / handel.
          
         2. Regulamin:
         * Handel na giełdzie wiąże się z ryzykiem utraty kapitału.
@@ -292,10 +299,10 @@ else:
     with st.sidebar.expander("📖 User Manual & Terms"):
         st.sidebar.markdown("""
         1. Getting Started:
-        1. Enter Bitget API keys.
-        2. Complete Stripe subscription.
-        3. Choose pairs and strategy.
-        4. Enable auto-scanning / trading.
+        * Enter Bitget API keys.
+        * Complete Stripe subscription.
+        * Choose pairs and strategy.
+        * Enable auto-scanning / trading.
          
         2. Terms of Service:
         * Crypto trading involves high risk.
@@ -435,8 +442,6 @@ fut_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h"
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Pętla Skanera")
-if "sidebar_auto_scan_cb" not in st.session_state:
-    st.session_state.sidebar_auto_scan_cb = st.session_state.get("scanner_active", False)
 
 def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
@@ -459,7 +464,6 @@ if emergency_kill:
                     sym = p["symbol"]
                     side = "sell" if p.get("side") == "long" else "buy"
                     try:
-                        # Poprawka precyzji wolumenu dla giełdy przy Kill Switchu
                         contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
                         if contracts_prec <= 0:
                             contracts_prec = contracts
@@ -473,8 +477,6 @@ if emergency_kill:
             pass
     st.session_state.scanner_active = False
     st.session_state.trend_bot_fut_active = False
-    st.session_state.sidebar_auto_scan_cb = False
-    st.session_state.main_cb_trend_fut = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
@@ -584,9 +586,6 @@ st.markdown(f"""
 st.markdown("---")
 st.subheader("🥾 Panel Sterowania Botem Futures")
 with st.container(border=True):
-    if "main_cb_trend_fut" not in st.session_state:
-        st.session_state.main_cb_trend_fut = st.session_state.trend_bot_fut_active
-
     def toggle_main_trend_fut():
         st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
         if st.session_state.trend_bot_fut_active and fut_total > 0:
@@ -604,15 +603,12 @@ with st.container(border=True):
         if not st.session_state.scanner_active:
             if st.button("🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True):
                 st.session_state.scanner_active = True
-                st.session_state.sidebar_auto_scan_cb = True
                 st.session_state.session_baseline_locked = False
                 st.rerun()
         else:
             if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
                 st.session_state.scanner_active = False
                 st.session_state.trend_bot_fut_active = False
-                st.session_state.sidebar_auto_scan_cb = False
-                st.session_state.main_cb_trend_fut = False
                 st.session_state.session_start_balance = 0.0
                 st.session_state.session_baseline_locked = False
                 st.rerun()
@@ -625,7 +621,7 @@ with st.container(border=True):
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI (Z ULEPSZONYM FILTREM TRENDU)
+# LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI
 # =====================================================================
 try:
     current_positions = []
@@ -715,7 +711,7 @@ try:
                         except Exception as inner_err:
                             st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {inner_err}")
 
-    # 2. WYJŚCIE Z POZYCJI (TREND EXIT - ODWRÓCENIE MACD LUB PRZEBICIE EMA 50)
+    # 2. WYJŚCIE Z POZYCJI (TREND EXIT)
     if futures_ex and current_positions:
         for pos in current_positions:
             contracts = float(pos.get("contracts", 0) or 0)
@@ -779,7 +775,7 @@ try:
                 except Exception:
                     pass
 
-    # 3. OTWIERANJE NOWYCH POZYCJI (TREND ENTRY Z FILTREM EMA 50)
+    # 3. OTWIERANJE NOWYCH POZYCJI
     if futures_ex and st.session_state.trend_bot_fut_active:
         try:
             fresh_pos = futures_ex.fetch_positions()
@@ -889,104 +885,45 @@ except Exception:
     pass
 
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER FUTURES
+# WIDOK NA ŻYWO: SKANER I AKTYWNE POZYCJE
 # =====================================================================
 st.markdown("---")
-st.subheader("📈 Top Par Futures (Skaner i Status)")
+st.subheader("📊 Aktywne Pozycje Futures na Żywo")
 
 if futures_ex:
     try:
-        f_tickers = futures_ex.fetch_tickers()
-        pos_map = {p["symbol"]: p for p in current_positions}
-        top_fut_view = sorted(
-            [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym],
-            key=lambda x: f_tickers[x].get("quoteVolume", 0),
-            reverse=True,
-        )[:10]
-
-        fut_data_list = []
-        for sym in top_fut_view:
-            t_data = f_tickers.get(sym, {})
-            pos = pos_map.get(sym)
-            side_val = "-"
-            lev_val = "-"
-            margin_val = "-"
-            pnl_val = "-"
-            status_desc = "⏳ Oczekująca"
-            prop_budget = min(fut_free, max_single_trade_usdt)
-
-            if pos:
-                side_val = pos.get("side", "").upper()
-                lev_val = f"{float(pos.get('leverage', 1))}x"
-                notional = float(pos.get("notional", 0))
-                lev = float(pos.get("leverage", 1))
-                margin = notional / lev if lev > 0 else 0
-                margin_val = f"{margin:.2f} USDT" if margin > 0 else f"{float(pos.get('initialMargin', 0)):.2f} USDT"
-                pnl_val = f"{float(pos.get('unrealizedPnl', 0)):+.2f} USDT"
-                status_desc = "🟢 Aktywna (Pozycja Otwarta)"
-            else:
-                try:
-                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
-                    time.sleep(0.01)
-                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                    f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
-                    f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
-                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
-                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                    f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
-
-                    f_macd = float(f_df["macd"].iloc[-1])
-                    f_sig = float(f_df["signal"].iloc[-1])
-                    f_price = float(f_df["close"].iloc[-1])
-                    f_ema50 = float(f_df["ema50"].iloc[-1])
-
-                    if f_macd > f_sig and f_price > f_ema50:
-                        side_val = "LONG (Sygnał)"
-                    elif f_macd < f_sig and f_price < f_ema50:
-                        side_val = "SHORT (Sygnał)"
-                    else:
-                        side_val = "OCZEKIWANIE (Brak trendu)"
-
-                    lev_num = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
-                    lev_val = f"{lev_num}x"
-                    margin_val = f"{prop_budget:.2f} USDT"
-                    pnl_val = "Oczekiwanie na warunek"
-                    status_desc = "⚡ Skaner Aktywny"
-                except Exception:
-                    lev_val = f"{manual_leverage}x"
-                    margin_val = f"{prop_budget:.2f} USDT"
-
-            fut_data_list.append({
-                "Para": sym,
-                "Cena": f"{float(t_data.get('last', 0)):.4f}",
-                "Zmiana 24h": f"{float(t_data.get('percentage', 0)):+.2f}%",
-                "Wolumen (USDT)": f"{float(t_data.get('quoteVolume', 0)):,.0f}",
-                "Strategia": "Trend-Following (MACD + EMA 50)",
-                "Strona": side_val,
-                "Dźwignia": lev_val,
-                "Budżet": margin_val,
-                "Wynik PnL": pnl_val,
-                "Status Pozycji": status_desc,
-            })
-
-        if fut_data_list:
-            st.dataframe(pd.DataFrame(fut_data_list), use_container_width=True)
+        positions = futures_ex.fetch_positions()
+        active_pos = [p for p in positions if float(p.get("contracts", 0)) > 0]
+        if active_pos:
+            pos_data = []
+            for p in active_pos:
+                sym = p.get("symbol")
+                side = p.get("side")
+                contracts = p.get("contracts")
+                entry_price = p.get("entryPrice") or p.get("info", {}).get("entryPrice", 0)
+                mark_price = p.get("markPrice") or p.get("info", {}).get("markPrice", 0)
+                leverage = p.get("leverage", 1)
+                unrealized_pnl = p.get("unrealizedPnl", 0)
+                pos_data.append({
+                    "Para": sym,
+                    "Strona": str(side).upper(),
+                    "Kontrakty": contracts,
+                    "Cena Wejścia": f"{float(entry_price):.4f}",
+                    "Cena Mark": f"{float(mark_price):.4f}",
+                    "Dźwignia": f"{leverage}x",
+                    "PnL (USDT)": f"{float(unrealized_pnl):+.2f}"
+                })
+            st.dataframe(pd.DataFrame(pos_data), use_container_width=True)
         else:
-            st.info("Brak danych Futures do wyświetlenia.")
-    except Exception as scanner_err:
-        st.error(f"Błąd ładowania danych skanera: {scanner_err}")
+            st.info("Brak aktywnych pozycji Futures w tej sesji.")
+    except Exception as e:
+        st.error(f"Nie udało się pobrać pozycji: {e}")
 else:
-    st.info("Skonfiguruj klucze API Futures, aby widzieć skaner.")
+    st.warning("Skonfiguruj i zapisz klucze API Bitget w panelu bocznym, aby podglądać pozycje na żywo.")
 
 st.markdown("---")
-st.subheader("📜 Dziennik Transakcji")
+st.subheader("📜 Historia Transakcji Sesji")
 if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
-    st.info("Brak transakcji w tej sesji.")
-
-if st.session_state.scanner_active or st.session_state.trend_bot_fut_active:
-    try:
-        time.sleep(scan_interval)
-    except Exception:
-        pass
+    st.info("Brak zarejestrowanych transakcji w bieżącej sesji.")
