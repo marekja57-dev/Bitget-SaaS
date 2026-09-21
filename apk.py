@@ -1,11 +1,12 @@
 from datetime import datetime
-import hashlib
+import logging
 import json
 import os
 import sqlite3
 import time
 import ccxt
 import pandas as pd
+import numpy as np
 import streamlit as st
 import stripe
 
@@ -627,44 +628,147 @@ try:
     current_positions = []
     if futures_ex:
         try:
-            current_positions = futures_ex.fetch_positions()
+            # Pobranie otwartych pozycji z giełdy
+            raw_positions = futures_ex.fetch_positions(selected_symbols)
+            current_positions = [p for p in raw_positions if float(p.get('contracts', 0)) > 0]
         except Exception as e:
-            st.toast(f"Błąd pobierania pozycji: {e}", icon="⚠️")
+            st.toast(f"Błąd pobierania pozycji: {str(e)}", icon="⚠️")
+            logging.error(f"Błąd pobierania pozycji: {str(e)}")
 
-    # 0. GLOBALNY TP / SL CAŁEJ SESJI
-    if enable_global_session_limit and st.session_state.session_start_balance > 0 and fut_total > 0:
-        session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
-        if session_pnl_pct >= global_session_tp_pct or session_pnl_pct <= -global_session_sl_pct:
-            is_tp = session_pnl_pct >= global_session_tp_pct
-            reason = f"GLOBALNY SESJA TAKE-PROFIT (+{global_session_tp_pct}%)" if is_tp else f"GLOBALNY SESJA STOP-LOSS (-{global_session_sl_pct}%)"
-             
-            if futures_ex and current_positions:
-                for p in current_positions:
-                    contracts = float(p.get("contracts", 0) or 0)
-                    if contracts > 0:
-                        sym = p["symbol"]
-                        side = "sell" if p.get("side") == "long" else "buy"
-                        try:
-                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                            if contracts_prec <= 0:
-                                contracts_prec = contracts
-                            futures_ex.create_order(sym, 'market', side, contracts_prec, params={"reduceOnly": True})
-                        except Exception:
-                            try:
-                                futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
-                            except Exception:
-                                pass
-             
-            st.session_state.trade_history.insert(0, {
-                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "Typ": f"{reason} [Wynik: {session_pnl_pct:+.2f}%]",
-                "Para": "WSZYSTKIE",
-                "Cena": f"{fut_total:.2f} USDT",
-            })
-             
-            st.session_state.session_start_balance = fut_total
-            st.session_state.session_baseline_locked = False
-            st.session_state.active_trades = {}
+    # Panel boczny lub definicje do pętli
+    selected_symbols = st.sidebar.multiselect("Wybierz pary do handlu", ["BTC/USDT", "ETH/USDT", "SOL/USDT"], default=["BTC/USDT"])
+    timeframe = st.sidebar.selectbox("Wybierz interwał", ["15m", "1h", "4h"], index=1)
+
+    # Pobranie salda konta Futures
+    balance_info = {'free': 0.0, 'used': 0.0, 'total': 0.0}
+    if futures_ex:
+        try:
+            bal = futures_ex.fetch_balance()
+            balance_info = bal.get('USDT', {'free': 0.0, 'used': 0.0, 'total': 0.0})
+        except Exception as e:
+            logging.error(f"Błąd pobierania salda: {str(e)}")
+
+    total_balance = float(balance_info.get('total', 0.0))
+
+    # Pętla po wybranych przez Ciebie symbolach
+    for symbol in selected_symbols:
+        if not futures_ex:
+            continue
+
+        # 1. Pobranie danych rynkowych i wskaźników
+        raw_ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe, limit=150)
+        df = pd.DataFrame(raw_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        
+        if df.empty or len(df) < 50:
+            continue
+
+        # Obliczenia techniczne (EMA, MACD, ATR, ADX)
+        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+        df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
+        ema_12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema_26 = df['close'].ewm(span=26, adjust=False).mean()
+        df['MACD'] = ema_12 - ema_26
+        df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+        df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+
+        high_low = df['high'] - df['low']
+        high_close = np.abs(df['high'] - df['close'].shift())
+        low_close = np.abs(df['low'] - df['close'].shift())
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        df['ATR'] = true_range.rolling(window=14).mean()
+
+        plus_dm = df['high'].diff()
+        minus_dm = df['low'].diff()
+        plus_dm = np.where((plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0.0)
+        minus_dm = np.where((minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0.0)
+        tr14 = true_range.rolling(14).sum()
+        plus_di = 100 * (pd.Series(plus_dm).rolling(14).sum() / (tr14 + 1e-9))
+        minus_di = 100 * (pd.Series(minus_dm).rolling(14).sum() / (tr14 + 1e-9))
+        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-9)
+        df['ADX'] = dx.rolling(14).mean()
+        df = df.dropna()
+
+        if df.empty:
+            continue
+
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        # 2. Inteligentna analiza wolumenu i zmienności
+        ticker = futures_ex.fetch_ticker(symbol)
+        volume_24h_usdt = float(ticker.get('quoteVolume', 0))
+        
+        df['Volume_SMA20'] = df['volume'].rolling(20).mean()
+        vol_ratio = latest['volume'] / (df['Volume_SMA20'].iloc[-1] + 1e-9)
+        volatility_pct = (latest['ATR'] / latest['close']) * 100
+
+        # Dynamiczna korekta dźwigni oparta o bazową wartość z Twojego suwaka `leverage_val`
+        if volatility_pct < 1.0 and vol_ratio > 1.2:
+            dynamic_leverage = min(leverage_val * 2, 30)
+        elif volatility_pct > 3.0:
+            dynamic_leverage = max(1, int(leverage_val / 2))
+        else:
+            dynamic_leverage = leverage_val
+
+        # Filtr płynności (min. 5M USDT obrotu 24h) oraz ADX z Twojego suwaka `min_adx`
+        allow_trade = (volume_24h_usdt >= 5_000_000) and (vol_ratio >= 0.9) and (latest['ADX'] >= min_adx)
+
+        # 3. Zabezpieczenie przed duplikacją pozycji na tym samym symbolu
+        existing_pos = next((p for p in current_positions if p['symbol'] == symbol and float(p.get('contracts', 0)) > 0), None)
+        has_open_pos = bool(existing_pos)
+
+        # ŚCISTY LIMIT: Alokacja kapitału nigdy nie przekroczy wartości z Twojego suwaka `risk_per_trade`
+        allocated_usdt = total_balance * (risk_per_trade / 100.0)
+        if allocated_usdt < MIN_FUT_TRADE:
+            allocated_usdt = MIN_FUT_TRADE
+
+        # 4. Sygnały techniczne MACD i faktyczne wykonanie zlecenia rynkowego
+        bullish_cross = (prev['MACD'] < prev['MACD_Signal']) and (latest['MACD'] > latest['MACD_Signal'])
+        bearish_cross = (prev['MACD'] > prev['MACD_Signal']) and (latest['MACD'] < latest['MACD_Signal'])
+
+        if allow_trade:
+            try:
+                futures_ex.set_leverage(int(dynamic_leverage), symbol)
+            except Exception:
+                pass
+
+            if auto_trade_enabled and not has_open_pos:
+                price = latest['close']
+                notional = allocated_usdt * dynamic_leverage
+                amount = notional / price
+                try:
+                    futures_ex.load_markets()
+                    amount = float(futures_ex.amount_to_precision(symbol, amount))
+                except Exception:
+                    pass
+
+                if bullish_cross and latest['close'] > latest['EMA_50']:
+                    if amount > 0:
+                        order = futures_ex.create_order(
+                            symbol=symbol, 
+                            type='market', 
+                            side='buy', 
+                            amount=amount, 
+                            params={'marginMode': 'isolated'}
+                        )
+                        logging.info(f"Otwarto LONG dla {symbol}: {amount} kontraktów, dźwignia {dynamic_leverage}x, alokacja {allocated_usdt} USDT (Limit z suwaka: {risk_per_trade}%)")
+                        st.toast(f"Otwarto pozycję LONG dla {symbol}!", icon="🚀")
+                elif bearish_cross and latest['close'] < latest['EMA_50']:
+                    if amount > 0:
+                        order = futures_ex.create_order(
+                            symbol=symbol, 
+                            type='market', 
+                            side='sell', 
+                            amount=amount, 
+                            params={'marginMode': 'isolated'}
+                        )
+                        logging.info(f"Otwarto SHORT dla {symbol}: {amount} kontraktów, dźwignia {dynamic_leverage}x, alokacja {allocated_usdt} USDT (Limit z suwaka: {risk_per_trade}%)")
+                        st.toast(f"Otwarto pozycję SHORT dla {symbol}!", icon="🔻")
+
+except Exception as e:
+    logging.error(f"Błąd w głównej pętli handlowej: {str(e)}")
+    st.error(f"Błąd w pętli handlowej: {str(e)}")
 
     # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (Pojedyncza pozycja)
     if futures_ex and current_positions:
