@@ -468,18 +468,15 @@ if emergency_kill:
                         pass
         except Exception:
             pass
-    st.session_state.scanner_active = False
-    st.session_state.trend_bot_fut_active = False
-    st.session_state.sidebar_auto_scan_cb = False
-    st.session_state.main_cb_trend_fut = False
+      st.session_state.reset_requested = True
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
     st.session_state.session_baseline_locked = False
+
     st.success("🛑 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
     time.sleep(2)
     st.rerun()
-
 # =====================================================================
 # WYLICZENIE SALDA I POZYCJI FUTURES
 # =====================================================================
