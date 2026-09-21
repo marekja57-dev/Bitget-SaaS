@@ -638,7 +638,8 @@ try:
     # Panel boczny lub definicje do pętli
     selected_symbols = st.sidebar.multiselect("Wybierz pary do handlu", ["BTC/USDT", "ETH/USDT", "SOL/USDT"], default=["BTC/USDT"])
     timeframe = st.sidebar.selectbox("Wybierz interwał", ["15m", "1h", "4h"], index=1)
-
+    leverage_val = st.sidebar.number_input("Wybierz dźwignię", min_value=1, max_value=50, value=10)
+    
     # Pobranie salda konta Futures
     balance_info = {'free': 0.0, 'used': 0.0, 'total': 0.0}
     if futures_ex:
