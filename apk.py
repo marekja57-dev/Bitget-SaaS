@@ -468,7 +468,7 @@ if emergency_kill:
                         pass
         except Exception:
             pass
-      st.session_state.reset_requested = True
+    st.session_state.reset_requested = True
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
