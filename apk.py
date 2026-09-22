@@ -19,9 +19,9 @@ DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
 # =====================================================================
-# FUNKCJE POMOCNICZE (ŻELAZNY NADPIS ADMINISTRATORA)
+# FUNKCJE POMOCNICZE I ADMIN
 # =====================================================================
-ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl"]
+ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl", "admin@bot-bitget.pl"]
 
 def is_user_admin():
     email = str(st.session_state.get("user_email", "")).strip().lower()
@@ -107,48 +107,34 @@ if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 # =====================================================================
-# INICJALIZACJA STANU SESSION STATE
+# INICJALIZACJA STANÓW SESSION STATE
 # =====================================================================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "user_email" not in st.session_state:
-    st.session_state.user_email = ""
-if "is_admin" not in st.session_state:
-    st.session_state.is_admin = False
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "stripe_paid" not in st.session_state:
-    st.session_state.stripe_paid = False
-if "known_markets" not in st.session_state:
-    st.session_state.known_markets = set()
-if "last_fut_total" not in st.session_state:
-    st.session_state.last_fut_total = 0.0
-if "last_fut_free" not in st.session_state:
-    st.session_state.last_fut_free = 0.0
-if "session_start_balance" not in st.session_state:
-    st.session_state.session_start_balance = 0.0
-if "session_baseline_locked" not in st.session_state:
-    st.session_state.session_baseline_locked = False
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
-if "trend_bot_fut_active" not in st.session_state:
-    st.session_state.trend_bot_fut_active = False
-if "session_start_time" not in st.session_state:
-    st.session_state.session_start_time = datetime.now()
-if "trade_history" not in st.session_state:
-    st.session_state.trade_history = []
-if "signal_cooldown" not in st.session_state:
-    st.session_state.signal_cooldown = {}
-if "active_trades" not in st.session_state:
-    st.session_state.active_trades = {}
-if "lang" not in st.session_state:
-    st.session_state.lang = "Polski"
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
-if "secret_key" not in st.session_state:
-    st.session_state.secret_key = ""
-if "passphrase" not in st.session_state:
-    st.session_state.passphrase = ""
+defaults = {
+    "logged_in": False,
+    "user_email": "",
+    "is_admin": False,
+    "user_id": None,
+    "stripe_paid": False,
+    "known_markets": set(),
+    "last_fut_total": 0.0,
+    "last_fut_free": 0.0,
+    "session_start_balance": 0.0,
+    "session_baseline_locked": False,
+    "scanner_active": False,
+    "trend_bot_fut_active": False,
+    "session_start_time": datetime.now(),
+    "trade_history": [],
+    "signal_cooldown": {},
+    "active_trades": {},
+    "lang": "Polski",
+    "api_key": "",
+    "secret_key": "",
+    "passphrase": ""
+}
+
+for key, val in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
 
 st.session_state.sidebar_auto_scan_cb = st.session_state.scanner_active
 st.session_state.main_cb_trend_fut = st.session_state.trend_bot_fut_active
@@ -168,7 +154,7 @@ if st.query_params.get("success") == "true":
     st.query_params.clear()
 
 # =====================================================================
-# STYLIZACJA WYGLĄDU
+# STYLIZACJA WYGLĄDU (CSS)
 # =====================================================================
 st.markdown(
     """<style>
@@ -497,7 +483,7 @@ if emergency_kill:
     st.rerun()
 
 # ==========================================
-# WYLICZENIE SALDA, POZYCJI I METRYK FUTURES
+# WYLICZENIE SALDA I METRYK FUTURES
 # ==========================================
 fut_free, fut_total = 0.0, 0.0
 active_positions_count = 0
@@ -528,7 +514,6 @@ if futures_ex:
         active_positions_count = len(active_pos)
         total_pnl = sum(float(p.get("unrealizedPnl", 0)) for p in active_pos)
         total_unrealized_pnl = total_pnl
-       
         total_margin_used = sum(float(p.get("initialMargin") or p.get("margin", 0) or p.get("info", {}).get("margin", 0)) for p in active_pos)
         if total_margin_used > 0 and (fut_total - fut_free) < 1:
             fut_free = max(0.0, fut_total - total_margin_used)
@@ -539,7 +524,6 @@ if (not st.session_state.session_baseline_locked or st.session_state.session_sta
     st.session_state.session_start_balance = fut_total
     st.session_state.session_baseline_locked = True
 
-# Obliczenie czasu sesji
 start_val = st.session_state.get('session_start_time', datetime.now())
 try:
     if hasattr(start_val, 'timestamp'):
@@ -559,7 +543,7 @@ elif fut_total > 0:
     session_pnl_pct_display = (total_pnl / fut_total) * 100
 
 # =====================================================================
-# GŁÓWNE KAFELKI
+# GŁÓWNE KAFELKI METRYK
 # =====================================================================
 st.markdown(f"""
 <div class="metrics-row">
@@ -571,7 +555,7 @@ st.markdown(f"""
     <div class="metric-card">
         <div class="metric-label">📊 Wyniki Sesji (PnL %)</div>
         <div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
-        <div class="metric-delta">Pnl USDT: {total_unrealized_pnl:+.2f} USDT</div>
+        <div class="metric-delta">PnL USDT: {total_unrealized_pnl:+.2f} USDT</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">📈 Sloty Futures</div>
@@ -596,7 +580,7 @@ with st.container(border=True):
 
     st.checkbox("🔵 Uruchom Bota Futures", key="main_cb_trend_fut", on_change=toggle_main_trend_fut)
     if st.session_state.trend_bot_fut_active:
-        st.success("🟢 Bot Futures Aktywny (Z filtrem trendu EMA 50)")
+        st.success("🟢 Bot Futures Aktywny (Z filtrem trendu EMA 50 + MACD)")
     else:
         st.info("🔴 Bot Futures Zatrzymany")
 
@@ -622,184 +606,109 @@ with st.container(border=True):
             st.error("STATUS: ZATRZYMANY")
 
 MIN_FUT_TRADE = 5.0
-def calculate_dynamic_leverage(current_vol, base_leverage=10, max_leverage=20):
-    """
-    Autonomicznie dobiera dźwignię na podstawie zmienności dla każdej kryptowaluty.
-    """
-    try:
-        current_vol = float(current_vol)
-        if current_vol <= 0:
-            return base_leverage
-        target_vol = 2.0
-        calculated = base_leverage * (target_vol / current_vol)
-        return int(round(max(1.0, min(calculated, max_leverage))))
-    except Exception:
-        return 5
 
-# =====================================================================
+# =====================================
 # LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI
-# =====================================================================
+# =====================================
 try:
-    current_positions = []
     if futures_ex:
         try:
             current_positions = futures_ex.fetch_positions()
         except Exception as e:
             st.toast(f"Błąd pobierania pozycji: {e}", icon="⚠️")
+            current_positions = []
 
-    # 0. GLOBALNY TP / SL CAŁEJ SESJI
-    if enable_global_session_limit and st.session_state.session_start_balance > 0 and fut_total > 0:
-        session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
-        if session_pnl_pct >= global_session_tp_pct or session_pnl_pct <= -global_session_sl_pct:
-            is_tp = session_pnl_pct >= global_session_tp_pct
-            reason = f"GLOBALNY SESJA TAKE-PROFIT (+{global_session_tp_pct}%)" if is_tp else f"GLOBALNY SESJA STOP-LOSS (-{global_session_sl_pct}%)"
+        # 0. GLOBALNY TP / SL CAŁEJ SESJI
+        if enable_global_session_limit and st.session_state.session_start_balance:
+            session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
+            if session_pnl_pct >= global_session_tp_pct or session_pnl_pct <= -global_session_sl_pct:
+                st.session_state.scanner_active = False
+                st.session_state.session_baseline_locked = False
+                st.warning(f"Osiągnięto globalny limit sesji! PnL: {session_pnl_pct:.2f}%")
+                st.rerun()
 
-            if futures_ex and current_positions:
-                for p in current_positions:
-                    contracts = float(p.get("contracts", 0) or 0)
-                    if contracts > 0:
-                        sym = p["symbol"]
-                        side = "sell" if p.get("side") == "long" else "buy"
-                        try:
-                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                            if contracts_prec <= 0:
-                                contracts_prec = contracts
-                            futures_ex.create_order(sym, 'market', side, contracts_prec, params={"reduceOnly": True})
-                        except Exception:
-                            try:
-                                futures_ex.create_market_order(sym, side, contracts, params={"reduceOnly": True})
-                            except Exception:
-                                pass
-
-            st.session_state.trade_history.insert(0, {
-                "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "Typ": f"{reason} [Wynik: {session_pnl_pct:+.2f}%]",
-                "Para": "WSZYSTKIE",
-                "Cena": f"{fut_total:.2f} USDT",
-            })
-
-            st.session_state.session_start_balance = fut_total
-            st.session_state.session_baseline_locked = False
-            st.session_state.active_trades = {}
-
-    # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (Pojedyncza pozycja)
-    if futures_ex and current_positions:
-        for pos in current_positions:
-            contracts = float(pos.get("contracts", 0) or 0)
-            if contracts > 0:
-                sym = pos["symbol"]
-                side = str(pos.get("side", "")).lower()
-                mark_price = float(pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0))
-                entry_price = float(pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0))
-                leverage = float(pos.get("leverage", 1) or 1)
-                if entry_price > 0 and mark_price > 0:
-                    if side == "long":
-                        pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
-                    else:
-                        pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
-                else:
-                    pnl_pct = 0.0
-                is_emergency_sl = pnl_pct <= -25.0
-                is_custom_sl = enable_custom_sl_tp and (pnl_pct <= -float(custom_stop_loss_pct))
-                is_custom_tp = enable_custom_sl_tp and (pnl_pct >= float(custom_take_profit_pct))
-                if is_emergency_sl or is_custom_sl or is_custom_tp:
-                    close_side = "sell" if side == "long" else "buy"
-                    reason = "AWARYJNY SL (-25%)" if is_emergency_sl else ("STOP-LOSS" if is_custom_sl else "TAKE-PROFIT")
-                    try:
-                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                        if contracts_prec <= 0:
-                            contracts_prec = contracts
-                        futures_ex.create_order(sym, 'market', close_side, contracts_prec, params={"reduceOnly": True})
-                        st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
-                        st.session_state.trade_history.insert(0, {
-                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": f"{reason} ({pnl_pct:.2f}%)",
-                            "Para": sym,
-                            "Cena": f"{mark_price:.4f}",
-                        })
-                    except Exception as order_err:
-                        try:
-                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                            st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
-                        except Exception as inner_err:
-                            st.error(f"Nie udało się zamknąć pozycji {sym} (SL/TP): {inner_err}")
-
-    # 2. WYJŚCIE Z POZYCJI (TREND EXIT)
-    if futures_ex and current_positions:
-        for pos in current_positions:
-            contracts = float(pos.get("contracts", 0) or 0)
-            if contracts > 0:
-                sym = pos["symbol"]
-                side = str(pos.get("side", "")).lower()
-                try:
+        # 1. ZARZĄDZANIE AKTYWNYMI POZYCJAMI: ZAMYKANIE NA ODWRÓCENIE TRENDU
+        try:
+            for pos in current_positions:
+                contracts_amt = float(pos.get("contracts", 0))
+                if contracts_amt > 0:
+                    sym = pos["symbol"]
+                    pos_side = pos.get("side", "").lower() # 'long' lub 'short'
+                    
+                    # Pobieramy świece dla otwartej pozycji, aby sprawdzić czy trend się odwrócił
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
-                    if not f_ohlcv:
-                        continue
+                    time.sleep(0.02)
                     f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                     f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
-                    f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
-                    f_macd = float(f_df["macd"].iloc[-1])
-                    f_sig = float(f_df["signal"].iloc[-1])
-                    f_close = float(f_df["close"].iloc[-1])
-                    f_ema50 = float(f_df["ema50"].iloc[-1])
-                    mark_price = float(pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0))
-                    entry_price = float(pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0))
-                    leverage = float(pos.get("leverage", 1) or 1)
-                    if entry_price > 0 and mark_price > 0:
-                        if side == "long":
-                            pnl_pct = ((mark_price - entry_price) / entry_price) * 100 * leverage
-                        else:
-                            pnl_pct = ((entry_price - mark_price) / entry_price) * 100 * leverage
-                    else:
-                        pnl_pct = 0.0
-                    should_close_fut = False
-                    close_reason_fut = ""
-
-                    if side == "long" and (f_macd < f_sig or f_close < f_ema50):
-                        should_close_fut = True
-                        close_reason_fut = f"TREND EXIT LONG (Zmiana trendu) [{pnl_pct:+.2f}%]"
-                    elif side == "short" and (f_macd > f_sig or f_close > f_ema50):
-                        should_close_fut = True
-                        close_reason_fut = f"TREND EXIT SHORT (Zmiana trendu) [{pnl_pct:+.2f}%]"
-
-                    if should_close_fut:
-                        close_side = "sell" if side == "long" else "buy"
+                    
+                    macd_prev = float(f_df["macd"].iloc[-2])
+                    sig_prev = float(f_df["signal"].iloc[-2])
+                    macd_curr = float(f_df["macd"].iloc[-1])
+                    sig_curr = float(f_df["signal"].iloc[-1])
+                    f_price = float(f_df["close"].iloc[-1])
+                    
+                    # Warunki odwrócenia kierunku
+                    is_bearish_reversal = (macd_prev >= sig_prev) and (macd_curr < sig_curr) # Koniec Longa
+                    is_bullish_reversal = (macd_prev <= sig_prev) and (macd_curr > sig_curr) # Koniec Shorta
+                    
+                    should_close = False
+                    close_side = ""
+                    if pos_side == 'long' and is_bearish_reversal:
+                        should_close = True
+                        close_side = 'sell'
+                    elif pos_side == 'short' and is_bullish_reversal:
+                        should_close = True
+                        close_side = 'buy'
+                        
+                    if should_close:
                         try:
-                            contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
-                            if contracts_prec <= 0:
-                                contracts_prec = contracts
-                            futures_ex.create_order(sym, 'market', close_side, contracts_prec, params={"reduceOnly": True})
+                            # Zamknięcie pozycji z flagą reduceOnly
+                            futures_ex.create_order(sym, 'market', close_side, contracts_amt, {'reduceOnly': True})
                         except Exception:
-                            futures_ex.create_market_order(sym, close_side, contracts, params={"reduceOnly": True})
-                        st.session_state.active_trades.pop(sym, None)
-                        st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = time.time() + 300
+                            futures_ex.create_order(sym, 'market', close_side, contracts_amt)
+                            
                         st.session_state.trade_history.insert(0, {
                             "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Typ": close_reason_fut,
+                            "Typ": f"ZAMKNIĘCIE (Odwrócenie Trendu)",
                             "Para": sym,
-                            "Cena": f"{mark_price:.4f}",
+                            "Budżet": "-",
+                            "Dźwignia": "-",
+                            "Cena": f"{f_price:.4f}",
                         })
-                except Exception:
-                    pass
+        except Exception:
+            pass
 
-    # 3. OTWIERANJE NOWYCH POZYCJI
-    if futures_ex and st.session_state.trend_bot_fut_active:
+        # Odświeżenie listy aktywnych symboli po ewentualnych zamknięciach
+        active_symbols = []
         try:
             fresh_pos = futures_ex.fetch_positions()
             active_symbols = [p["symbol"] for p in fresh_pos if float(p.get("contracts", 0)) > 0]
         except Exception:
             active_symbols = [p["symbol"] for p in current_positions if float(p.get("contracts", 0)) > 0]
 
+        # 2. OTWIERANIE NOWYCH POZYCJI (START TRENDU + NAJWYŻSZY WOLUMEN)
         if len(active_symbols) < max_active_futures_positions and fut_free >= MIN_FUT_TRADE:
             try:
                 f_tickers = futures_ex.fetch_tickers()
-                best_fut_candidates = sorted(
-                    [sym for sym, data in f_tickers.items() if (sym.endswith(":USDT") or "/USDT:USDT" in sym) and "BULL" not in sym and "BEAR" not in sym and sym not in active_symbols],
-                    key=lambda x: f_tickers[x].get("quoteVolume", 0), reverse=True
-                )[:max_fut_scan_pairs]
+                
+                # Twardy filtr wolumenu (min. 50 mln USDT obrotu – odrzucamy środek)
+                min_required_volume = 50000000.0 
+                
+                top_volume_symbols = sorted(
+                    [
+                        sym for sym, data in f_tickers.items() 
+                        if (sym.endswith(":USDT") or "/USDT:USDT" in sym) 
+                        and "BULL" not in sym and "BEAR" not in sym 
+                        and sym not in active_symbols
+                        and float(data.get("quoteVolume") or 0) >= min_required_volume
+                    ],
+                    key=lambda x: float(f_tickers[x].get("quoteVolume") or 0), 
+                    reverse=True
+                )[:15]
+
                 evaluated_pairs = []
-                for sym in best_fut_candidates:
+                for sym in top_volume_symbols:
                     tf_key = f"trend_bot_fut_{sym}"
                     if time.time() < st.session_state.signal_cooldown.get(tf_key, 0):
                         continue
@@ -809,55 +718,76 @@ try:
                         f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                         f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                         f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
-                        dyn_leverage = calculate_dynamic_leverage(f_vol)
-                        try:
-                          futures_ex.set_leverage(dyn_leverage, sym)
-                        except Exception:
-                          pass
+
                         f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                         f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
                         f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
-                        f_macd = float(f_df["macd"].iloc[-1])
-                        f_sig = float(f_df["signal"].iloc[-1])
+                        
+                        macd_prev = float(f_df["macd"].iloc[-2])
+                        sig_prev = float(f_df["signal"].iloc[-2])
+                        macd_curr = float(f_df["macd"].iloc[-1])
+                        sig_curr = float(f_df["signal"].iloc[-1])
                         f_price = float(f_df["close"].iloc[-1])
                         f_ema50 = float(f_df["ema50"].iloc[-1])
-                        if f_macd > f_sig and f_price > f_ema50:
+
+                        # Świeży start trendu
+                        is_fresh_bullish = (macd_prev <= sig_prev) and (macd_curr > sig_curr) and (f_price > f_ema50)
+                        is_fresh_bearish = (macd_prev >= sig_prev) and (macd_curr < sig_curr) and (f_price < f_ema50)
+
+                        if is_fresh_bullish:
                             side = "buy"
-                        elif f_macd < f_sig and f_price < f_ema50:
+                        elif is_fresh_bearish:
                             side = "sell"
                         else:
                             continue
-                        signal_strength = abs(f_macd - f_sig) / f_price
-                        evaluated_pairs.append({"symbol": sym, "price": f_price, "side": side, "strength": signal_strength, "volatility": f_vol})
+
+                        q_vol = float(f_tickers[sym].get("quoteVolume") or 0)
+                        
+                        evaluated_pairs.append({
+                            "symbol": sym, 
+                            "price": f_price, 
+                            "side": side, 
+                            "volatility": f_vol,
+                            "quote_volume": q_vol
+                        })
                     except Exception:
                         continue
 
-                top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["strength"], reverse=True)[:max_active_futures_positions]
+                # Sortowanie po najwyższym wolumenie
+                top_signal_pairs = sorted(evaluated_pairs, key=lambda x: x["quote_volume"], reverse=True)[:max_active_futures_positions]
+                
                 for item in top_signal_pairs:
                     try:
                         check_pos = futures_ex.fetch_positions()
                         active_symbols_now = [p["symbol"] for p in check_pos if float(p.get("contracts", 0)) > 0]
                     except Exception:
                         active_symbols_now = active_symbols
+
                     if len(active_symbols_now) >= max_active_futures_positions:
                         break
+
                     sym = item["symbol"]
                     if sym in active_symbols_now:
                         continue
+
                     f_price = item["price"]
                     side = item["side"]
                     f_vol = item["volatility"]
                     label = "LONG" if side == "buy" else "SHORT"
+                    
+                    # Dynamiczna dźwignia i ryzyko dopasowane do zmienności waluty
                     bot_leverage = calculate_dynamic_leverage(sym, f_vol, leverage_mode, manual_leverage)
                     tf_key = f"trend_bot_fut_{sym}"
 
                     budget = min(fut_free, max_single_trade_usdt)
                     if budget < MIN_FUT_TRADE:
                         break
+
                     try:
                         futures_ex.set_leverage(bot_leverage, sym)
                     except Exception:
                         pass
+
                     contracts = (budget * bot_leverage) / f_price
                     try:
                         contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
@@ -869,6 +799,7 @@ try:
                             futures_ex.create_order(sym, 'market', side, float(contracts))
                         except Exception:
                             continue
+
                     st.session_state.signal_cooldown[tf_key] = time.time() + 300
                     st.session_state.active_trades[sym] = {
                         "entry_price": f_price,
@@ -876,11 +807,11 @@ try:
                         "contracts": contracts,
                         "leverage": bot_leverage,
                         "budget": budget,
-                        "signal_name": "EMA + MACD (Potwierdzony)"
+                        "signal_name": "Start Trendu (Crossover + Wolumen)"
                     }
                     st.session_state.trade_history.insert(0, {
                         "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Typ": f"BOT FUTURES {label} (EMA+MACD)",
+                        "Typ": f"BOT FUTURES {label} (Start Trendu)",
                         "Para": sym,
                         "Budżet": f"{budget:.2f} USDT",
                         "Dźwignia": f"{bot_leverage}x",
@@ -892,7 +823,7 @@ except Exception as e:
     logging.error(f"Błąd ogólny w logice bota: {e}")
 
 # =====================================================================
-# WIDOK NA ŻYWO: SKANER I AKTYWNE POZYCJE
+# WIDOK NA ŻYWO: TABELE AKTUALNYCH POZYCJI I HISTORIA
 # =====================================================================
 st.markdown("---")
 st.subheader("📊 Aktywne Pozycje Futures na Żywo")
@@ -901,7 +832,7 @@ if futures_ex:
     try:
         if hasattr(futures_ex, 'timeout'):
             futures_ex.timeout = 8000
-           
+
         positions = futures_ex.fetch_positions()
         active_pos = [p for p in positions if float(p.get("contracts", 0)) > 0]
         if active_pos:
@@ -916,20 +847,20 @@ if futures_ex:
                 mark_price = float(p.get("markPrice") or p.get("info", {}).get("markPrice", 0))
                 leverage = float(p.get("leverage") or p.get("info", {}).get("leverage", 1))
                 unrealized_pnl = float(p.get("unrealizedPnl", 0))
-               
+
                 active_trades_dict = st.session_state.get('active_trades', {})
                 trade_info = active_trades_dict.get(sym, {}) \
-                          or active_trades_dict.get(clean_sym, {}) \
-                          or active_trades_dict.get(base_coin, {})
-               
+                        or active_trades_dict.get(clean_sym, {}) \
+                        or active_trades_dict.get(base_coin, {})
+
                 budget_val = trade_info.get("budget") or trade_info.get("amount") or trade_info.get("allocated")
                 lev_num = leverage if leverage > 0 else 1.0
                 if not budget_val and contracts and entry_price:
                     budget_val = (float(contracts) * entry_price) / lev_num
-               
+
                 allocation_str = f"{float(budget_val):.2f} USDT" if budget_val else f"{(float(contracts or 0) * entry_price / lev_num):.2f} USDT"
                 signal_desc = trade_info.get("signal_name") or trade_info.get("Typ") or "EMA + MACD (Potwierdzony)"
-               
+
                 pos_data.append({
                     "Para": clean_sym,
                     "Strona": str(side).upper(),
@@ -949,6 +880,80 @@ if futures_ex:
         st.error(f"Błąd pobierania pozycji: {e}")
 else:
     st.warning("Skonfiguruj i zapisz klucze API Bitget w panelu bocznym, aby podglądać pozycje na żywo.")
+
+# =====================================
+# PANEL DIAGNOSTYCZNY SKANERA NA ŻYWO
+# =====================================
+st.subheader("🔎 Stan Skanera Rynku na Żywo (Analiza Wskaźników)")
+
+if st.session_state.get("scanner_active", False) and futures_ex:
+    with st.spinner("Analizowanie czołowych par rynkowych..."):
+        try:
+            f_tickers = futures_ex.fetch_tickers()
+            min_required_volume = 50000000.0 # Twój próg minimalnego wolumenu (50 mln USDT)
+            
+            # Pobieramy top 10 par o największym wolumenie
+            top_volume_symbols = sorted(
+                [
+                    sym for sym, data in f_tickers.items() 
+                    if (sym.endswith(":USDT") or "/USDT:USDT" in sym) 
+                    and "BULL" not in sym and "BEAR" not in sym 
+                    and float(data.get("quoteVolume") or 0) >= min_required_volume
+                ],
+                key=lambda x: float(f_tickers[x].get("quoteVolume") or 0), 
+                reverse=True
+            )[:10]
+
+            scanner_display_data = []
+            for sym in top_volume_symbols:
+                try:
+                    f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=60)
+                    f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
+                    f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
+                    f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
+
+                    macd_prev = float(f_df["macd"].iloc[-2])
+                    sig_prev = float(f_df["signal"].iloc[-2])
+                    macd_curr = float(f_df["macd"].iloc[-1])
+                    sig_curr = float(f_df["signal"].iloc[-1])
+                    f_price = float(f_df["close"].iloc[-1])
+                    f_ema50 = float(f_df["ema50"].iloc[-1])
+                    q_vol = float(f_tickers[sym].get("quoteVolume") or 0)
+
+                    # Określanie statusu dla Ciebie
+                    is_fresh_bull = (macd_prev <= sig_prev) and (macd_curr > sig_curr) and (f_price > f_ema50)
+                    is_fresh_bear = (macd_prev >= sig_prev) and (macd_curr < sig_curr) and (f_price < f_ema50)
+
+                    if is_fresh_bull:
+                        status = "🟢 ŚWIEŻY START (BUY / Long)"
+                    elif is_fresh_bear:
+                        status = "🔴 ŚWIEŻY START (SELL / Short)"
+                    elif macd_curr > sig_curr:
+                        status = "⏳ Trend wzrostowy trwał już wcześniej (Czekam na zwrot)"
+                    else:
+                        status = "⏳ Trend spadkowy trwał już wcześniej (Czekam na zwrot)"
+
+                    scanner_display_data.append({
+                        "Para": sym,
+                        "Cena": f"{f_price:.4f}",
+                        "Wolumen 24h": f"{q_vol:,.0f} USDT",
+                        "MACD vs Signal": f"{macd_curr:.4f} / {sig_curr:.4f}",
+                        "Status Skanera": status
+                    })
+                except Exception:
+                    continue
+
+            if scanner_display_data:
+                st.dataframe(pd.DataFrame(scanner_display_data), use_container_width=True)
+            else:
+                st.warning("Brak danych do wyświetlenia w skanerze.")
+        except Exception as e:
+            st.error(f"Błąd podczas pobierania danych skanera: {e}")
+else:
+     st.info("ℹ️ Skaner jest obecnie zatrzymany. Kliknij przycisk uruchomienia skanera powyżej, aby zobaczyć analizę na żywo.")
+
+
 
 # ==========================================
 # HISTORIA TRANSAKCJI SESJI
