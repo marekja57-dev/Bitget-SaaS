@@ -877,51 +877,65 @@ try:
       st.session_state.session_baseline_locked = False
       st.session_state.active_trades = {}
 
-  # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (Pojedyncza pozycja)
+ 
+      # 1. BEZPIECZNY STOP-LOSS / TAKE-PROFIT Z FILTREM POTWIERDZENIA (Odporny na szumy i knoty)
   if futures_ex and current_positions:
     for pos in current_positions:
       contracts = float(pos.get("contracts", 0) or 0)
       if contracts > 0:
         sym = pos["symbol"]
         side = str(pos.get("side", "")).lower()
-        mark_price = float(
-            pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0)
-        )
-        entry_price = float(
-            pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0)
-        )
-        leverage = float(pos.get("leverage", 1) or 1)
-        if entry_price > 0 and mark_price > 0:
-          if side == "long":
-            pnl_pct = (
-                ((mark_price - entry_price) / entry_price) * 100 * leverage
-            )
-          else:
-            pnl_pct = (
-                ((entry_price - mark_price) / entry_price) * 100 * leverage
-            )
-        else:
-          pnl_pct = 0.0
-        is_emergency_sl = pnl_pct <= -25.0
-        is_custom_sl = enable_custom_sl_tp and (
-            pnl_pct <= -float(custom_stop_loss_pct)
-        )
-        is_custom_tp = enable_custom_sl_tp and (
-            pnl_pct >= float(custom_take_profit_pct)
-        )
-        if is_emergency_sl or is_custom_sl or is_custom_tp:
-          close_side = "sell" if side == "long" else "buy"
-          reason = (
-              "AWARYJNY SL (-25%)"
-              if is_emergency_sl
-              else ("STOP-LOSS" if is_custom_sl else "TAKE-PROFIT")
+
+        try:
+          # Pobieramy świecę z wybranego interwału, aby sprawdzać faktyczny stan, a nie chwilowe szpilki ticków
+          f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=5)
+          if not f_ohlcv:
+            continue
+          f_close = float(f_ohlcv[-1][4]) # Cena zamknięcia ostatniej świecy
+          entry_price = float(
+              pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0)
           )
-          try:
+          leverage = float(pos.get("leverage", 1) or 1)
+
+          if entry_price > 0 and f_close > 0:
+            if side == "long":
+              pnl_pct = (
+                  ((f_close - entry_price) / entry_price) * 100 * leverage
+              )
+            else:
+              pnl_pct = (
+                  ((entry_price - f_close) / entry_price) * 100 * leverage
+              )
+          else:
+            pnl_pct = 0.0
+
+          # Definiujemy progi z Twoich suwaków
+          is_emergency_sl = pnl_pct <= -25.0
+          is_custom_sl = enable_custom_sl_tp and (
+              pnl_pct <= -float(custom_stop_loss_pct)
+          )
+          is_custom_tp = enable_custom_sl_tp and (
+              pnl_pct >= float(custom_take_profit_pct)
+          )
+
+          if is_emergency_sl or is_custom_sl or is_custom_tp:
+            close_side = "sell" if side == "long" else "buy"
+            reason = (
+                "AWARYJNY SL (-25%)"
+                if is_emergency_sl
+                else (
+                    f"STOP-LOSS (-{custom_stop_loss_pct}%)"
+                    if is_custom_sl
+                    else f"TAKE-PROFIT (+{custom_take_profit_pct}%)"
+                )
+            )
+
             contracts_prec = float(
                 futures_ex.amount_to_precision(sym, contracts)
             )
             if contracts_prec <= 0:
               contracts_prec = contracts
+
             futures_ex.create_order(
                 sym, "market", close_side, contracts_prec, params={"reduceOnly": True}
             )
@@ -932,21 +946,13 @@ try:
                 0,
                 {
                     "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Typ": f"{reason} ({pnl_pct:.2f}%)",
+                    "Typ": f"{reason} [{pnl_pct:+.2f}%]",
                     "Para": sym,
-                    "Cena": f"{mark_price:.4f}",
+                    "Cena": f"{f_close:.4f}",
                 },
             )
-          except Exception:
-            try:
-              futures_ex.create_market_order(
-                  sym, close_side, contracts, params={"reduceOnly": True}
-              )
-              st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = (
-                  time.time() + 300
-              )
-            except Exception:
-              pass
+        except Exception:
+          pass
 
   # 2. WYJŚCIE Z POZYCJI (TREND EXIT - UŻYWA WYBRANEGO `fut_tf`)
   if futures_ex and current_positions:
