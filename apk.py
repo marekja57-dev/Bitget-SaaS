@@ -622,6 +622,19 @@ with st.container(border=True):
             st.error("STATUS: ZATRZYMANY")
 
 MIN_FUT_TRADE = 5.0
+def calculate_dynamic_leverage(current_vol, base_leverage=10, max_leverage=20):
+    """
+    Autonomicznie dobiera dźwignię na podstawie zmienności dla każdej kryptowaluty.
+    """
+    try:
+        current_vol = float(current_vol)
+        if current_vol <= 0:
+            return base_leverage
+        target_vol = 2.0
+        calculated = base_leverage * (target_vol / current_vol)
+        return int(round(max(1.0, min(calculated, max_leverage))))
+    except Exception:
+        return 5
 
 # =====================================================================
 # LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI
@@ -796,7 +809,11 @@ try:
                         f_df = pd.DataFrame(f_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                         f_df["volatility_pct"] = ((f_df["high"] - f_df["low"]) / f_df["close"]).rolling(14).mean() * 100
                         f_vol = float(f_df["volatility_pct"].iloc[-1]) if not pd.isna(f_df["volatility_pct"].iloc[-1]) else 2.0
-
+                        dyn_leverage = calculate_dynamic_leverage(f_vol)
+                        try:
+                          futures_ex.set_leverage(dyn_leverage, sym)
+                        except Exception:
+                          pass
                         f_df["macd"] = f_df["close"].ewm(span=12, adjust=False).mean() - f_df["close"].ewm(span=26, adjust=False).mean()
                         f_df["signal"] = f_df["macd"].ewm(span=9, adjust=False).mean()
                         f_df["ema50"] = f_df["close"].ewm(span=50, adjust=False).mean()
