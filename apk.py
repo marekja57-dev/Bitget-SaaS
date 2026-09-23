@@ -24,11 +24,13 @@ STRIPE_CONFIG_FILE = "stripe_config.json"
 # =====================================================================
 ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl"]
 
+
 def is_user_admin():
     email = str(st.session_state.get("user_email", "")).strip().lower()
     if email in ADMIN_EMAILS:
         return True
     return bool(st.session_state.get("is_admin", False))
+
 
 def is_user_paid():
     email = str(st.session_state.get("user_email", "")).strip().lower()
@@ -36,12 +38,12 @@ def is_user_paid():
         return True
     return bool(st.session_state.get("stripe_paid", False))
 
+
 # =====================================================================
 # WSKAŹNIKI TECHNICZNE Z FILTREM ADX ORAZ TRENDU
 # =====================================================================
 def calculate_indicators(df, ema_period=50, adx_period=14):
     df["ema50"] = df["close"].ewm(span=ema_period, adjust=False).mean()
-
     exp1 = df["close"].ewm(span=12, adjust=False).mean()
     exp2 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = exp1 - exp2
@@ -58,7 +60,9 @@ def calculate_indicators(df, ema_period=50, adx_period=14):
     df["down_move"] = df["low"].shift(1) - df["low"]
 
     df["plus_dm"] = np.where(
-        (df["up_move"] > df["down_move"]) & (df["up_move"] > 0), df["up_move"], 0
+        (df["up_move"] > df["down_move"]) & (df["up_move"] > 0),
+        df["up_move"],
+        0,
     )
     df["minus_dm"] = np.where(
         (df["down_move"] > df["up_move"]) & (df["down_move"] > 0),
@@ -78,8 +82,8 @@ def calculate_indicators(df, ema_period=50, adx_period=14):
     di_sum = (df["plus_di"] + df["minus_di"]).replace(0, np.nan)
     df["dx"] = 100 * abs(df["plus_di"] - df["minus_di"]) / di_sum
     df["adx"] = df["dx"].ewm(alpha=alpha, adjust=False).mean()
-
     return df
+
 
 # =====================================================================
 # INICJALIZACJA BAZY DANYCH SQLITE
@@ -130,36 +134,45 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 init_db()
+
 
 def load_stripe_credentials():
     if os.path.exists(STRIPE_CONFIG_FILE):
         try:
             with open(STRIPE_CONFIG_FILE, "r") as f:
                 data = json.load(f)
-            return (
-                data.get("stripe_pk", ""),
-                data.get("stripe_sk", ""),
-                data.get("stripe_price_id", ""),
-            )
+                return (
+                    data.get("stripe_pk", ""),
+                    data.get("stripe_sk", ""),
+                    data.get("stripe_price_id", ""),
+                )
         except Exception:
             pass
     return "", "", ""
+
 
 def save_stripe_credentials(pk, sk, price_id):
     try:
         with open(STRIPE_CONFIG_FILE, "w") as f:
             json.dump(
-                {"stripe_pk": pk, "stripe_sk": sk, "stripe_price_id": price_id}, f
+                {"stripe_pk": pk, "stripe_sk": sk, "stripe_price_id": price_id},
+                f,
             )
         return True
     except Exception:
         return False
 
-saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credentials()
+
+saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = (
+    load_stripe_credentials()
+)
 stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
 stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
-stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "")
+stripe_price_id_val = saved_stripe_price_id or st.secrets.get(
+    "STRIPE_PRICE_ID", ""
+)
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
@@ -225,7 +238,9 @@ if st.query_params.get("success") == "true":
             conn.close()
         except Exception:
             pass
-    st.success("🎉 Płatność zakończona sukcesem! Twoja subskrypcja została aktywowana.")
+    st.success(
+        "🎉 Płatność zakończona sukcesem! Twoja subskrypcja została aktywowana."
+    )
     st.query_params.clear()
 
 # =====================================================================
@@ -233,53 +248,53 @@ if st.query_params.get("success") == "true":
 # =====================================================================
 st.markdown(
     """<style>
-    @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
-    .stApp { background-color: #0d0b0a; }
-    section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
-    .metrics-row {
-        display: flex;
-        flex-direction: row;
-        flex-wrap: nowrap !important;
-        gap: 14px;
-        width: 100%;
-        margin-bottom: 10px;
-    }
-    .metric-card {
-        flex: 1;
-        min-width: 0;
-        border: 2px solid #f3d57a;
-        border-radius: 10px;
-        padding: 12px 14px;
-        background-color: rgba(243, 213, 122, 0.03);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-    .metric-label {
-        font-family: 'Cinzel', serif;
-        color: #f3d57a;
-        font-size: 0.85rem;
-        font-weight: 700;
-        margin-bottom: 6px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .metric-value {
-        font-size: 1.4rem;
-        font-weight: bold;
-        color: #ffffff;
-        margin-bottom: 4px;
-    }
-    .metric-delta {
-        font-size: 0.75rem;
-        color: #e6c687;
-    }
-    .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
-    .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
-    .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
-    .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
-    div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; }
-    div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); }
-    </style>""",
+@import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
+.stApp { background-color: #0d0b0a; }
+section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
+.metrics-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap !important;
+    gap: 14px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+.metric-card {
+    flex: 1;
+    min-width: 0;
+    border: 2px solid #f3d57a;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background-color: rgba(243, 213, 122, 0.03);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.metric-label {
+    font-family: 'Cinzel', serif;
+    color: #f3d57a;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+.metric-delta {
+    font-size: 0.75rem;
+    color: #e6c687;
+}
+.hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
+.retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
+.retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
+.retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
+div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; }
+div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); }
+</style>""",
     unsafe_allow_html=True,
 )
 
@@ -289,14 +304,12 @@ st.markdown(
 if not st.session_state.logged_in:
     st.markdown(
         """<div class="hero-wrapper">
-              <div class="retro-ornate-frame">
-                  <div class="retro-vintage-title">BITGET FUTURES</div>
-                  <div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>""",
+<div class="retro-ornate-frame">
+<div class="retro-vintage-title">BITGET FUTURES</div>
+<div class="retro-subtitle">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>""",
         unsafe_allow_html=True,
     )
-
     tab_login, tab_register = st.tabs(["🔑 Zaloguj się", "📝 Załóż konto"])
-
     with tab_login:
         st.markdown(
             "<p style='color: #f3d57a; font-family: Cinzel, serif;'>Logowanie do Panelu Klienta</p>",
@@ -315,7 +328,9 @@ if not st.session_state.logged_in:
             conn.close()
             if user_row and user_row[2] == login_pass:
                 user_email_str = user_row[1].strip().lower()
-                is_admin_flag = True if user_email_str in ADMIN_EMAILS else bool(user_row[3])
+                is_admin_flag = (
+                    True if user_email_str in ADMIN_EMAILS else bool(user_row[3])
+                )
                 stripe_paid_flag = True if is_admin_flag else bool(user_row[4])
                 st.session_state.logged_in = True
                 st.session_state.user_id = user_row[0]
@@ -356,7 +371,6 @@ if not st.session_state.logged_in:
                     st.error("Ten e-mail jest już zarejestrowany.")
             else:
                 st.error("Wypełnij wszystkie pola.")
-
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
@@ -370,29 +384,30 @@ st.session_state.lang = st.sidebar.selectbox(
 if st.session_state.lang == "Polski":
     with st.sidebar.expander("📖 Instrukcja Obsługi i Regulamin"):
         st.sidebar.markdown("""
-            1. Jak zacząć:
-            * Wpisz klucze API Bitget w panelu.
-            * Opłać subskrypcję Stripe.
-            * Wybierz pary walut i strategię.
-            * Włącz auto-skanowanie / handel.
+1. Jak zacząć:
+* Wpisz klucze API Bitget w panelu.
+* Opłać subskrypcję Stripe.
+* Wybierz pary walut i strategię.
+* Włącz auto-skanowanie / handel.
 
-            2. Regulamin:
-            * Handel na giełdzie wiąże się z ryzykiem utraty kapitału.
-            * Narzędzie służy do celów analitycznych i automatyzacji.
-            """)
+2. Regulamin:
+* Handel na giełdzie wiąże się z ryzykiem utraty kapitału.
+* Narzędzie służy do celów analitycznych i automatyzacji.
+""")
 else:
     with st.sidebar.expander("📖 User Manual & Terms"):
         st.sidebar.markdown("""
-            1. Getting Started:
-            * Enter Bitget API keys.
-            * Complete Stripe subscription.
-            * Choose pairs and strategy.
-            * Enable auto-scanning / trading.
+1. Getting Started:
+* Enter Bitget API keys.
+* Complete Stripe subscription.
+* Choose pairs and strategy.
+* Enable auto-scanning / trading.
 
-            2. Terms of Service:
-            * Crypto trading involves high risk.
-            * Software is provided as an analytical tool.
-            """)
+2. Terms of Service:
+* Crypto trading involves high risk.
+* Software is provided as an analytical tool.
+""")
+
 
 def get_exchange():
     if not st.session_state.get("api_key"):
@@ -412,6 +427,7 @@ def get_exchange():
     except Exception:
         return None
 
+
 def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
     if "Ręczny" in mode:
         return int(manual_lev)
@@ -426,6 +442,7 @@ def calculate_dynamic_leverage(sym, current_vol, mode, manual_lev):
         return 8
     else:
         return 10
+
 
 # =====================================================================
 # PANEL BOCZNY (SIDEBAR)
@@ -447,6 +464,37 @@ if st.sidebar.button(
     st.session_state.secret_key = ""
     st.session_state.passphrase = ""
     st.rerun()
+st.sidebar.header("⚙️ Ustawienia Giełdy & API")
+
+# Wybór aktywnej giełdy z listy
+selected_exchange = st.sidebar.selectbox(
+    "Wybierz Giełdę:",
+    options=["Bitget", "Binance", "Bybit", "OKX"],
+    index=0 # Domyślnie Bitget
+)
+
+# Zapamiętujemy wybraną giełdę w stanie sesji
+st.session_state["selected_exchange"] = selected_exchange
+
+st.sidebar.markdown("---")
+st.sidebar.subheader(f"🔑 Klucze API ({selected_exchange})")
+
+# Dedykowane pola API dla wybranej giełdy
+api_key = st.sidebar.text_input(f"API Key ({selected_exchange}):", type="password", key=f"key_{selected_exchange}")
+api_secret = st.sidebar.text_input(f"API Secret ({selected_exchange}):", type="password", key=f"secret_{selected_exchange}")
+
+# Bitget i OKX wymagają dodatkowo hasła API (Passphrase)
+if selected_exchange in ["Bitget", "OKX"]:
+    api_passphrase = st.sidebar.text_input(f"Passphrase ({selected_exchange}):", type="password", key=f"pass_{selected_exchange}")
+else:
+    api_passphrase = ""
+
+if st.sidebar.button("Zapisz połączenie API"):
+    st.session_state["api_key"] = api_key
+    st.session_state["api_secret"] = api_secret
+    st.session_state["api_passphrase"] = api_passphrase
+    st.sidebar.success(f"Zapisano konfigurację dla {selected_exchange}!")
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💳 Strefa Subskrypcji")
@@ -454,9 +502,9 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success("Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
-st.sidebar.link_button(
-    "OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w0kecLiSfbc8c13qA88"
-)
+    st.sidebar.link_button(
+        "OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w0kecLiSfbc8c13qA88"
+    )
 
 if is_user_admin():
     with st.sidebar.expander("⚙️ Konfiguracja Stripe (Admin)"):
@@ -480,7 +528,9 @@ if is_user_admin():
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔑 Klucze API Bitget (Futures)")
 input_api = st.sidebar.text_input(
-    "Bitget API Key", value=st.session_state.get("api_key", ""), type="password"
+    "Bitget API Key",
+    value=st.session_state.get("api_key", ""),
+    type="password",
 )
 input_secret = st.sidebar.text_input(
     "Bitget Secret Key",
@@ -572,10 +622,12 @@ fut_tf = st.sidebar.selectbox(
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Pętla Skanera")
 
+
 def toggle_scanner_from_sidebar():
     st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
     if st.session_state.scanner_active:
         st.session_state.session_baseline_locked = False
+
 
 auto_scan_enabled = st.sidebar.checkbox(
     "Włącz auto-skanowanie w tle",
@@ -592,6 +644,7 @@ emergency_kill = st.sidebar.button(
     use_container_width=True,
     key="sidebar_kill_switch_btn",
 )
+
 if emergency_kill:
     if futures_ex:
         try:
@@ -602,11 +655,17 @@ if emergency_kill:
                     sym = p["symbol"]
                     side = "sell" if p.get("side") == "long" else "buy"
                     try:
-                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        contracts_prec = float(
+                            futures_ex.amount_to_precision(sym, contracts)
+                        )
                         if contracts_prec <= 0:
                             contracts_prec = contracts
                         futures_ex.create_order(
-                            sym, "market", side, contracts_prec, params={"reduceOnly": True}
+                            sym,
+                            "market",
+                            side,
+                            contracts_prec,
+                            params={"reduceOnly": True},
                         )
                     except Exception:
                         try:
@@ -659,7 +718,6 @@ if futures_ex:
         active_positions_count = len(active_pos)
         total_pnl = sum(float(p.get("unrealizedPnl", 0)) for p in active_pos)
         total_unrealized_pnl = total_pnl
-
         total_margin_used = sum(
             float(
                 p.get("initialMargin")
@@ -711,26 +769,26 @@ elif fut_total > 0:
 st.markdown(
     f"""
 <div class="metrics-row">
-    <div class="metric-card">
-        <div class="metric-label">🔵 Portfel Futures</div>
-        <div class="metric-value">{fut_total:.2f} USDT</div>
-        <div class="metric-delta">Wolne: {fut_free:.2f} USDT</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-label">📊 Wyniki Sesji (PnL %)</div>
-        <div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
-        <div class="metric-delta">Pnl USDT: {total_unrealized_pnl:+.2f} USDT</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-label">📈 Sloty Futures</div>
-        <div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
-        <div class="metric-delta">Aktywne / Maksymalne</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-label">⏱️ Czas Sesji</div>
-        <div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
-        <div class="metric-delta">Interwał: {scan_interval}s | Wykres: {fut_tf}</div>
-    </div>
+<div class="metric-card">
+<div class="metric-label">🔵 Portfel Futures</div>
+<div class="metric-value">{fut_total:.2f} USDT</div>
+<div class="metric-delta">Wolne: {fut_free:.2f} USDT</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">📊 Wyniki Sesji (PnL %)</div>
+<div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
+<div class="metric-delta">Pnl USDT: {total_unrealized_pnl:+.2f} USDT</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">📈 Sloty Futures</div>
+<div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
+<div class="metric-delta">Aktywne / Maksymalne</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">⏱️ Czas Sesji</div>
+<div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
+<div class="metric-delta">Interwał: {scan_interval}s | Wykres: {fut_tf}</div>
+</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -738,10 +796,13 @@ st.markdown(
 
 st.markdown("---")
 st.subheader("🥾 Panel Sterowania Botem Futures")
+
 with st.container(border=True):
 
     def toggle_main_trend_fut():
-        st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
+        st.session_state.trend_bot_fut_active = (
+            st.session_state.main_cb_trend_fut
+        )
         if st.session_state.trend_bot_fut_active and fut_total > 0:
             st.session_state.session_baseline_locked = False
 
@@ -750,6 +811,7 @@ with st.container(border=True):
         key="main_cb_trend_fut",
         on_change=toggle_main_trend_fut,
     )
+
     if st.session_state.trend_bot_fut_active:
         st.success(
             f"🟢 Bot Futures Aktywny (Timeframe: {fut_tf}, Filtr ADX >= 18 + EMA 50 + MACD Momentum)"
@@ -762,20 +824,25 @@ with st.container(border=True):
     with col_btn:
         if not st.session_state.scanner_active:
             if st.button(
-                "🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True
+                "🚀 Uruchom Skaner Non-Stop",
+                type="primary",
+                use_container_width=True,
             ):
                 st.session_state.scanner_active = True
                 st.session_state.session_baseline_locked = False
                 st.rerun()
         else:
             if st.button(
-                "⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True
+                "⏹️ Zatrzymaj Skaner",
+                type="secondary",
+                use_container_width=True,
             ):
                 st.session_state.scanner_active = False
                 st.session_state.trend_bot_fut_active = False
                 st.session_state.session_start_balance = 0.0
                 st.session_state.session_baseline_locked = False
                 st.rerun()
+
     with col_status:
         if st.session_state.scanner_active:
             st.success("STATUS: AKTYWNY")
@@ -815,7 +882,6 @@ try:
                 if is_tp
                 else f"GLOBALNY SESJA STOP-LOSS (-{global_session_sl_pct}%)"
             )
-
             if futures_ex and current_positions:
                 for p in current_positions:
                     contracts = float(p.get("contracts", 0) or 0)
@@ -842,7 +908,6 @@ try:
                                 )
                             except Exception:
                                 pass
-
             st.session_state.trade_history.insert(
                 0,
                 {
@@ -852,7 +917,6 @@ try:
                     "Cena": f"{fut_total:.2f} USDT",
                 },
             )
-
             st.session_state.session_start_balance = fut_total
             st.session_state.session_baseline_locked = False
             st.session_state.active_trades = {}
@@ -871,6 +935,7 @@ try:
                     pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0)
                 )
                 leverage = float(pos.get("leverage", 1) or 1)
+
                 if entry_price > 0 and mark_price > 0:
                     if side == "long":
                         pnl_pct = (((mark_price - entry_price) / entry_price) * 100 * leverage)
@@ -886,6 +951,7 @@ try:
                 is_custom_tp = enable_custom_sl_tp and (
                     pnl_pct >= float(custom_take_profit_pct)
                 )
+
                 if is_emergency_sl or is_custom_sl or is_custom_tp:
                     close_side = "sell" if side == "long" else "buy"
                     reason = (
@@ -900,11 +966,15 @@ try:
                         if contracts_prec <= 0:
                             contracts_prec = contracts
                         futures_ex.create_order(
-                            sym, "market", close_side, contracts_prec, params={"reduceOnly": True}
+                            sym,
+                            "market",
+                            close_side,
+                            contracts_prec,
+                            params={"reduceOnly": True},
                         )
                         st.session_state.active_trades.pop(sym, None)
                         st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = (
-                            time.time() + 300
+                            time.time() + 600
                         )
                         st.session_state.trade_history.insert(
                             0,
@@ -922,12 +992,12 @@ try:
                             )
                             st.session_state.active_trades.pop(sym, None)
                             st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = (
-                                time.time() + 300
+                                time.time() + 600
                             )
                         except Exception:
                             pass
 
-    # 2. WYJŚCIE Z POZYCJI (TREND EXIT)
+    # 2. WYJŚCIE Z POZYCJI (TREND EXIT NA ZAMKNIĘTEJ ŚWIECY - BRAK WHIPSAW)
     if futures_ex and current_positions:
         for pos in current_positions:
             contracts = float(pos.get("contracts", 0) or 0)
@@ -936,17 +1006,22 @@ try:
                 side = str(pos.get("side", "")).lower()
                 try:
                     f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=80)
-                    if not f_ohlcv:
+                    if not f_ohlcv or len(f_ohlcv) < 50:
                         continue
                     f_df = pd.DataFrame(
                         f_ohlcv,
                         columns=["timestamp", "open", "high", "low", "close", "volume"],
                     )
                     f_df = calculate_indicators(f_df)
-                    f_macd = float(f_df["macd"].iloc[-1])
-                    f_sig = float(f_df["signal"].iloc[-1])
-                    f_close = float(f_df["close"].iloc[-1])
-                    f_ema50 = float(f_df["ema50"].iloc[-1])
+
+                    # KLUCZOWA POPRAWKA: Analiza OSTATNIEJ ZAMKNIĘTEJ ŚWIECY (.iloc[-2]), nie na żywo
+                    last_closed = f_df.iloc[-2]
+
+                    f_macd = float(last_closed["macd"])
+                    f_sig = float(last_closed["signal"])
+                    f_close = float(last_closed["close"])
+                    f_ema50 = float(last_closed["ema50"])
+
                     mark_price = float(
                         pos.get("markPrice", 0) or pos.get("info", {}).get("markPrice", 0)
                     )
@@ -954,6 +1029,7 @@ try:
                         pos.get("entryPrice", 0) or pos.get("info", {}).get("entryPrice", 0)
                     )
                     leverage = float(pos.get("leverage", 1) or 1)
+
                     if entry_price > 0 and mark_price > 0:
                         if side == "long":
                             pnl_pct = (((mark_price - entry_price) / entry_price) * 100 * leverage)
@@ -965,10 +1041,11 @@ try:
                     should_close_fut = False
                     close_reason_fut = ""
 
-                    if side == "long" and (f_macd < f_sig or f_close < f_ema50):
+                    # Dodana poduszka 0.2% dla EMA50, żeby szum rynkowy nie wybijał pozycji
+                    if side == "long" and (f_macd < f_sig or f_close < (f_ema50 * 0.998)):
                         should_close_fut = True
                         close_reason_fut = f"TREND EXIT LONG ({fut_tf}) [{pnl_pct:+.2f}%]"
-                    elif side == "short" and (f_macd > f_sig or f_close > f_ema50):
+                    elif side == "short" and (f_macd > f_sig or f_close > (f_ema50 * 1.002)):
                         should_close_fut = True
                         close_reason_fut = f"TREND EXIT SHORT ({fut_tf}) [{pnl_pct:+.2f}%]"
 
@@ -992,8 +1069,9 @@ try:
                                 sym, close_side, contracts, params={"reduceOnly": True}
                             )
                         st.session_state.active_trades.pop(sym, None)
+                        # Wydłużony cooldown do 10 minut (600s), żeby nie otwierał znów od razu
                         st.session_state.signal_cooldown[f"trend_bot_fut_{sym}"] = (
-                            time.time() + 300
+                            time.time() + 600
                         )
                         st.session_state.trade_history.insert(
                             0,
@@ -1007,7 +1085,7 @@ try:
                 except Exception:
                     pass
 
-    # 3. OTWIERANJE NOWYCH POZYCJI (Z OPTYMALIZACJĄ MOMENTUM TRENDU)
+    # 3. OTWIERANJE NOWYCH POZYCJI (TYLKO ZAMKNIĘTE ŚWIECE + ADX)
     if futures_ex and st.session_state.trend_bot_fut_active:
         try:
             fresh_pos = futures_ex.fetch_positions()
@@ -1049,6 +1127,7 @@ try:
                     tf_key = f"trend_bot_fut_{sym}"
                     if time.time() < st.session_state.signal_cooldown.get(tf_key, 0):
                         continue
+
                     try:
                         f_ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=80)
                         time.sleep(0.02)
@@ -1060,33 +1139,37 @@ try:
                         if len(f_df) < 50:
                             continue
 
-                        last_row = f_df.iloc[-1]
-                        
+                        # Ostatnia w pełni zamknięta świeca oraz poprzednia
+                        last_closed = f_df.iloc[-2]
+                        prev_closed = f_df.iloc[-3]
+
                         f_vol = (
                             ((f_df["high"] - f_df["low"]) / f_df["close"])
                             .rolling(14)
                             .mean()
-                            .iloc[-1]
+                            .iloc[-2]
                             * 100
                         )
                         if pd.isna(f_vol):
                             f_vol = 2.0
 
-                        f_macd = float(last_row["macd"])
-                        f_sig = float(last_row["signal"])
-                        f_price = float(last_row["close"])
-                        f_ema50 = float(last_row["ema50"])
+                        f_macd = float(last_closed["macd"])
+                        f_sig = float(last_closed["signal"])
+                        f_price = float(last_closed["close"])
+                        f_ema50 = float(last_closed["ema50"])
                         f_adx = (
-                            float(last_row["adx"]) if not pd.isna(last_row["adx"]) else 0.0
+                            float(last_closed["adx"])
+                            if not pd.isna(last_closed["adx"])
+                            else 0.0
                         )
-                        f_hist = float(last_row["macd_hist"])
-                        prev_hist = float(f_df["macd_hist"].iloc[-2])
+                        f_hist = float(last_closed["macd_hist"])
+                        prev_hist = float(prev_closed["macd_hist"])
 
-                        # Optymalizacja filtra ADX (obniżony próg do 18 dla lepszej łowli trendów)
+                        # Filtr silnego trendu ADX
                         if f_adx < 18.0:
                             continue
 
-                        # Usprawniony warunek wejścia (Momentum + Trend, zamiast sztywnego pojedynczego crossu)
+                        # Sygnał po potwiedzeniu zamknięcia świecy
                         if (
                             f_macd > f_sig
                             and f_hist > prev_hist
@@ -1140,12 +1223,13 @@ try:
                     side = item["side"]
                     f_vol = item["volatility"]
                     label = "LONG" if side == "buy" else "SHORT"
+
                     bot_leverage = calculate_dynamic_leverage(
                         sym, f_vol, leverage_mode, manual_leverage
                     )
                     tf_key = f"trend_bot_fut_{sym}"
-
                     budget = min(fut_free, max_single_trade_usdt)
+
                     if budget < MIN_FUT_TRADE:
                         break
 
@@ -1155,7 +1239,7 @@ try:
                         pass
 
                     contracts = (budget * bot_leverage) / f_price
-                    
+
                     st.session_state.active_trades[sym] = {
                         "entry_price": f_price,
                         "side": side,
@@ -1164,7 +1248,7 @@ try:
                         "budget": budget,
                         "signal_name": f"ADX + Momentum MACD ({fut_tf})",
                     }
-                    st.session_state.signal_cooldown[tf_key] = time.time() + 300
+                    st.session_state.signal_cooldown[tf_key] = time.time() + 600
 
                     try:
                         contracts_prec = float(
@@ -1206,9 +1290,9 @@ if futures_ex:
     try:
         if hasattr(futures_ex, "timeout"):
             futures_ex.timeout = 8000
-
         positions = futures_ex.fetch_positions()
         active_pos = [p for p in positions if float(p.get("contracts", 0)) > 0]
+
         if active_pos:
             pos_data = []
             for p in active_pos:
@@ -1241,6 +1325,7 @@ if futures_ex:
                     or trade_info.get("allocated")
                 )
                 lev_num = leverage if leverage > 0 else 1.0
+
                 if not budget_val and contracts and entry_price:
                     budget_val = (float(contracts) * entry_price) / lev_num
 
@@ -1249,7 +1334,9 @@ if futures_ex:
                     if budget_val
                     else f"{(float(contracts or 0) * entry_price / lev_num):.2f} USDT"
                 )
-                signal_desc = trade_info.get("signal_name") or f"ADX + Momentum ({fut_tf})"
+                signal_desc = (
+                    trade_info.get("signal_name") or f"ADX + Momentum ({fut_tf})"
+                )
 
                 pos_data.append({
                     "Para": clean_sym,
@@ -1280,12 +1367,60 @@ else:
 # ==========================================
 st.markdown("---")
 st.subheader("📜 Historia Transakcji Sesji")
+
 trade_history = st.session_state.get("trade_history", [])
 if trade_history:
     df_history = pd.DataFrame(trade_history)
     st.dataframe(df_history, use_container_width=True)
 else:
     st.info("Brak zarejestrowanych transakcji w bieżącej sesji.")
+import streamlit as st
+import pandas as pd
+
+# ===================================
+# STAN SKANERA I MONITOROWANE RYNKI
+# ===================================
+st.markdown("---")
+st.subheader("📡 Stan Skanera i Monitorowane Rynki")
+
+# Pobieramy pary z sesji lub ustawiamy pełną listę do skanowania
+monitored_pairs = st.session_state.get("monitored_symbols_list", [])
+
+# Jeśli lista w sesji jest pusta, ładujemy pełną listę par dla skanera
+if not monitored_pairs:
+    try:
+        import ccxt
+        exchange = ccxt.bitget()
+        markets = exchange.fetch_markets()
+        # Pobieramy aktywne pary USDT Futures z Bitget
+        monitored_pairs = [m['symbol'] for m in markets if m.get('swap') and m.get('linear') and m.get('active')]
+    except Exception:
+        # Zestaw głównych par w przypadku braku połączenia z API
+        monitored_pairs = [
+            "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", 
+            "PEPE/USDT:USDT", "TRUMP/USDT:USDT", "HBAR/USDT:USDT", "FIL/USDT:USDT", 
+            "UNI/USDT:USDT", "DOGE/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT", 
+            "SUI/USDT:USDT", "NEAR/USDT:USDT", "LINK/USDT:USDT", "APT/USDT:USDT"
+        ]
+    st.session_state["monitored_symbols_list"] = monitored_pairs
+
+scanner_states = st.session_state.get("scanner_states", {})
+
+# Budowanie pełnej tabeli skanera
+scanner_data = []
+for pair in monitored_pairs:
+    state = scanner_states.get(pair, {})
+    scanner_data.append({
+        "Para Handlowa": pair,
+        "Interwał": state.get("interval", "1h"),
+        "Status Skanera": state.get("status", "🟡 Skanowanie / Oczekiwanie"),
+        "Stan Wskaźników": state.get("indicators", "Skaner analizuje trend (ADX / MACD)"),
+        "Planowana Alokacja": state.get("allocation", "45.00 USDT")
+    })
+
+df_scanner = pd.DataFrame(scanner_data)
+st.dataframe(df_scanner, use_container_width=True, hide_index=True)
+
 
 # =====================================================================
 # PĘTLA AUTOMATYCZNEGO ODŚWIEŻANIA (AUTO-REFRESH LOOP)
