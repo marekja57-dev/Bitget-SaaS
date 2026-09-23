@@ -827,7 +827,7 @@ with st.container(border=True):
 MIN_FUT_TRADE = 5.0
 
 # =====================================================================
-# LOGIKA BOTA I ZARZĄDZANIE POZYCJAMI Z OPTYMALIZACJĄ TRENDU
+# NAPRAWIONA LOGIKA BOTA, SKANERA I ZARZĄDZANIA POZYCJAMI
 # =====================================================================
 try:
     current_positions = []
@@ -895,6 +895,8 @@ try:
             st.session_state.session_start_balance = fut_total
             st.session_state.session_baseline_locked = False
             st.session_state.active_trades = {}
+            st.session_state.scanner_active = False
+            st.session_state.trend_bot_fut_active = False
 
     # 1. AWARYJNY STOP-LOSS / TAKE-PROFIT (Pojedyncza pozycja)
     if futures_ex and current_positions:
@@ -1063,5 +1065,139 @@ try:
                                 pass
                 except Exception:
                     pass
+
+    # 3. SKANER ORAZ AUTOMATYCZNY WEJŚCIOWY BOT FUTURES
+    if futures_ex and (st.session_state.trend_bot_fut_active or st.session_state.scanner_active):
+        if active_positions_count < max_active_futures_positions:
+            try:
+                tickers = futures_ex.fetch_tickers()
+                usdt_symbols = [
+                    s for s in tickers.keys()
+                    if s.endswith("/USDT:USDT") or (s.endswith("/USDT") and ":" not in s)
+                ]
+                usdt_symbols = sorted(
+                    usdt_symbols,
+                    key=lambda s: float(tickers[s].get("quoteVolume", 0) or 0),
+                    reverse=True
+                )
+                target_symbols = usdt_symbols[:max_fut_scan_pairs]
+
+                active_syms_set = {p["symbol"] for p in current_positions if float(p.get("contracts", 0)) > 0}
+
+                for sym in target_symbols:
+                    if sym in active_syms_set or active_positions_count >= max_active_futures_positions:
+                        continue
+                    
+                    cooldown_key = f"trend_bot_fut_{sym}"
+                    if time.time() < st.session_state.signal_cooldown.get(cooldown_key, 0):
+                        continue
+
+                    try:
+                        ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=fut_tf, limit=80)
+                        if not ohlcv or len(ohlcv) < 50:
+                            continue
+                        df = pd.DataFrame(
+                            ohlcv,
+                            columns=["timestamp", "open", "high", "low", "close", "volume"]
+                        )
+                        df = calculate_indicators(df)
+                        last_closed = df.iloc[-2]
+
+                        f_adx = float(last_closed["adx"])
+                        f_macd = float(last_closed["macd"])
+                        f_sig = float(last_closed["signal"])
+                        f_close = float(last_closed["close"])
+                        f_ema50 = float(last_closed["ema50"])
+                        current_vol = float(df["close"].pct_change().std() * np.sqrt(365) * 10)
+
+                        if f_adx >= 18 and st.session_state.trend_bot_fut_active:
+                            side = None
+                            if f_macd > f_sig and f_close > f_ema50:
+                                side = "buy"
+                            elif f_macd < f_sig and f_close < f_ema50:
+                                side = "sell"
+
+                            if side and fut_free >= MIN_FUT_TRADE:
+                                lev = calculate_dynamic_leverage(sym, current_vol, leverage_mode, manual_leverage)
+                                try:
+                                    try:
+                                        futures_ex.set_leverage(lev, sym)
+                                    except Exception:
+                                        pass
+                                    
+                                    try:
+                                        futures_ex.set_margin_mode("cross", sym)
+                                    except Exception:
+                                        pass
+
+                                    trade_usdt = min(max_single_trade_usdt, fut_free * 0.95)
+                                    mark_p = float(tickers[sym].get("last", f_close))
+                                    contracts_amt = (trade_usdt * lev) / mark_p
+                                    prec_contracts = float(futures_ex.amount_to_precision(sym, contracts_amt))
+                                    if prec_contracts <= 0:
+                                        prec_contracts = contracts_amt
+
+                                    futures_ex.create_order(sym, "market", side, prec_contracts)
+                                    st.session_state.signal_cooldown[cooldown_key] = time.time() + 300
+                                    active_positions_count += 1
+                                    st.session_state.trade_history.insert(
+                                        0,
+                                        {
+                                            "Czas": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                            "Typ": f"OTWARCIE {side.upper()} ({fut_tf}) [ADX:{f_adx:.1f}]",
+                                            "Para": sym,
+                                            "Cena": f"{mark_p:.4f}",
+                                        }
+                                    )
+                                    st.toast(f"Otwarto pozycję {side.upper()} na {sym}", icon="🚀")
+                                except Exception as err:
+                                    st.toast(f"Błąd otwierania {sym}: {err}", icon="❌")
+                    except Exception:
+                        continue
+            except Exception:
+                pass
 except Exception:
     pass
+
+# =====================================================================
+# HISTORIA TRANSAKCJI I PANEL KONTROLNY
+# =====================================================================
+st.markdown("---")
+col_hist, col_active = st.columns(2)
+
+with col_hist:
+    st.subheader("📜 Historia Transakcji Sesji")
+    if st.session_state.trade_history:
+        st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
+    else:
+        st.info("Brak zarejestrowanych transakcji w bieżącej sesji.")
+
+with col_active:
+    st.subheader("📊 Aktualne Pozycje Futures")
+    if futures_ex:
+        try:
+            positions = futures_ex.fetch_positions()
+            active_pos = [p for p in positions if float(p.get("contracts", 0)) > 0]
+            if active_pos:
+                pos_data = []
+                for p in active_pos:
+                    pos_data.append({
+                        "Para": p["symbol"],
+                        "Strona": p.get("side"),
+                        "Kontrakty": p.get("contracts"),
+                        "Wejście": p.get("entryPrice"),
+                        "Mark Price": p.get("markPrice"),
+                        "PnL (USDT)": float(p.get("unrealizedPnl", 0)),
+                        "Dźwignia": p.get("leverage")
+                    })
+                st.dataframe(pd.DataFrame(pos_data), use_container_width=True)
+            else:
+                st.info("Brak otwartych pozycji na giełdzie.")
+        except Exception:
+            st.info("Nie udało się pobrać pozycji z giełdy.")
+    else:
+        st.warning("Brak połączenia z API giełdy.")
+
+if st.session_state.scanner_active or st.session_state.trend_bot_fut_active:
+    time.sleep(scan_interval)
+    st.rerun()
