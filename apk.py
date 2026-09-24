@@ -679,7 +679,8 @@ if emergency_kill:
         except Exception:
             pass
     st.session_state.scanner_active = False
-    st.session_state.trend_bot_fut_active = False
+if 'trend_bot_ft_active' not in st.session_state:
+    st.session_state.trend_bot_ft_active = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
@@ -842,7 +843,8 @@ with st.container(border=True):
                 use_container_width=True,
             ):
                 st.session_state.scanner_active = False
-                st.session_state.trend_bot_fut_active = False
+            if 'trend_bot_ft_active' not in st.session_state:
+                st.session_state.trend_bot_ft_active = False 
                 st.session_state.session_start_balance = 0.0
                 st.session_state.session_baseline_locked = False
                 st.session_state.scanner_diagnostics = []
@@ -885,15 +887,35 @@ def get_smart_leverage(adx_val, exchange_limit, preferred_max=20):
 # POBRANIE PAR, POZYCJI I SILNIK TRANSAKCYJNY
 # ==========================================
 try:
-    if futures_ex and hasattr(futures_ex, 'load_markets'):
-        futures_ex.load_markets()
-    selected_symbols = [s for s in futures_ex.symbols if s.endswith('/USDT:USDT') or s.endswith(':USDT')] if futures_ex and hasattr(futures_ex, 'symbols') else []
-    if not selected_symbols and futures_ex and hasattr(futures_ex, 'symbols'):
-        selected_symbols = futures_ex.symbols[:max_fut_scan_pairs]
-    else:
-        selected_symbols = selected_symbols[:max_fut_scan_pairs]
-except Exception:
+  if futures_ex and hasattr(futures_ex, 'load_markets'):
+    futures_ex.load_markets()
+
+    # Pobieramy tickery z giełdy używając poprawnej zmiennej futures_ex
+    tickers = futures_ex.fetch_tickers()
+
+    # Minimalny dobowy wolumen w USDT (np. 5 milionów USDT)
+    MIN_VOLUME_USDT = 5_000_000
+
+    filtered_symbols = []
+    for symbol, ticker in tickers.items():
+      # Sprawdzamy kontrakty USDT-M i ich wolumen
+      if symbol.endswith('/USDT:USDT') or symbol.endswith('/USDT'):
+        quote_volume = ticker.get('quoteVolume', 0) or 0
+        if quote_volume >= MIN_VOLUME_USDT:
+          filtered_symbols.append(symbol)
+
+    # Sortujemy od największego wolumenu i ograniczamy do limitu skanera
+    filtered_symbols = sorted(
+        filtered_symbols,
+        key=lambda s: tickers.get(s, {}).get('quoteVolume', 0) or 0,
+        reverse=True,
+    )
+
+    selected_symbols = filtered_symbols[:max_fut_scan_pairs]
+  else:
     selected_symbols = []
+except Exception:
+  selected_symbols = []
 
 existing_positions_map = {}
 try:
