@@ -432,9 +432,9 @@ def get_exchange():
     except Exception:
         return None
 
-def calculate_dynamic_leverage(current_vol, mode, manual_lev):
+def calculate_dynamic_leverage(current_vol, mode, manual_leverage):
     if "Ręczny" in mode:
-        return int(manual_lev)
+        return int(manual_leverage)
     if current_vol > 4.0:
         return 2
     elif current_vol > 3.0:
@@ -452,18 +452,92 @@ def calculate_dynamic_allocation(total_balance, max_positions, max_single):
     allocated = total_balance / max(1, max_positions)
     return min(max_single, max(5.0, allocated))
 
-# =====================================================================
-# PANEL BOCZNY (SIDEBAR)
-# =====================================================================
-st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
-if is_user_admin():
+import time
+import streamlit as st
+
+# ==========================================
+# FUNKCJA MONITORUJĄCA I WYKONUJĄCA SL / TP
+# ==========================================
+def check_and_execute_sl_tp(exchange):
+    """
+    Sprawdza otwarte pozycje na giełdzie i porównuje ich wynik procentowy 
+    z ustawionym Stop-Loss (SL) oraz Take-Profit (TP).
+    """
+    if not exchange:
+        return
+
+    try:
+        positions = exchange.fetch_positions()
+        for p in positions:
+            contracts = float(p.get("contracts", 0))
+            if contracts <= 0:
+                continue
+                
+            sym = p["symbol"]
+            side = p.get("side") # 'long' lub 'short'
+            entry_price = float(p.get("entryPrice", 0) or 0)
+            mark_price = float(p.get("markPrice", 0) or 0)
+            
+            if entry_price <= 0 or mark_price <= 0:
+                continue
+
+            # Obliczanie aktualnego zysku/straty w %
+            if side == "long":
+                pnl_pct = ((mark_price - entry_price) / entry_price) * 100
+            else:  
+                pnl_pct = ((entry_price - mark_price) / entry_price) * 100
+
+            # Pobieranie ustawień z sesji Streamlita
+            enable_sl_tp = st.session_state.get("enable_custom_sl_tp", False)
+            sl_pct = st.session_state.get("custom_stop_loss_pct", 5)     
+            tp_pct = st.session_state.get("custom_take_profit_pct", 15)  
+
+            if not enable_sl_tp:
+                continue
+
+            close_reason = None
+            if pnl_pct <= -sl_pct:
+                close_reason = f"STOP-LOSS (Strata: {pnl_pct:.2f}% <= -{sl_pct}%)"
+            elif pnl_pct >= tp_pct:
+                close_reason = f"TAKE-PROFIT (Zysk: {pnl_pct:.2f}% >= {tp_pct}%)"
+
+            if close_reason:
+                close_side = "sell" if side == "long" else "buy"
+                try:
+                    amount_prec = float(exchange.amount_to_precision(sym, contracts))
+                    if amount_prec > 0:
+                        try:
+                            exchange.create_order(
+                                symbol=sym,
+                                type="market",
+                                side=close_side,
+                                amount=amount_prec,
+                                params={"reduceOnly": True}
+                            )
+                        except Exception:
+                            exchange.create_market_order(
+                                symbol=sym,
+                                side=close_side,
+                                amount=amount_prec,
+                                params={"reduceOnly": True}
+                            )
+                        st.warning(f"🚨 AUTOMATYCZNE ZAMKNIĘCIE [{sym}]: {close_reason}")
+                except Exception as ex_order:
+                    st.error(f"Błąd wykonania SL/TP dla {sym}: {ex_order}")
+    except Exception:
+        pass
+
+
+# ==========================================
+# PANEL BOCZNY (SIDEBAR) + INICJALIZACJA SL/TP
+# ==========================================
+st.sidebar.markdown(f"### 👤 {st.session_state.get('user_email', '')}")
+if 'is_user_admin' in globals() and is_user_admin():
     st.sidebar.markdown("**Rola: Administrator**")
 else:
     st.sidebar.markdown("**Rola: Klient SaaS**")
 
-if st.sidebar.button(
-    "🚪 WYLOGUJ SIĘ", use_container_width=True, key="sidebar_wyloguj_btn"
-):
+if st.sidebar.button("🚪 WYLOGUJ SIĘ", use_container_width=True, key="sidebar_wyloguj_btn"):
     st.session_state.logged_in = False
     st.session_state.user_email = ""
     st.session_state.is_admin = False
@@ -474,11 +548,11 @@ if st.sidebar.button(
     st.rerun()
 
 st.sidebar.header("⚙️ Ustawienia Giełdy & API")
-
 selected_exchange = st.sidebar.selectbox(
     "Wybierz Giełdę:",
     options=["Bitget", "Binance", "Bybit", "OKX"],
     index=0,
+    key="sidebar_selected_exchange_sb"
 )
 st.session_state["selected_exchange"] = selected_exchange
 
@@ -489,13 +563,13 @@ input_api = st.sidebar.text_input(
     f"API Key ({selected_exchange}):",
     value=st.session_state.get("api_key", ""),
     type="password",
-    key=f"key_{selected_exchange}",
+    key=f"key_{selected_exchange}"
 )
 input_secret = st.sidebar.text_input(
     f"API Secret ({selected_exchange}):",
     value=st.session_state.get("secret_key", ""),
     type="password",
-    key=f"secret_{selected_exchange}",
+    key=f"secret_{selected_exchange}"
 )
 
 if selected_exchange in ["Bitget", "OKX"]:
@@ -503,36 +577,41 @@ if selected_exchange in ["Bitget", "OKX"]:
         f"Passphrase ({selected_exchange}):",
         value=st.session_state.get("passphrase", ""),
         type="password",
-        key=f"pass_{selected_exchange}",
+        key=f"pass_{selected_exchange}"
     )
 else:
     input_pass = ""
 
-if st.sidebar.button(
-    "💾 ZAPISZ MOJE KLUCZE",
-    use_container_width=True,
-    key="sidebar_zapisz_klucze_btn",
-):
+if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True, key="sidebar_zapisz_klucze_btn"):
     if input_api and input_secret:
         st.session_state.api_key = input_api
         st.session_state.secret_key = input_secret
         st.session_state.passphrase = input_pass
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
-            (input_api, input_secret, input_pass, st.session_state.user_id),
-        )
-        conn.commit()
-        conn.close()
+        
+        try:
+            import sqlite3
+            conn = sqlite3.connect("trading.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
+                (input_api, input_secret, input_pass, st.session_state.get("user_id"))
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
         st.success(f"Zapisano klucze dla {selected_exchange}!")
         st.rerun()
     else:
         st.error("Wypełnij wymagane pola kluczy.")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💳 Strefa Subskrypcji")
-if is_user_admin() or is_user_paid():
+st.sidebar.markdown("### 🛡️ Strefa Subskrypcji")
+is_admin_flag = is_user_admin() if 'is_user_admin' in globals() else False
+is_paid_flag = is_user_paid() if 'is_user_paid' in globals() else False
+
+if is_admin_flag or is_paid_flag:
     st.sidebar.success("Subskrypcja aktywna (Dostęp Pełny)")
 else:
     st.sidebar.warning("⚠️ Brak aktywnej subskrypcji")
@@ -540,27 +619,22 @@ else:
         "OPŁAĆ DOSTĘP (49 PLN)", "https://buy.stripe.com/00w0kecLiSfbc8c13qA88"
     )
 
-if is_user_admin():
+if is_admin_flag:
     with st.sidebar.expander("⚙️ Konfiguracja Stripe (Admin)"):
-        input_s_pk = st.text_input(
-            "Stripe Publishable Key", value=stripe_pk_val, type="password"
-        )
-        input_s_sk = st.text_input(
-            "Stripe Secret Key", value=stripe_sk_val, type="password"
-        )
-        input_s_price = st.text_input(
-            "Stripe Price ID (np. price_...)", value=stripe_price_id_val
-        )
-        if st.button("💾 Zapisz Konfigurację Stripe"):
-            if save_stripe_credentials(input_s_pk, input_s_sk, input_s_price):
-                st.success("Zapisano dane Stripe! Odśwież stronę.")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("Błąd zapisu pliku konfiguracyjnego.")
+        input_s_pk = st.text_input("Stripe Publishable Key", value=str(st.session_state.get("stripe_pk_val", "")), type="password", key="admin_s_pk")
+        input_s_sk = st.text_input("Stripe Secret Key", value=str(st.session_state.get("stripe_sk_val", "")), type="password", key="admin_s_sk")
+        input_s_price = st.text_input("Stripe Price ID (np. price_...)", value=str(st.session_state.get("stripe_price_id_val", "")), key="admin_s_price")
+        if st.button("Zapisz Konfigurację Stripe", key="admin_save_stripe"):
+            try:
+                if 'save_stripe_credentials' in globals():
+                    save_stripe_credentials(input_s_pk, input_s_sk, input_s_price)
+                st.success("Zapisano dane Stripe pomyślnie.")
+            except Exception:
+                st.error("Błąd zapisu.")
 
-futures_ex = get_exchange()
-if futures_ex and not st.session_state.known_markets:
+# Inicjalizacja giełdy
+futures_ex = get_exchange() if 'get_exchange' in globals() else None
+if futures_ex and not st.session_state.get("known_markets", False):
     try:
         markets = futures_ex.load_markets()
         st.session_state.known_markets = set(markets.keys())
@@ -569,59 +643,45 @@ if futures_ex and not st.session_state.known_markets:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💰 Kapitał i Ryzyko")
-max_single_trade_usdt = st.sidebar.number_input(
-    "Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0
-)
-max_active_futures_positions = st.sidebar.slider(
-    "Maks. aktywne pozycje Futures", 1, 20, 5
-)
+max_single_trade_usdt = st.sidebar.number_input("Maksymalnie USDT na 1 pozycję", 5.0, 5000.0, 50.0, 5.0, key="sb_max_single_trade")
+max_active_futures_positions = st.sidebar.slider("Maks. aktywne pozycje Futures", 1, 20, 5, key="sb_max_active_pos")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛡️ Awaryjne SL / TP (Pojedyncza pozycja)")
-enable_custom_sl_tp = st.sidebar.checkbox(
-    "Włącz awaryjne limity SL / TP (%)", value=False
-)
-custom_stop_loss_pct = st.sidebar.slider(
-    "Maksymalna strata (Stop-Loss %)", 1, 50, 5
-)
-custom_take_profit_pct = st.sidebar.slider(
-    "Docelowy zysk (Take-Profit %)", 1, 200, 15
-)
+st.sidebar.markdown("### 🚨 Awaryjne SL / TP (Pojedyncza pozycja)")
+
+# KLUCZOWE: Zapis do session_state, żeby funkcja wyżej mogła to odczytać
+enable_custom_sl_tp = st.sidebar.checkbox("Włącz awaryjne limity SL / TP (%)", value=False, key="enable_custom_sl_tp")
+custom_stop_loss_pct = st.sidebar.slider("Maksymalna strata (Stop-Loss %)", 1, 50, 5, key="custom_stop_loss_pct")
+custom_take_profit_pct = st.sidebar.slider("Docelowy zysk (Take-Profit %)", 1, 200, 15, key="custom_take_profit_pct")
+
+# AUTOMATYCZNE WYWOŁANIE SPRAWDZANIA SL/TP W KAŻDYM ODŚWIŻENIU BOCZNYM / PĘTLI
+if futures_ex and enable_custom_sl_tp:
+    check_and_execute_sl_tp(futures_ex)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🌐 Globalny TP / SL Całej Sesji")
-enable_global_session_limit = st.sidebar.checkbox(
-    "Włącz globalny limit sesji (%)", value=True
-)
-global_session_tp_pct = st.sidebar.slider(
-    "Globalny zysk sesji (Take-Profit %)", 1, 100, 10
-)
-global_session_sl_pct = st.sidebar.slider(
-    "Globalna strata sesji (Stop-Loss %)", 1, 50, 5
-)
+enable_global_session_limit = st.sidebar.checkbox("Włącz globalny limit sesji (%)", value=True, key="sb_enable_global_lim")
+global_session_tp_pct = st.sidebar.slider("Globalny zysk sesji (Take-Profit %)", 1, 100, 10, key="sb_glb_tp")
+global_session_sl_pct = st.sidebar.slider("Globalna strata sesji (Stop-Loss %)", 1, 50, 5, key="sb_glb_sl")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
-leverage_mode = st.sidebar.radio(
-    "Tryb Dźwigni", ["🤖 Autonomiczny (max 10x)", "🛡️ Ręczny"]
-)
-manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3)
+leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["Autonomiczny (max 10x)", "Ręczny"], key="sb_lev_mode")
+manual_leverrage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⏱️ Timeframe Analizy")
-fut_tf = st.sidebar.selectbox(
-    "Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4
-)
+fut_tf = st.sidebar.selectbox("Interwał", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4, key="sb_fut_tf")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Konfiguracja Skanera i Bota")
-timeframe_val = st.selectbox("Interwał czasowy", ["1m", "5m", "15m", "1h", "4h", "1d"], index=3, key="tf_val_input")
-ema_fast_val = int(st.number_input("Okres EMA Szybka", min_value=1, max_value=200, value=50, key="ema_fast_input"))
-ema_slow_val = int(st.number_input("Okres EMA Wolna", min_value=2, max_value=300, value=200, key="ema_slow_input"))
+timeframe_val = st.selectbox("Interwał czasowy", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4, key="conf_tf_val")
+ema_fast_val = int(st.number_input("Okres EMA Szybka", min_value=1, max_value=200, value=9, key="conf_ema_fast"))
+ema_slow_val = int(st.number_input("Okres EMA Wolna", min_value=2, max_value=300, value=21, key="conf_ema_slow"))
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎛️ Panel Sterowania Botem Futures")
-bot_active = st.checkbox("Uruchom Bota Futures (Filtry ADX + EMA50)", value=False, key="trend_bot_fut_active")
+st.sidebar.markdown("### 🤖 Panel Sterowania Botem Futures")
+bot_active = st.sidebar.checkbox("Uruchom Bota Futures (Filtry ADX + EMA50)", value=False, key="sidebar_bot_active_cb")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Pętla Skanera")
@@ -636,12 +696,12 @@ auto_scan_enabled = st.sidebar.checkbox(
     key="sidebar_auto_scan_cb",
     on_change=toggle_scanner_from_sidebar,
 )
-scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 3, 300, 5)
-max_fut_scan_pairs = st.sidebar.slider("Liczba par Futures", 5, 100, 30, 5)
+scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 3, 300, 5, key="sb_scan_interval")
+max_fut_scan_pairs = st.sidebar.slider("Liczba par Futures", 5, 100, 30, 5, key="sb_max_fut_pairs")
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button(
-    "🛑 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
+    "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
     type="primary",
     use_container_width=True,
     key="sidebar_kill_switch_btn",
@@ -657,36 +717,26 @@ if emergency_kill:
                     sym = p["symbol"]
                     side = "sell" if p.get("side") == "long" else "buy"
                     try:
-                        contracts_prec = float(
-                            futures_ex.amount_to_precision(sym, contracts)
-                        )
-                        if contracts_prec <= 0:
-                            contracts_prec = contracts
-                        futures_ex.create_order(
-                            sym,
-                            "market",
-                            side,
-                            contracts_prec,
-                            params={"reduceOnly": True},
-                        )
+                        contracts_prec = float(futures_ex.amount_to_precision(sym, contracts))
+                        if contracts_prec > 0:
+                            try:
+                                futures_ex.create_order(sym, "market", side, contracts_prec, params={"reduceOnly": True})
+                            except Exception:
+                                futures_ex.create_market_order(sym, side, contracts_prec, params={"reduceOnly": True})
                     except Exception:
-                        try:
-                            futures_ex.create_market_order(
-                                sym, side, contracts, params={"reduceOnly": True}
-                            )
-                        except Exception:
-                            pass
+                        pass
         except Exception:
             pass
+
     st.session_state.scanner_active = False
-if 'trend_bot_ft_active' not in st.session_state:
-    st.session_state.trend_bot_ft_active = False
+    if 'trend_bot_ft_active' not in st.session_state:
+        st.session_state.trend_bot_ft_active = False
     st.session_state.active_trades = {}
     st.session_state.signal_cooldown = {}
     st.session_state.session_start_balance = 0.0
     st.session_state.session_baseline_locked = False
     st.session_state.scanner_diagnostics = []
-    st.success("🛑 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
+    st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
     time.sleep(2)
     st.rerun()
 
@@ -882,13 +932,12 @@ def get_smart_leverage(adx_val, exchange_limit, preferred_max=20):
         return min(15, effective_max)
     else:
         return effective_max
-
 # ==========================================
-# POBRANIE PAR, POZYCJI I SILNIK TRANSAKCYJNY
+# POBRANIE PAR, POZYCIJI I SILNIK TRANSAKCYJNY
 # ==========================================
 try:
-  if futures_ex and hasattr(futures_ex, 'load_markets'):
-    futures_ex.load_markets()
+    if futures_ex and hasattr(futures_ex, 'load_markets'):
+        futures_ex.load_markets()
 
     # Pobieramy tickery z giełdy używając poprawnej zmiennej futures_ex
     tickers = futures_ex.fetch_tickers()
@@ -898,11 +947,11 @@ try:
 
     filtered_symbols = []
     for symbol, ticker in tickers.items():
-      # Sprawdzamy kontrakty USDT-M i ich wolumen
-      if symbol.endswith('/USDT:USDT') or symbol.endswith('/USDT'):
-        quote_volume = ticker.get('quoteVolume', 0) or 0
-        if quote_volume >= MIN_VOLUME_USDT:
-          filtered_symbols.append(symbol)
+        # Sprawdzamy kontrakty USDT-M i ich wolumen
+        if symbol.endswith('/USDT:USDT') or symbol.endswith(':USDT'):
+            quote_volume = ticker.get('quoteVolume', 0) or 0
+            if quote_volume >= MIN_VOLUME_USDT:
+                filtered_symbols.append(symbol)
 
     # Sortujemy od największego wolumenu i ograniczamy do limitu skanera
     filtered_symbols = sorted(
@@ -912,10 +961,8 @@ try:
     )
 
     selected_symbols = filtered_symbols[:max_fut_scan_pairs]
-  else:
-    selected_symbols = []
 except Exception:
-  selected_symbols = []
+    selected_symbols = []
 
 existing_positions_map = {}
 try:
@@ -934,12 +981,15 @@ except Exception:
 scan_results = []
 bot_active = st.session_state.get("trend_bot_fut_active", False)
 
+# Bezpieczne pobranie zmiennej dźwigni dla Pylance i pętli
+manual_leverage = st.session_state.get("manual_leverage", st.session_state.get("manual_lev", 10))
+
 if selected_symbols and futures_ex:
     for symbol in selected_symbols:
         signal_type = "NEUTRALNY"
         current_adx = 20.0
         market_price = 0.0
-        
+
         try:
             ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=timeframe_val, limit=100)
             if ohlcv and len(ohlcv) > ema_slow_val:
@@ -947,11 +997,11 @@ if selected_symbols and futures_ex:
                 df_sym = calculate_indicators(df_sym, ema_period=ema_fast_val)
                 df_sym['EMA_fast'] = df_sym['close'].ewm(span=ema_fast_val, adjust=False).mean()
                 df_sym['EMA_slow'] = df_sym['close'].ewm(span=ema_slow_val, adjust=False).mean()
-                
+
                 last_r = df_sym.iloc[-1]
                 prev_r = df_sym.iloc[-2]
                 market_price = float(last_r['close'])
-                
+
                 if 'adx' in last_r and not pd.isna(last_r['adx']):
                     current_adx = float(last_r['adx'])
 
@@ -971,11 +1021,11 @@ if selected_symbols and futures_ex:
 
         if bot_active and signal_type != "NEUTRALNY":
             current_pos_side = existing_positions_map.get(symbol, None)
-            
+
             if not current_pos_side:
                 cooldown_key = f"trend_bot_fut_{symbol}"
                 now_ts = time.time()
-                
+
                 if now_ts > st.session_state.signal_cooldown.get(cooldown_key, 0):
                     if active_positions_count < max_active_futures_positions:
                         trade_side = "buy" if signal_type == "LONG" else "sell"
@@ -985,14 +1035,16 @@ if selected_symbols and futures_ex:
                                 market_price = float(ticker.get("last") or ticker.get("close", 0))
                             if market_price <= 0:
                                 continue
-                                
+
                             exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
+                            
+                            # Wywołanie z poprawnie zdefiniowaną zmienną manual_leverage
                             lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
 
                             base_alloc = calculate_dynamic_allocation(fut_free if fut_free > 0 else 1000.0, max_active_futures_positions, max_single_trade_usdt)
                             notional_usdt = base_alloc * lev_to_set
                             amount_contracts = notional_usdt / market_price
-                            
+
                             try:
                                 amount_str = futures_ex.amount_to_precision(symbol, amount_contracts)
                                 amount_val = float(amount_str)
@@ -1000,13 +1052,13 @@ if selected_symbols and futures_ex:
                                     amount_val = amount_contracts
                             except Exception:
                                 amount_val = amount_contracts
-                                
+
                             if (amount_val * market_price) < 5.0:
                                 continue
-                                
+
                             futures_ex.set_leverage(lev_to_set, symbol)
-                            futures_ex.create_order(symbol, "market", trade_side, amount_val, params={"leverage": lev_to_set})
-                            
+                            futures_ex.create_order(symbol, "market", trade_side, amount_val, params={})
+
                             st.session_state.signal_cooldown[cooldown_key] = now_ts + 60
                             st.session_state.trade_history.insert(0, {
                                 "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1022,25 +1074,24 @@ if selected_symbols and futures_ex:
                             pass
 
 st.markdown("---")
-st.markdown("### 📋 Wyniki Skanera Rynkowego")
+st.markdown("### 📊 Wyniki Skanera Rynkowego")
 
 if scan_results:
     st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
 else:
     st.info("Brak danych ze skanera.")
 
-st.markdown("---")
 col_tab1, col_tab2 = st.columns(2)
 
 with col_tab1:
-    st.markdown("### 📊 Aktywne Pozycje Futures")
+    st.markdown("### 📈 Aktywne Pozycje Futures")
     raw_pos = []
     try:
         if futures_ex and hasattr(futures_ex, 'fetch_positions'):
             raw_pos = futures_ex.fetch_positions()
     except Exception:
         raw_pos = []
-        
+
     parsed_positions = []
     if raw_pos:
         for p in raw_pos:
@@ -1055,7 +1106,7 @@ with col_tab1:
                         "Dźwignia": int(p.get("leverage", 1)),
                         "PnL (USDT)": float(p.get("unrealizedPnL", 0))
                     })
-    
+
     if parsed_positions:
         st.dataframe(pd.DataFrame(parsed_positions), use_container_width=True, hide_index=True)
     else:
@@ -1074,4 +1125,3 @@ with col_tab2:
 if st.session_state.scanner_active:
     time.sleep(scan_interval)
     st.rerun()
-
