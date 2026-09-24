@@ -933,7 +933,7 @@ def get_smart_leverage(adx_val, exchange_limit, preferred_max=20):
     else:
         return effective_max
 # ==========================================
-# POBRANIE PAR, POZYCIJI I SILNIK TRANSAKCYJNY
+# POBRANIE PAR, POZYCJI I SILNIK TRANSAKCYJNY
 # ==========================================
 try:
     if futures_ex and hasattr(futures_ex, 'load_markets'):
@@ -966,6 +966,7 @@ except Exception as e:
     selected_symbols = []
 
 existing_positions_map = {}
+existing_positions_amount = {}
 real_active_positions_count = 0
 try:
     if futures_ex and hasattr(futures_ex, 'fetch_positions'):
@@ -977,6 +978,7 @@ try:
                     sym = p.get("symbol")
                     side = str(p.get("side", "")).lower()
                     existing_positions_map[sym] = side
+                    existing_positions_amount[sym] = abs(contracts)
                     real_active_positions_count += 1
 except Exception as e:
     print(f"[DEBUG BŁĄD POZYCJI]: {e}")
@@ -993,6 +995,8 @@ if selected_symbols and futures_ex:
         signal_type = "NEUTRALNY"
         current_adx = 20.0
         market_price = 0.0
+        trend_is_bullish = False
+        trend_is_bearish = False
 
         try:
             ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=timeframe_val, limit=100)
@@ -1002,15 +1006,14 @@ if selected_symbols and futures_ex:
                 df_sym['EMA_fast'] = df_sym['close'].ewm(span=ema_fast_val, adjust=False).mean()
                 df_sym['EMA_slow'] = df_sym['close'].ewm(span=ema_slow_val, adjust=False).mean()
 
-                # Poprawiona, w 100% szczelna kalkulacja RSI (odporna na dzielenie przez zero na pompowanych świecach)
+                # Poprawiona, w 100% szczelna kalkulacja RSI
                 delta = df_sym['close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                 
-                # Zabezpieczenie przed brakiem strat (loss = 0 na pionowych świecach wzrostowych)
                 rs = gain / loss.replace(0, 1e-10)
                 df_sym['rsi'] = 100 - (100 / (1 + rs))
-                df_sym['rsi'] = df_sym['rsi'].fillna(100.0) # Jeśli loss=0, to pełne wykupienie (RSI 100)
+                df_sym['rsi'] = df_sym['rsi'].fillna(100.0)
 
                 last_r = df_sym.iloc[-1]
                 prev_r = df_sym.iloc[-2]
@@ -1019,20 +1022,24 @@ if selected_symbols and futures_ex:
                 if 'adx' in last_r and not pd.isna(last_r['adx']):
                     current_adx = float(last_r['adx'])
 
-                # Generowanie sygnału z EMA
-                if prev_r['EMA_fast'] <= prev_r['EMA_slow'] and last_r['EMA_fast'] > last_r['EMA_slow']:
+                # Określenie aktualnego stanu trendu (do szybkiego zamykania)
+                trend_is_bullish = last_r['EMA_fast'] > last_r['EMA_slow']
+                trend_is_bearish = last_r['EMA_fast'] < last_r['EMA_slow']
+
+                # Generowanie sygnału z EMA (moment przecięcia)
+                if prev_r['EMA_fast'] <= prev_r['EMA_slow'] and trend_is_bullish:
                     signal_type = "LONG"
-                elif prev_r['EMA_fast'] >= prev_r['EMA_slow'] and last_r['EMA_fast'] < last_r['EMA_slow']:
+                elif prev_r['EMA_fast'] >= prev_r['EMA_slow'] and trend_is_bearish:
                     signal_type = "SHORT"
 
                 # BEZLITOSNY FILTR LOKALNYCH GÓREK I DOŁKÓW (RSI)
                 rsi_val = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 100.0
                 if signal_type == "LONG" and rsi_val > 70:
                     signal_type = "NEUTRALNY"
-                    print(f"[DEBUG] Odrzucono LONG dla {symbol}: RSI wynosi {rsi_val:.1f} (lokalna górka / wykupienie).")
+                    print(f"[DEBUG] Odrzucono LONG dla {symbol}: RSI wynosi {rsi_val:.1f} (wykupienie).")
                 elif signal_type == "SHORT" and rsi_val < 30:
                     signal_type = "NEUTRALNY"
-                    print(f"[DEBUG] Odrzucono SHORT dla {symbol}: RSI wynosi {rsi_val:.1f} (lokalny dołek / wyprzedanie).")
+                    print(f"[DEBUG] Odrzucono SHORT dla {symbol}: RSI wynosi {rsi_val:.1f} (wyprzedanie).")
 
         except Exception as e:
             print(f"[DEBUG BŁĄD OHLCV dla {symbol}]: {e}")
@@ -1045,10 +1052,49 @@ if selected_symbols and futures_ex:
             "Status": "Aktywny"
         })
 
-        if bot_active and signal_type != "NEUTRALNY":
+        if bot_active:
             current_pos_side = existing_positions_map.get(symbol, None)
+            position_contracts = existing_positions_amount.get(symbol, 0.0)
 
-            if not current_pos_side:
+            # ---------------------------------------------------------
+            # 1. ZAMKNIĘCIE POZYCJI PRZY ODWRÓCENIU TRENDU
+            # ---------------------------------------------------------
+            if current_pos_side and position_contracts > 0:
+                is_long = current_pos_side in ["buy", "long"]
+                is_short = current_pos_side in ["sell", "short"]
+
+                # Jeśli mamy LONG, a trend zrobił się niedźwiedzi LUB jeśli mamy SHORT, a trend zrobił się byczy
+                if (is_long and trend_is_bearish) or (is_short and trend_is_bullish):
+                    close_side = "sell" if is_long else "buy"
+                    print(f"[DEBUG] Odwrócenie trendu dla {symbol} (Pozycja: {current_pos_side.upper()}). Zamykam pozycję rynkowo.")
+                    try:
+                        futures_ex.create_order(
+                            symbol, "market", close_side, position_contracts, 
+                            params={'reduceOnly': True}
+                        )
+                        print(f"[DEBUG] Pomyślnie zamknięto {symbol} z powodu odwrócenia trendu.")
+                        
+                        # Aktualizacja lokalnych map stanu
+                        existing_positions_map.pop(symbol, None)
+                        existing_positions_amount.pop(symbol, None)
+                        real_active_positions_count = max(0, real_active_positions_count - 1)
+                        
+                        # Zapis do historii transakcji
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Para": symbol,
+                            "Typ": f"ZAMKNIĘCIE ({'LONG' if is_long else 'SHORT'})",
+                            "Cena": f"{market_price:.4f}",
+                            "Ilość": f"{position_contracts:.4f}",
+                            "Dźwignia": "-"
+                        })
+                    except Exception as close_err:
+                        print(f"[BŁĄD ZAMKNIĘCIA PRZY ODWRÓCENIU]: {symbol}: {close_err}")
+
+            # ---------------------------------------------------------
+            # 2. OTWARCIE NOWEJ POZYCJI (brak pozycji + sygnał LONG/SHORT)
+            # ---------------------------------------------------------
+            elif not current_pos_side and signal_type != "NEUTRALNY":
                 cooldown_key = f"trend_bot_fut_{symbol}"
                 now_ts = time.time()
 
@@ -1133,6 +1179,7 @@ if selected_symbols and futures_ex:
                                 "Dźwignia": f"{lev_to_set}x"
                             })
                             existing_positions_map[symbol] = "buy" if signal_type == "LONG" else "sell"
+                            existing_positions_amount[symbol] = amount_val
                             real_active_positions_count += 1
                         except Exception as e:
                             print(f"[KRYTYCZNY BŁĄD SKŁADANIA ZLECENIA dla {symbol}]: {e}")
