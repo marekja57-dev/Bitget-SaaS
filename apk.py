@@ -1002,12 +1002,15 @@ if selected_symbols and futures_ex:
                 df_sym['EMA_fast'] = df_sym['close'].ewm(span=ema_fast_val, adjust=False).mean()
                 df_sym['EMA_slow'] = df_sym['close'].ewm(span=ema_slow_val, adjust=False).mean()
 
-                # Bezpieczne obliczenie RSI do wykrywania lokalnych górek i dołków (wyczerpanie trendu)
+                # Poprawiona, w 100% szczelna kalkulacja RSI (odporna na dzielenie przez zero na pompowanych świecach)
                 delta = df_sym['close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
+                
+                # Zabezpieczenie przed brakiem strat (loss = 0 na pionowych świecach wzrostowych)
+                rs = gain / loss.replace(0, 1e-10)
                 df_sym['rsi'] = 100 - (100 / (1 + rs))
+                df_sym['rsi'] = df_sym['rsi'].fillna(100.0) # Jeśli loss=0, to pełne wykupienie (RSI 100)
 
                 last_r = df_sym.iloc[-1]
                 prev_r = df_sym.iloc[-2]
@@ -1022,8 +1025,8 @@ if selected_symbols and futures_ex:
                 elif prev_r['EMA_fast'] >= prev_r['EMA_slow'] and last_r['EMA_fast'] < last_r['EMA_slow']:
                     signal_type = "SHORT"
 
-                # ŚCISŁY FILTR LOKALNYCH GÓREK I DOŁKÓW (RSI)
-                rsi_val = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 50.0
+                # BEZLITOSNY FILTR LOKALNYCH GÓREK I DOŁKÓW (RSI)
+                rsi_val = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 100.0
                 if signal_type == "LONG" and rsi_val > 70:
                     signal_type = "NEUTRALNY"
                     print(f"[DEBUG] Odrzucono LONG dla {symbol}: RSI wynosi {rsi_val:.1f} (lokalna górka / wykupienie).")
@@ -1086,7 +1089,7 @@ if selected_symbols and futures_ex:
                             # 2. Otwarcie pozycji rynkowej
                             futures_ex.create_order(symbol, "market", trade_side, amount_val, params={})
 
-                            # 3. Stabilne ustawienie Stop Loss i Take Profit
+                            # 3. Ustawienie Stop Loss i Take Profit
                             try:
                                 sl_pct = 0.02
                                 tp_pct = 0.04
@@ -1104,25 +1107,17 @@ if selected_symbols and futures_ex:
                                 sl_precision = float(futures_ex.price_to_precision(symbol, sl_price))
                                 tp_precision = float(futures_ex.price_to_precision(symbol, tp_price))
 
-                                # Stop Loss z pełną kompatybilnością parametrów
+                                # Stop Loss
                                 futures_ex.create_order(
                                     symbol, 'stop_market', sl_side, amount_val, 
-                                    params={
-                                        'triggerPrice': sl_precision,
-                                        'stopPrice': sl_precision,
-                                        'reduceOnly': True
-                                    }
+                                    params={'triggerPrice': sl_precision, 'stopPrice': sl_precision, 'reduceOnly': True}
                                 )
                                 print(f"[DEBUG] Ustawiono Stop Loss dla {symbol} na cenie {sl_precision}")
 
-                                # Take Profit z pełną kompatybilnością parametrów
+                                # Take Profit
                                 futures_ex.create_order(
                                     symbol, 'take_profit_market', tp_side, amount_val, 
-                                    params={
-                                        'triggerPrice': tp_precision,
-                                        'stopPrice': tp_precision,
-                                        'reduceOnly': True
-                                    }
+                                    params={'triggerPrice': tp_precision, 'stopPrice': tp_precision, 'reduceOnly': True}
                                 )
                                 print(f"[DEBUG] Ustawiono Take Profit dla {symbol} na cenie {tp_precision}")
                             except Exception as sl_err:
@@ -1195,4 +1190,3 @@ with col_tab2:
 if st.session_state.scanner_active:
     time.sleep(scan_interval)
     st.rerun()
-
