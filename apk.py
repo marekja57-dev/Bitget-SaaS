@@ -961,10 +961,12 @@ try:
     )
 
     selected_symbols = filtered_symbols[:max_fut_scan_pairs]
-except Exception:
+except Exception as e:
+    print(f"[DEBUG BŁĄD RYNKÓW]: {e}")
     selected_symbols = []
 
 existing_positions_map = {}
+real_active_positions_count = 0
 try:
     if futures_ex and hasattr(futures_ex, 'fetch_positions'):
         raw_pos_check = futures_ex.fetch_positions()
@@ -975,7 +977,9 @@ try:
                     sym = p.get("symbol")
                     side = str(p.get("side", "")).lower()
                     existing_positions_map[sym] = side
-except Exception:
+                    real_active_positions_count += 1
+except Exception as e:
+    print(f"[DEBUG BŁĄD POZYCJI]: {e}")
     pass
 
 scan_results = []
@@ -998,6 +1002,13 @@ if selected_symbols and futures_ex:
                 df_sym['EMA_fast'] = df_sym['close'].ewm(span=ema_fast_val, adjust=False).mean()
                 df_sym['EMA_slow'] = df_sym['close'].ewm(span=ema_slow_val, adjust=False).mean()
 
+                # Bezpieczne obliczenie RSI do wykrywania lokalnych górek i dołków (wyczerpanie trendu)
+                delta = df_sym['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df_sym['rsi'] = 100 - (100 / (1 + rs))
+
                 last_r = df_sym.iloc[-1]
                 prev_r = df_sym.iloc[-2]
                 market_price = float(last_r['close'])
@@ -1005,11 +1016,23 @@ if selected_symbols and futures_ex:
                 if 'adx' in last_r and not pd.isna(last_r['adx']):
                     current_adx = float(last_r['adx'])
 
+                # Generowanie sygnału z EMA
                 if prev_r['EMA_fast'] <= prev_r['EMA_slow'] and last_r['EMA_fast'] > last_r['EMA_slow']:
                     signal_type = "LONG"
                 elif prev_r['EMA_fast'] >= prev_r['EMA_slow'] and last_r['EMA_fast'] < last_r['EMA_slow']:
                     signal_type = "SHORT"
-        except Exception:
+
+                # ŚCISŁY FILTR LOKALNYCH GÓREK I DOŁKÓW (RSI)
+                rsi_val = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 50.0
+                if signal_type == "LONG" and rsi_val > 70:
+                    signal_type = "NEUTRALNY"
+                    print(f"[DEBUG] Odrzucono LONG dla {symbol}: RSI wynosi {rsi_val:.1f} (lokalna górka / wykupienie).")
+                elif signal_type == "SHORT" and rsi_val < 30:
+                    signal_type = "NEUTRALNY"
+                    print(f"[DEBUG] Odrzucono SHORT dla {symbol}: RSI wynosi {rsi_val:.1f} (lokalny dołek / wyprzedanie).")
+
+        except Exception as e:
+            print(f"[DEBUG BŁĄD OHLCV dla {symbol}]: {e}")
             pass
 
         scan_results.append({
@@ -1027,7 +1050,7 @@ if selected_symbols and futures_ex:
                 now_ts = time.time()
 
                 if now_ts > st.session_state.signal_cooldown.get(cooldown_key, 0):
-                    if active_positions_count < max_active_futures_positions:
+                    if real_active_positions_count < max_active_futures_positions:
                         trade_side = "buy" if signal_type == "LONG" else "sell"
                         try:
                             if market_price <= 0:
@@ -1037,8 +1060,6 @@ if selected_symbols and futures_ex:
                                 continue
 
                             exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
-                            
-                            # Wywołanie z poprawnie zdefiniowaną zmienną manual_leverage
                             lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
 
                             base_alloc = calculate_dynamic_allocation(fut_free if fut_free > 0 else 1000.0, max_active_futures_positions, max_single_trade_usdt)
@@ -1054,10 +1075,58 @@ if selected_symbols and futures_ex:
                                 amount_val = amount_contracts
 
                             if (amount_val * market_price) < 5.0:
+                                print(f"[DEBUG] Zlecenie dla {symbol} odrzucone: za mała wartość notional (< 5 USDT).")
                                 continue
 
+                            print(f"[DEBUG] Wysyłam zlecenie: {symbol} | Strona: {trade_side} | Ilość: {amount_val} | Dźwignia: {lev_to_set}x")
+                            
+                            # 1. Ustawienie dźwigni
                             futures_ex.set_leverage(lev_to_set, symbol)
+                            
+                            # 2. Otwarcie pozycji rynkowej
                             futures_ex.create_order(symbol, "market", trade_side, amount_val, params={})
+
+                            # 3. Stabilne ustawienie Stop Loss i Take Profit
+                            try:
+                                sl_pct = 0.02
+                                tp_pct = 0.04
+                                if trade_side == "buy":
+                                    sl_price = market_price * (1.0 - sl_pct)
+                                    tp_price = market_price * (1.0 + tp_pct)
+                                    sl_side = "sell"
+                                    tp_side = "sell"
+                                else:
+                                    sl_price = market_price * (1.0 + sl_pct)
+                                    tp_price = market_price * (1.0 - tp_pct)
+                                    sl_side = "buy"
+                                    tp_side = "buy"
+
+                                sl_precision = float(futures_ex.price_to_precision(symbol, sl_price))
+                                tp_precision = float(futures_ex.price_to_precision(symbol, tp_price))
+
+                                # Stop Loss z pełną kompatybilnością parametrów
+                                futures_ex.create_order(
+                                    symbol, 'stop_market', sl_side, amount_val, 
+                                    params={
+                                        'triggerPrice': sl_precision,
+                                        'stopPrice': sl_precision,
+                                        'reduceOnly': True
+                                    }
+                                )
+                                print(f"[DEBUG] Ustawiono Stop Loss dla {symbol} na cenie {sl_precision}")
+
+                                # Take Profit z pełną kompatybilnością parametrów
+                                futures_ex.create_order(
+                                    symbol, 'take_profit_market', tp_side, amount_val, 
+                                    params={
+                                        'triggerPrice': tp_precision,
+                                        'stopPrice': tp_precision,
+                                        'reduceOnly': True
+                                    }
+                                )
+                                print(f"[DEBUG] Ustawiono Take Profit dla {symbol} na cenie {tp_precision}")
+                            except Exception as sl_err:
+                                print(f"[BŁĄD SL/TP]: Nie udało się ustawić zabezpieczeń dla {symbol}: {sl_err}")
 
                             st.session_state.signal_cooldown[cooldown_key] = now_ts + 60
                             st.session_state.trade_history.insert(0, {
@@ -1069,8 +1138,9 @@ if selected_symbols and futures_ex:
                                 "Dźwignia": f"{lev_to_set}x"
                             })
                             existing_positions_map[symbol] = "buy" if signal_type == "LONG" else "sell"
-                            active_positions_count += 1
-                        except Exception:
+                            real_active_positions_count += 1
+                        except Exception as e:
+                            print(f"[KRYTYCZNY BŁĄD SKŁADANIA ZLECENIA dla {symbol}]: {e}")
                             pass
 
 st.markdown("---")
@@ -1125,3 +1195,4 @@ with col_tab2:
 if st.session_state.scanner_active:
     time.sleep(scan_interval)
     st.rerun()
+
