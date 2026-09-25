@@ -382,11 +382,29 @@ def get_exchange():
     except Exception:
         return None
 
-def calculate_dynamic_allocation(total_balance, max_positions, max_single):
-    if total_balance <= 0:
+# =====================================================================
+# OPTYMALIZOWANY DYNAMICZNY SYSTEM ALOKACJI (Pełne wykorzystanie wolnych środków)
+# =====================================================================
+def calculate_dynamic_allocation(free_balance, max_positions, max_single, adx_val=20.0, volume=10_000_000):
+    if free_balance <= 0:
         return max_single
-    allocated = total_balance / max(1, max_positions)
-    return min(max_single, max(5.0, allocated))
+    
+    # Bazowa alokacja oparta na wolnym saldzie dzielonym przez liczbę slotów (zamiast sztywnego totalu)
+    base_slot_allocation = free_balance / max(1, max_positions)
+    
+    # Modyfikator ADX premiujący silne trendy (skala od 0.95 do 1.25 dla wysokiego ADX)
+    adx_multiplier = 0.95 + (min(max(adx_val, 10.0), 60.0) - 10.0) / 160.0
+    
+    # Modyfikator płynności oparty na wolumenie
+    vol_multiplier = np.log10(max(volume, 1_000_000)) / np.log10(20_000_000)
+    vol_multiplier = max(0.9, min(1.2, vol_multiplier))
+    
+    dynamic_alloc = base_slot_allocation * adx_multiplier * vol_multiplier
+    
+    # Uwzględniamy limit użytkownika na 1 pozycję, ale pozwalamy alokować do 95% wolnych środków na jeden slot,
+    # żeby uniknąć sytuacji zablokowanego kapitału.
+    upper_bound = min(max_single, free_balance * 0.95)
+    return min(upper_bound, max(10.0, dynamic_alloc))
 
 def get_exchange_max_leverage(exchange, symbol, default_max=20):
     try:
@@ -402,74 +420,17 @@ def get_exchange_max_leverage(exchange, symbol, default_max=20):
 def get_smart_leverage(adx_val, exchange_limit, preferred_max=20):
     effective_max = min(preferred_max, exchange_limit)
     if adx_val < 20:
-        return min(3, effective_max)
-    elif adx_val < 30:
         return min(5, effective_max)
-    elif adx_val < 40:
+    elif adx_val < 30:
         return min(10, effective_max)
-    elif adx_val < 50:
+    elif adx_val < 40:
         return min(15, effective_max)
     else:
         return effective_max
 
 # =====================================================================
-# FUNKCJA SKŁADANIA SL / TP
-# =====================================================================
-def place_sl_tp_orders(exchange, symbol, side, amount_val, market_price):
-    try:
-        sl_side = "sell" if side == "buy" else "buy"
-        tp_side = "sell" if side == "buy" else "buy"
-
-        sl_pct = float(st.session_state.get("custom_stop_loss_pct", 5)) / 100.0
-        tp_pct = float(st.session_state.get("custom_take_profit_pct", 15)) / 100.0
-
-        if side == "buy":
-            sl_price = market_price * (1.0 - sl_pct)
-            tp_price = market_price * (1.0 + tp_pct)
-        else:
-            sl_price = market_price * (1.0 + sl_pct)
-            tp_price = market_price * (1.0 - tp_pct)
-
-        sl_precision = float(exchange.price_to_precision(symbol, sl_price))
-        tp_precision = float(exchange.price_to_precision(symbol, tp_price))
-        amount_precision = float(exchange.amount_to_precision(symbol, amount_val))
-
-        try:
-            exchange.create_order(
-                symbol=symbol,
-                type='stop_market',
-                side=sl_side,
-                amount=amount_precision,
-                params={
-                    'triggerPrice': sl_precision,
-                    'stopPrice': sl_precision,
-                    'reduceOnly': True
-                }
-            )
-        except Exception as e_sl:
-            print(f"[BŁĄD SL dla {symbol}]: {e_sl}")
-
-        try:
-            exchange.create_order(
-                symbol=symbol,
-                type='take_profit_market',
-                side=tp_side,
-                amount=amount_precision,
-                params={
-                    'triggerPrice': tp_precision,
-                    'stopPrice': tp_precision,
-                    'reduceOnly': True
-                }
-            )
-        except Exception as e_tp:
-            print(f"[BŁĄD TP dla {symbol}]: {e_tp}")
-
-    except Exception as e:
-        print(f"[KRYTYCZNY BŁĄD SL/TP]: {e}")
-
-# ==========================================
 # PANEL BOCZNY (SIDEBAR)
-# ==========================================
+# =====================================================================
 st.sidebar.markdown(f"### 👤 {st.session_state.get('user_email', '')}")
 if is_user_admin():
     st.sidebar.markdown("**Rola: Administrator**")
@@ -526,7 +487,6 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True, key="s
         st.session_state.api_key = input_api
         st.session_state.secret_key = input_secret
         st.session_state.passphrase = input_pass
-        
         try:
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
@@ -538,7 +498,6 @@ if st.sidebar.button("💾 ZAPISZ MOJE KLUCZE", use_container_width=True, key="s
             conn.close()
         except Exception:
             pass
-
         st.success(f"Zapisano klucze dla {selected_exchange}!")
         st.rerun()
     else:
@@ -560,14 +519,31 @@ max_single_trade_usdt = st.sidebar.number_input("Maksymalnie USDT na 1 pozycję"
 max_active_futures_positions = st.sidebar.slider("Maks. aktywne pozycje Futures", 1, 20, 5, key="sb_max_active_pos")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🚨 Ustawienia Stop-Loss / Take-Profit")
-custom_stop_loss_pct = st.sidebar.slider("Stop-Loss (%)", 1, 50, 5, key="custom_stop_loss_pct")
-custom_take_profit_pct = st.sidebar.slider("Take-Profit (%)", 1, 200, 15, key="custom_take_profit_pct")
+st.sidebar.markdown("### 🛑 Zarządzanie Ryzykiem ROE (SL / TP)")
+enable_roe_guard = st.sidebar.checkbox("Włącz strażnika SL / TP ROE", value=True, key="enable_roe_guard")
+
+if enable_roe_guard:
+    custom_stop_loss_roe = st.sidebar.slider("Stop-Loss ROE (%)", 0.5, 50.0, 4.0, 0.5, key="custom_stop_loss_roe")
+    custom_take_profit_roe = st.sidebar.slider("Take-Profit ROE (%)", 1.0, 100.0, 15.0, 0.5, key="custom_take_profit_roe")
+else:
+    custom_stop_loss_roe = 999.0
+    custom_take_profit_roe = 999.0
+    st.sidebar.markdown("---")
+st.sidebar.markdown("### 🛡️ Globalny Stop-Loss / Take-Profit Sesji")
+enable_global_session_guard = st.sidebar.checkbox("Włącz globalny SL/TP sesji", value=True, key="enable_global_session_guard")
+
+if enable_global_session_guard:
+    global_session_sl_usdt = st.sidebar.slider("Globalny SL sesji (USDT)", min_value=-50.0, max_value=0.0, value=-50.0, step=1.0, key="global_session_sl_usdt")
+    global_session_tp_usdt = st.sidebar.slider("Globalny TP sesji (USDT)", min_value=1.0, max_value=100.0, value=100.0, step=1.0, key="global_session_tp_usdt")
+else:
+    global_session_sl_usdt = -9999.0
+    global_session_tp_usdt = 9999.0
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
-leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["Autonomiczny (max 10x)", "Ręczny"], key="sb_lev_mode")
-manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 10, 3, key="sb_manual_leverage")
+leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["Autonomiczny (max 20x)", "Ręczny"], key="sb_leverage_mode")
+manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 20, 3, 1, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⏱️ Timeframe Analizy")
@@ -577,16 +553,6 @@ ema_slow_val = int(st.sidebar.number_input("Okres EMA Wolna", min_value=2, max_v
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🤖 Panel Sterowania Botem Futures")
-def toggle_scanner_from_sidebar():
-    st.session_state.scanner_active = st.session_state.sidebar_auto_scan_cb
-    if st.session_state.scanner_active:
-        st.session_state.session_baseline_locked = False
-
-auto_scan_enabled = st.sidebar.checkbox(
-    "Włącz auto-skanowanie w tle",
-    key="sidebar_auto_scan_cb",
-    on_change=toggle_scanner_from_sidebar,
-)
 scan_interval = st.sidebar.slider("Interwał odświeżania (s)", 3, 300, 5, key="sb_scan_interval")
 max_fut_scan_pairs = st.sidebar.slider("Liczba par Futures", 1, 100, 100, 1, key="sb_max_fut_pairs")
 
@@ -629,7 +595,7 @@ if emergency_kill:
     st.rerun()
 
 # ==========================================
-# SALDO I METRYKI (POPRAWIONE POBIERANIE ŚRODKÓW Z MARGINESEM)
+# SALDO I METRYKI
 # ==========================================
 fut_free, fut_total = 0.0, 0.0
 active_positions_count = 0
@@ -640,7 +606,6 @@ if futures_ex:
     try:
         f_bal = futures_ex.fetch_balance({"type": "swap"})
         usdt_info = f_bal.get("USDT", {})
-        
         fut_total = float(usdt_info.get("total", 0.0) or 0.0)
         if fut_total == 0.0 and "info" in f_bal:
             try:
@@ -668,11 +633,9 @@ if futures_ex:
         if fut_used == 0.0 and total_margin_used > 0.0:
             fut_used = total_margin_used
 
-        # Kluczowa poprawka: wolne środki to całkowite saldo pomniejszone o zaangażowany margines pozycji
         fut_free = float(usdt_info.get("free", 0.0) or 0.0)
         if fut_free == 0.0 or fut_free >= fut_total:
             fut_free = max(0.0, fut_total - fut_used)
-
     except Exception:
         try:
             f_bal = futures_ex.fetch_balance()
@@ -735,44 +698,39 @@ st.markdown("---")
 st.subheader("🥾 Panel Sterowania Botem Futures")
 
 with st.container(border=True):
-    def toggle_main_trend_fut():
-        st.session_state.trend_bot_fut_active = st.session_state.main_cb_trend_fut
-        if st.session_state.trend_bot_fut_active and fut_total > 0:
-            st.session_state.session_baseline_locked = False
-
-    st.checkbox(
-        "🔵 Uruchom Bota Futures (Filtry ADX + EMA50 + Automatyczny SL/TP)",
-        value=st.session_state.get("trend_bot_fut_active", False),
-        key="main_cb_trend_fut",
-        on_change=toggle_main_trend_fut,
-    )
-
-    if st.session_state.trend_bot_fut_active:
-        st.success(f"🟢 Bot Futures Aktywny (Timeframe: {fut_tf}, SL: {custom_stop_loss_pct}%, TP: {custom_take_profit_pct}%)")
-    else:
-        st.info("🔴 Bot Futures Zatrzymany")
-
-    if not st.session_state.scanner_active:
-        if st.button("🚀 Uruchom Skaner Non-Stop", type="primary", use_container_width=True):
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        if st.button("🟢 URUCHOM SKANER I BOT HANDLOWY", use_container_width=True, key="btn_start_master"):
             st.session_state.scanner_active = True
-            st.session_state.session_baseline_locked = False
+            st.session_state.trend_bot_fut_active = True
+            if fut_total > 0:
+                st.session_state.session_baseline_locked = False
             st.rerun()
-    else:
-        if st.button("⏹️ Zatrzymaj Skaner", type="secondary", use_container_width=True):
+            
+    with col_btn2:
+        if st.button("🔴 ZATRZYMAJ BOT I SKANER", use_container_width=True, key="btn_stop_master"):
             st.session_state.scanner_active = False
             st.session_state.trend_bot_fut_active = False
             st.rerun()
 
+    if st.session_state.get("scanner_active", False):
+        st.success(f"🟢 STATUS: SYSTEM AKTYWNY I HANDLUJE (Timeframe: {fut_tf}, SL ROE: {custom_stop_loss_roe}%, TP ROE: {custom_take_profit_roe}%)")
+    else:
+        st.warning("🔴 STATUS: SYSTEM ZATRZYMANY (Kliknij zielony przycisk powyżej, aby uruchomić)")
+
 # ==========================================
-# POBRANIE PAR I SILNIK TRANSAKCYJNY Z SL/TP
+# POBRANIE PAR I SILNIK TRANSAKCYJNY Z AKTYWNYM STRAŻNIKIEM ROE
 # ==========================================
 selected_symbols = []
+tickers_data = {}
+
 try:
     if futures_ex and hasattr(futures_ex, 'load_markets'):
         futures_ex.load_markets()
-        tickers = futures_ex.fetch_tickers()
-        filtered = [s for s, t in tickers.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
-        selected_symbols = sorted(filtered, key=lambda s: tickers.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:max_fut_scan_pairs]
+        tickers_data = futures_ex.fetch_tickers()
+        filtered = [s for s, t in tickers_data.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
+        selected_symbols = sorted(filtered, key=lambda s: tickers_data.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:max_fut_scan_pairs]
 except Exception:
     pass
 
@@ -785,9 +743,44 @@ try:
             contracts = float(p.get("contracts", p.get("amount", 0)))
             if contracts != 0:
                 sym = p.get("symbol")
-                existing_positions_map[sym] = str(p.get("side", "")).lower()
+                side_str = str(p.get("side", "")).lower()
+                existing_positions_map[sym] = side_str
                 existing_positions_amount[sym] = abs(contracts)
                 real_active_positions_count += 1
+
+                # ==========================================
+                # TWARDY STRAŻNIK ROE (STOP-LOSS / TAKE-PROFIT)
+                # ==========================================
+                if st.session_state.get("trend_bot_fut_active", False) and st.session_state.get("enable_roe_guard", True):
+                    try:
+                        entry_price = float(p.get("entryPrice", 0) or 0)
+                        leverage_val = float(p.get("leverage", 1) or 1)
+                        mark_price = float(p.get("markPrice", 0) or p.get("lastPrice", 0) or 0)
+                        
+                        if entry_price > 0 and mark_price > 0:
+                            if side_str in ["buy", "long"]:
+                                pnl_pct = ((mark_price - entry_price) / entry_price) * 100
+                            else:
+                                pnl_pct = ((entry_price - mark_price) / entry_price) * 100
+                            
+                            current_roe = pnl_pct * leverage_val
+
+                            sl_limit = -float(st.session_state.get("custom_stop_loss_roe", 4.0))
+                            tp_limit = float(st.session_state.get("custom_take_profit_roe", 15.0))
+
+                            if current_roe <= sl_limit or current_roe >= tp_limit:
+                                close_side = "sell" if side_str in ["buy", "long"] else "buy"
+                                futures_ex.create_order(sym, "market", close_side, abs(contracts), params={'reduceOnly': True})
+                                st.session_state.trade_history.insert(0, {
+                                    "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Para": sym,
+                                    "Typ": f"STRAŻNIK {'SL' if current_roe <= sl_limit else 'TP'}",
+                                    "Cena": f"{mark_price:.4f}",
+                                    "Ilość": f"{abs(contracts):.4f}",
+                                    "Dźwignia": f"{int(leverage_val)}x"
+                                })
+                    except Exception as e_guard:
+                        print(f"[BŁĄD STRAŻNIKA ROE]: {e_guard}")
 except Exception:
     pass
 
@@ -798,11 +791,16 @@ if selected_symbols and futures_ex:
     for symbol in selected_symbols:
         signal_type = "NEUTRALNY"
         current_adx = 20.0
+        current_rsi = 50.0
         market_price = 0.0
         trend_is_bullish = False
         trend_is_bearish = False
+        sym_volume = 10_000_000
 
         try:
+            t_info = tickers_data.get(symbol, {})
+            sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
+
             ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=fut_tf, limit=100)
             if ohlcv and len(ohlcv) > ema_slow_val:
                 df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -811,25 +809,34 @@ if selected_symbols and futures_ex:
                 df_sym['EMA_slow'] = df_sym['close'].ewm(span=ema_slow_val, adjust=False).mean()
 
                 last_r = df_sym.iloc[-1]
-                prev_r = df_sym.iloc[-2]
                 market_price = float(last_r['close'])
 
                 if 'adx' in last_r and not pd.isna(last_r['adx']):
                     current_adx = float(last_r['adx'])
+                
+                if 'rsi' in last_r and not pd.isna(last_r['rsi']):
+                    current_rsi = float(last_r['rsi'])
 
                 trend_is_bullish = last_r['EMA_fast'] > last_r['EMA_slow']
                 trend_is_bearish = last_r['EMA_fast'] < last_r['EMA_slow']
 
-                if prev_r['EMA_fast'] <= prev_r['EMA_slow'] and trend_is_bullish:
+                min_adx_required = 25.0  
+                
+                if trend_is_bullish and current_adx >= min_adx_required and current_rsi < 70:
                     signal_type = "LONG"
-                elif prev_r['EMA_fast'] >= prev_r['EMA_slow'] and trend_is_bearish:
+                elif trend_is_bearish and current_adx >= min_adx_required and current_rsi > 30:
                     signal_type = "SHORT"
+                else:
+                    signal_type = "NEUTRALNY"
         except Exception:
             pass
 
         scan_results.append({
             "Para": symbol,
             "Sygnał": signal_type,
+            "Wolumen": f"{sym_volume:,.0f}",
+            "ADX": f"{current_adx:.1f}",
+            "RSI": f"{current_rsi:.1f}",
             "Cena": f"{market_price:.4f}" if market_price > 0 else "Błąd",
             "Status": "Aktywny"
         })
@@ -838,6 +845,9 @@ if selected_symbols and futures_ex:
             current_pos_side = existing_positions_map.get(symbol, None)
             position_contracts = existing_positions_amount.get(symbol, 0.0)
 
+            # ==========================================
+            # ZAMKNIĘCIE POZYCJI PRZY ZMIANIE TRENDU
+            # ==========================================
             if current_pos_side and position_contracts > 0:
                 is_long = current_pos_side in ["buy", "long"]
                 is_short = current_pos_side in ["sell", "short"]
@@ -848,7 +858,14 @@ if selected_symbols and futures_ex:
                         futures_ex.create_order(symbol, "market", close_side, position_contracts, params={'reduceOnly': True})
                         existing_positions_map.pop(symbol, None)
                         existing_positions_amount.pop(symbol, None)
-                        real_active_positions_count = max(0, real_active_positions_count - 1)
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Para": symbol,
+                            "Typ": "ZMIANA TRENDU",
+                            "Cena": f"{market_price:.4f}",
+                            "Ilość": f"{position_contracts:.4f}",
+                            "Dźwignia": "-"
+                        })
                     except Exception:
                         pass
 
@@ -863,13 +880,23 @@ if selected_symbols and futures_ex:
                             if market_price <= 0:
                                 ticker = futures_ex.fetch_ticker(symbol)
                                 market_price = float(ticker.get("last") or ticker.get("close", 0))
+                            else:
+                                ticker = tickers_data.get(symbol, {})
+
                             if market_price <= 0:
                                 continue
 
                             exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
                             lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
 
-                            base_alloc = calculate_dynamic_allocation(fut_free if fut_free > 0 else 1000.0, max_active_futures_positions, max_single_trade_usdt)
+                            # Wykorzystujemy zoptymalizowaną funkcję bazującą na wolnym saldzie (fut_free)
+                            base_alloc = calculate_dynamic_allocation(
+                                fut_free if fut_free > 0 else 1000.0,
+                                max_active_futures_positions,
+                                max_single_trade_usdt,
+                                current_adx,
+                                sym_volume
+                            )
                             notional_usdt = base_alloc * lev_to_set
                             amount_contracts = notional_usdt / market_price
 
@@ -884,11 +911,9 @@ if selected_symbols and futures_ex:
                                 continue
 
                             futures_ex.set_leverage(lev_to_set, symbol)
-                            
                             futures_ex.create_order(symbol, "market", trade_side, amount_val, params={})
-                            place_sl_tp_orders(futures_ex, symbol, trade_side, amount_val, market_price)
 
-                            st.session_state.signal_cooldown[cooldown_key] = now_ts + 60
+                            st.session_state.signal_cooldown[cooldown_key] = now_ts + 120
                             st.session_state.trade_history.insert(0, {
                                 "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Para": symbol,
