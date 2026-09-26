@@ -383,30 +383,26 @@ def get_exchange():
         return None
 
 # =====================================================================
-# OPTYMALIZOWANY DYNAMICZNY SYSTEM ALOKACJI (Pełne wykorzystanie wolnych środków)
+# AUTONOMICZNY, PŁYNNY SYSTEM DOBORU KAPITAŁU I DŹWIGNI (W RAMACH LIMITU)
 # =====================================================================
-def calculate_dynamic_allocation(free_balance, max_positions, max_single, adx_val=20.0, volume=10_000_000):
+def calculate_dynamic_allocation(free_balance, max_positions, max_single_limit, adx_val=20.0, volume=10_000_000):
     if free_balance <= 0:
-        return max_single
+        return max_single_limit
     
-    # Bazowa alokacja oparta na wolnym saldzie dzielonym przez liczbę slotów (zamiast sztywnego totalu)
-    base_slot_allocation = free_balance / max(1, max_positions)
+    safe_balance_pool = free_balance * 0.85
+    base_slot_allocation = safe_balance_pool / max(1, max_positions)
     
-    # Modyfikator ADX premiujący silne trendy (skala od 0.95 do 1.25 dla wysokiego ADX)
-    adx_multiplier = 0.95 + (min(max(adx_val, 10.0), 60.0) - 10.0) / 160.0
+    adx_clamped = min(max(adx_val, 10.0), 60.0)
+    adx_multiplier = 0.75 + (adx_clamped - 10.0) / (50.0 / 0.5)
     
-    # Modyfikator płynności oparty na wolumenie
     vol_multiplier = np.log10(max(volume, 1_000_000)) / np.log10(20_000_000)
-    vol_multiplier = max(0.9, min(1.2, vol_multiplier))
+    vol_multiplier = max(0.8, min(1.2, vol_multiplier))
     
     dynamic_alloc = base_slot_allocation * adx_multiplier * vol_multiplier
-    
-    # Uwzględniamy limit użytkownika na 1 pozycję, ale pozwalamy alokować do 95% wolnych środków na jeden slot,
-    # żeby uniknąć sytuacji zablokowanego kapitału.
-    upper_bound = min(max_single, free_balance * 0.95)
+    upper_bound = min(max_single_limit, free_balance * 0.95)
     return min(upper_bound, max(10.0, dynamic_alloc))
 
-def get_exchange_max_leverage(exchange, symbol, default_max=20):
+def get_exchange_max_leverage(exchange, symbol, default_max=15):
     try:
         market = exchange.market(symbol)
         if 'limits' in market and 'leverage' in market['limits']:
@@ -417,16 +413,16 @@ def get_exchange_max_leverage(exchange, symbol, default_max=20):
         pass
     return default_max
 
-def get_smart_leverage(adx_val, exchange_limit, preferred_max=20):
+def get_smart_leverage(adx_val, exchange_limit, preferred_max=15):
+    """
+    Płynny dobór dźwigni w zakresie od 1x do preferowanego maksimum (np. 15x),
+    nigdy nie przekraczając narzuconego limitu.
+    """
     effective_max = min(preferred_max, exchange_limit)
-    if adx_val < 20:
-        return min(5, effective_max)
-    elif adx_val < 30:
-        return min(10, effective_max)
-    elif adx_val < 40:
-        return min(15, effective_max)
-    else:
-        return effective_max
+    adx_clamped = min(max(adx_val, 10.0), 55.0)
+    ratio = (adx_clamped - 10.0) / (55.0 - 10.0)
+    floating_lev = 1.0 + ratio * (effective_max - 1.0)
+    return int(round(floating_lev))
 
 # =====================================================================
 # PANEL BOCZNY (SIDEBAR)
@@ -528,7 +524,8 @@ if enable_roe_guard:
 else:
     custom_stop_loss_roe = 999.0
     custom_take_profit_roe = 999.0
-    st.sidebar.markdown("---")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 🛡️ Globalny Stop-Loss / Take-Profit Sesji")
 enable_global_session_guard = st.sidebar.checkbox("Włącz globalny SL/TP sesji", value=True, key="enable_global_session_guard")
 
@@ -539,11 +536,11 @@ else:
     global_session_sl_usdt = -9999.0
     global_session_tp_usdt = 9999.0
 
-
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Zarządzanie Dźwignią")
-leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["Autonomiczny (max 20x)", "Ręczny"], key="sb_leverage_mode")
-manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 20, 3, 1, key="sb_manual_leverage")
+leverage_mode = st.sidebar.radio("Tryb Dźwigni", ["Autonomiczny (płynny w granicach limitu)", "Ręczny"], key="sb_leverage_mode")
+max_allowed_leverage = st.sidebar.slider("Maksymalna dozwolona dźwignia", 1, 50, 15, 1, key="sb_max_allowed_leverage")
+manual_leverage = st.sidebar.slider("Stała dźwignia Futures", 1, 50, 5, 1, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⏱️ Timeframe Analizy")
@@ -720,7 +717,7 @@ with st.container(border=True):
         st.warning("🔴 STATUS: SYSTEM ZATRZYMANY (Kliknij zielony przycisk powyżej, aby uruchomić)")
 
 # ==========================================
-# POBRANIE PAR I SILNIK TRANSAKCYJNY Z AKTYWNYM STRAŻNIKIEM ROE
+# POBRANIE PAR I SILNIK TRANSAKCYJNY
 # ==========================================
 selected_symbols = []
 tickers_data = {}
@@ -820,11 +817,14 @@ if selected_symbols and futures_ex:
                 trend_is_bullish = last_r['EMA_fast'] > last_r['EMA_slow']
                 trend_is_bearish = last_r['EMA_fast'] < last_r['EMA_slow']
 
-                min_adx_required = 25.0  
+                # =========================================================
+                # POPRAWIONY FILTR: Odrzucamy zakupy na górkach i dołkach
+                # =========================================================
+                min_adx_required = 30.0  
                 
-                if trend_is_bullish and current_adx >= min_adx_required and current_rsi < 70:
+                if trend_is_bullish and current_adx >= min_adx_required and current_rsi < 65:
                     signal_type = "LONG"
-                elif trend_is_bearish and current_adx >= min_adx_required and current_rsi > 30:
+                elif trend_is_bearish and current_adx >= min_adx_required and current_rsi > 35:
                     signal_type = "SHORT"
                 else:
                     signal_type = "NEUTRALNY"
@@ -886,10 +886,13 @@ if selected_symbols and futures_ex:
                             if market_price <= 0:
                                 continue
 
-                            exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
-                            lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
+                            exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=50)
+                            
+                            if "Autonomiczny" in leverage_mode:
+                                lev_to_set = get_smart_leverage(current_adx, exch_max_lev, max_allowed_leverage)
+                            else:
+                                lev_to_set = min(manual_leverage, exch_max_lev, max_allowed_leverage)
 
-                            # Wykorzystujemy zoptymalizowaną funkcję bazującą na wolnym saldzie (fut_free)
                             base_alloc = calculate_dynamic_allocation(
                                 fut_free if fut_free > 0 else 1000.0,
                                 max_active_futures_positions,
