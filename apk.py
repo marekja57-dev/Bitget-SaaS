@@ -383,24 +383,28 @@ def get_exchange():
         return None
 
 # =====================================================================
-# AUTONOMICZNY, PŁYNNY SYSTEM DOBORU KAPITAŁU I DŹWIGNI
+# POPRAWIONY SYSTEM DOBORU KAPITAŁU OPARTY NA RYZYKU I SALDZIE
 # =====================================================================
-def calculate_dynamic_allocation(free_balance, max_positions, max_single_limit, adx_val=20.0, volume=10_000_000):
-    if free_balance <= 0:
-        return max_single_limit
+def calculate_risk_based_allocation(free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0):
+    if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
+        return min(max_single_limit, max(5.0, free_balance * 0.1))
+        
+    # Maksymalna kwota do stracenia w jednej transakcji (np. 1% wolnego salda)
+    max_risk_amount = free_balance * risk_percentage
     
-    safe_balance_pool = free_balance * 0.85
-    base_slot_allocation = safe_balance_pool / max(1, max_positions)
+    # Odległość do Stop Lossa w procentach
+    risk_distance_pct = abs(entry_price - stop_loss_price) / entry_price
+    if risk_distance_pct == 0:
+        risk_distance_pct = 0.02 # zabezpieczenie przed dzieleniem przez zero (domyślnie 2%)
+        
+    # Wartość pozycji wynikająca z ryzyka
+    position_notional_value = max_risk_amount / risk_distance_pct
     
-    adx_clamped = min(max(adx_val, 10.0), 60.0)
-    adx_multiplier = 0.75 + (adx_clamped - 10.0) / (50.0 / 0.5)
+    # Bezpiecznik: nie przekraczamy wolnych środków pomnożonych przez dźwignię ani limitu użytkownika
+    max_allowed_value = min(free_balance * leverage * 0.9, max_single_limit * leverage)
+    final_notional = min(position_notional_value, max_allowed_value)
     
-    vol_multiplier = np.log10(max(volume, 1_000_000)) / np.log10(20_000_000)
-    vol_multiplier = max(0.8, min(1.2, vol_multiplier))
-    
-    dynamic_alloc = base_slot_allocation * adx_multiplier * vol_multiplier
-    upper_bound = min(max_single_limit, free_balance * 0.95)
-    return min(upper_bound, max(10.0, dynamic_alloc))
+    return max(5.0, final_notional)
 
 def get_exchange_max_leverage(exchange, symbol, default_max=15):
     try:
@@ -866,14 +870,18 @@ if selected_symbols and futures_ex:
                             exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
                             lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
 
-                            base_alloc = calculate_dynamic_allocation(
+                            # Szacowany Stop-Loss na podstawie procentu ROE (np. 4% ROE przy danej dźwigni)
+                            sl_pct_from_roe = (custom_stop_loss_roe / 100.0) / lev_to_set
+                            estimated_sl_price = market_price * (1 - sl_pct_from_roe) if target_side == "buy" else market_price * (1 + sl_pct_from_roe)
+
+                            notional_usdt = calculate_risk_based_allocation(
                                 fut_free if fut_free > 0 else 1000.0,
-                                max_active_futures_positions,
-                                max_single_trade_usdt,
-                                current_adx,
-                                sym_volume
+                                market_price,
+                                estimated_sl_price,
+                                risk_percentage=0.01,
+                                leverage=lev_to_set,
+                                max_single_limit=max_single_trade_usdt
                             )
-                            notional_usdt = base_alloc * lev_to_set
                             amount_contracts = notional_usdt / market_price
 
                             try:
@@ -916,14 +924,18 @@ if selected_symbols and futures_ex:
                             exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
                             lev_to_set = get_smart_leverage(current_adx, exch_max_lev, 10 if "Autonomiczny" in leverage_mode else manual_leverage)
 
-                            base_alloc = calculate_dynamic_allocation(
+                            # Szacowany Stop-Loss na podstawie procentu ROE
+                            sl_pct_from_roe = (custom_stop_loss_roe / 100.0) / lev_to_set
+                            estimated_sl_price = market_price * (1 - sl_pct_from_roe) if target_side == "buy" else market_price * (1 + sl_pct_from_roe)
+
+                            notional_usdt = calculate_risk_based_allocation(
                                 fut_free if fut_free > 0 else 1000.0,
-                                max_active_futures_positions,
-                                max_single_trade_usdt,
-                                current_adx,
-                                sym_volume
+                                market_price,
+                                estimated_sl_price,
+                                risk_percentage=0.01,
+                                leverage=lev_to_set,
+                                max_single_limit=max_single_trade_usdt
                             )
-                            notional_usdt = base_alloc * lev_to_set
                             amount_contracts = notional_usdt / market_price
 
                             try:
