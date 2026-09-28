@@ -20,9 +20,6 @@ st.set_page_config(
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
-# =====================================================================
-# SŁOWNIKI JĘZYKOWE I TŁUMACZENIA
-# =====================================================================
 TRANSLATIONS = {
     "Polski": {
         "title": "BITGET FUTURES",
@@ -205,8 +202,9 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     return df
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -274,7 +272,6 @@ stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID",
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
-# Stan sesji
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_email" not in st.session_state:
@@ -312,7 +309,7 @@ if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
         st.session_state.stripe_paid = True
         try:
-            conn = sqlite3.connect(DB_FILE)
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET stripe_paid = 1 WHERE id = ?",
@@ -391,7 +388,7 @@ if not st.session_state.logged_in:
         login_email = st.text_input(t("email_label"), key="log_email")
         login_pass = st.text_input(t("pass_label"), type="password", key="log_pass")
         if st.button(t("login_btn"), use_container_width=True):
-            conn = sqlite3.connect(DB_FILE)
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE LOWER(TRIM(email)) = ?",
@@ -423,7 +420,7 @@ if not st.session_state.logged_in:
         if st.button(t("register_btn"), use_container_width=True):
             if reg_email and reg_pass:
                 try:
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = sqlite3.connect(DB_FILE, timeout=30.0)
                     cursor = conn.cursor()
                     clean_reg = reg_email.strip().lower()
                     is_adm = 1 if clean_reg in ADMIN_EMAILS else 0
@@ -502,7 +499,6 @@ def get_smart_leverage(adx_val, exchange_limit, preferred_max=15):
     floating_lev = 1.0 + ratio * (effective_max - 1.0)
     return int(round(floating_lev))
 
-# Sidebar
 st.sidebar.markdown(f"### 👤 {st.session_state.get('user_email', '')}")
 if is_user_admin():
     st.sidebar.markdown(f"**{t('sidebar_role_admin')}**")
@@ -545,7 +541,7 @@ if st.sidebar.button(t("save_keys_btn"), use_container_width=True, key="sidebar_
         st.session_state.secret_key = input_secret
         st.session_state.passphrase = input_pass
         try:
-            conn = sqlite3.connect(DB_FILE)
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ?",
@@ -626,7 +622,6 @@ if emergency_kill:
     time.sleep(2)
     st.rerun()
 
-# Saldo i metryki
 fut_free, fut_total = 0.0, 0.0
 active_positions_count = 0
 total_unrealized_pnl = 0.0
@@ -801,9 +796,9 @@ for idx, tf in enumerate(available_timeframes):
     with cols_tf[idx]:
         st.markdown(f"**📌 {tf}**")
         
-        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
-        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
-        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
+        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9 if tf=="15m" else 9, key=f"ema_f_{tf}")
+        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21 if tf=="15m" else 21, key=f"ema_s_{tf}")
+        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 32.0 if tf=="15m" else 28.0, 1.0, key=f"adx_{tf}")
 
         is_active = tf in st.session_state.active_mtf_bots
         
@@ -837,7 +832,6 @@ for idx, tf in enumerate(available_timeframes):
                     st.success(f"Uruchomiono bota na {tf}!")
                     st.rerun()
 
-# STRAŻNIK ROE
 existing_positions_map = {}
 existing_positions_amount = {}
 real_active_positions_count = 0
@@ -1009,7 +1003,6 @@ if active_tf_list and tickers_data and futures_ex:
             except Exception as e_sym:
                 print(f"[BŁĄD ANALIZY {symbol} na {tf}]: {e_sym}")
 
-# Wyświetlanie wyników
 st.markdown("---")
 st.subheader(t('market_scanner_results'))
 
@@ -1037,6 +1030,5 @@ if st.session_state.trade_history:
 else:
     st.info(t("no_history"))
 
-# AUTOMATYCZNE ODŚWIEŻANIE STRONY (AUTO-REFRESH)
 time.sleep(auto_refresh_seconds)
 st.rerun()
