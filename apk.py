@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 import time
+import threading
 import ccxt
 import numpy as np
 import pandas as pd
@@ -61,14 +62,8 @@ TRANSLATIONS = {
         "lev_mode": "Tryb Dźwigni",
         "max_allowed_lev": "Maksymalna dozwolona dźwignia",
         "manual_lev": "Stała dźwignia Futures",
-        "strategy_params": "⏱️ Parametry Strategii i Wskaźników",
-        "timeframe": "Interwał",
-        "ema_fast": "Okres EMA Szybka",
-        "ema_slow": "Okres EMA Wolna",
-        "min_adx": "Minimalny ADX (Siła Trendu)",
-        "bot_control": "🤖 Panel Sterowania Botem Futures",
-        "scan_interval": "Interwał odświeżania (s)",
-        "max_pairs": "Liczba par Futures",
+        "bot_control": "🤖 Panel Sterowania Wieloma Botami MTF (Niezależne Parametry)",
+        "max_pairs": "Liczba par Futures do skanowania",
         "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
         "wallet_futures": "🔵 Portfel Futures",
         "free_balance": "Wolne",
@@ -77,16 +72,12 @@ TRANSLATIONS = {
         "slots_futures": "📈 Sloty Futures",
         "active_max": "Aktywne / Maksymalne",
         "session_time": "⏱️ Czas Sesji",
-        "start_scanner": "🟢 URUCHOM SKANER I BOT HANDLOWY",
-        "stop_scanner": "🔴 ZATRZYMAJ BOT I SKANER",
-        "status_active": "STATUS: SYSTEM AKTYWNY I HANDLUJE",
-        "status_stopped": "STATUS: SYSTEM ZATRZYMANY",
-        "market_scanner_results": "📊 Wyniki Skanera Rynkowego",
+        "market_scanner_results": "📊 Wyniki Skanera Rynkowego (Aktywne Interwały)",
         "active_positions": "📈 Aktywne Pozycje Futures",
         "trade_history": "📜 Historia Ostatnich Transakcji",
         "no_positions": "Brak otwartych pozycji futures.",
         "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
-        "no_scanner": "Brak danych ze skanera."
+        "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania. Uruchom przynajmniej jeden bot."
     },
     "English": {
         "title": "BITGET FUTURES",
@@ -126,14 +117,8 @@ TRANSLATIONS = {
         "lev_mode": "Leverage Mode",
         "max_allowed_lev": "Maximum allowed leverage",
         "manual_lev": "Fixed Futures leverage",
-        "strategy_params": "⏱️ Strategy & Indicator Parameters",
-        "timeframe": "Timeframe",
-        "ema_fast": "EMA Fast Period",
-        "ema_slow": "EMA Slow Period",
-        "min_adx": "Minimum ADX (Trend Strength)",
-        "bot_control": "🤖 Futures Bot Control Panel",
-        "scan_interval": "Refresh interval (s)",
-        "max_pairs": "Number of Futures pairs",
+        "bot_control": "🤖 Multi-Timeframe Bot Control Panel (Independent Settings)",
+        "max_pairs": "Number of Futures pairs to scan",
         "kill_switch": "🔴 CLOSE ALL (KILL SWITCH)",
         "wallet_futures": "🔵 Futures Wallet",
         "free_balance": "Free",
@@ -142,16 +127,12 @@ TRANSLATIONS = {
         "slots_futures": "📈 Futures Slots",
         "active_max": "Active / Maximum",
         "session_time": "⏱️ Session Time",
-        "start_scanner": "🟢 START SCANNER & TRADING BOT",
-        "stop_scanner": "🔴 STOP BOT & SCANNER",
-        "status_active": "STATUS: SYSTEM ACTIVE & TRADING",
-        "status_stopped": "STATUS: SYSTEM STOPPED",
-        "market_scanner_results": "📊 Market Scanner Results",
+        "market_scanner_results": "📊 Market Scanner Results (Active Timeframes)",
         "active_positions": "📈 Active Futures Positions",
         "trade_history": "📜 Recent Trade History",
         "no_positions": "No open futures positions.",
         "no_history": "No recorded trades in this session.",
-        "no_scanner": "No scanner data available."
+        "no_scanner": "No active MTF bots or scanner results. Start at least one bot."
     }
 }
 
@@ -304,10 +285,6 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = None
 if "stripe_paid" not in st.session_state:
     st.session_state.stripe_paid = False
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
-if "trend_bot_fut_active" not in st.session_state:
-    st.session_state.trend_bot_fut_active = False
 if "session_start_time" not in st.session_state:
     st.session_state.session_start_time = datetime.now()
 if "trade_history" not in st.session_state:
@@ -328,6 +305,8 @@ if "session_start_balance" not in st.session_state:
     st.session_state.session_start_balance = 0.0
 if "session_baseline_locked" not in st.session_state:
     st.session_state.session_baseline_locked = False
+if "active_mtf_bots" not in st.session_state:
+    st.session_state.active_mtf_bots = {}
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -612,16 +591,11 @@ max_allowed_leverage = st.sidebar.slider(t("max_allowed_lev"), 1, 50, 15, 1, key
 manual_leverage = st.sidebar.slider(t("manual_lev"), 1, 50, 5, 1, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"### {t('strategy_params')}")
-fut_tf = st.sidebar.selectbox(t("timeframe"), ["1m", "5m", "15m", "30m", "1h", "4h", "1d"], index=4, key="sb_fut_tf")
-ema_fast_val = int(st.sidebar.number_input(t("ema_fast"), min_value=1, max_value=200, value=9, key="conf_ema_fast"))
-ema_slow_val = int(st.sidebar.number_input(t("ema_slow"), min_value=2, max_value=300, value=21, key="conf_ema_slow"))
-min_adx_required = st.sidebar.slider(t("min_adx"), 10.0, 50.0, 30.0, 1.0, key="sb_min_adx")
+max_fut_scan_pairs = st.sidebar.slider(t("max_pairs"), 1, 100, 30, 1, key="sb_max_fut_pairs")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"### {t('bot_control')}")
-scan_interval = st.sidebar.slider(t("scan_interval"), 3, 300, 5, key="sb_scan_interval")
-max_fut_scan_pairs = st.sidebar.slider(t("max_pairs"), 1, 100, 30, 1, key="sb_max_fut_pairs") # Zmniejsz domyślny limit par, by oszczędzać limity API!
+st.sidebar.subheader("⏱️ Odświeżanie strony / Auto-Refresh")
+auto_refresh_seconds = st.sidebar.slider("Częstotliwość odświeżania (sekundy)", 5, 60, 15, 1, key="sb_auto_refresh")
 
 st.sidebar.markdown("---")
 emergency_kill = st.sidebar.button(t("kill_switch"), type="primary", use_container_width=True, key="sidebar_kill_switch_btn")
@@ -646,10 +620,9 @@ if emergency_kill:
         except Exception:
             pass
 
-    st.session_state.scanner_active = False
-    st.session_state.trend_bot_fut_active = False
+    st.session_state.active_mtf_bots = {}
     st.session_state.trade_history = []
-    st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures.")
+    st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures i zatrzymano wszystkie boty.")
     time.sleep(2)
     st.rerun()
 
@@ -744,7 +717,7 @@ st.markdown(
 <div class="metric-card">
 <div class="metric-label">{t("session_time")}</div>
 <div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
-<div class="metric-delta">Interwał: {scan_interval}s | Wykres: {fut_tf}</div>
+<div class="metric-delta">Aktywne boty MTF: {len(st.session_state.active_mtf_bots)}</div>
 </div>
 </div>
 """,
@@ -752,31 +725,119 @@ st.markdown(
 )
 
 st.markdown("---")
-st.subheader(f"🥾 {t('bot_control')}")
+st.subheader(f"🤖 {t('bot_control')}")
+st.text("Każdy interwał posiada własne, niezależne parametry EMA oraz ADX. Ustaw je według uznania i uruchom wybrane boty.")
 
-with st.container(border=True):
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button(t("start_scanner"), use_container_width=True, key="btn_start_master"):
-            st.session_state.scanner_active = True
-            st.session_state.trend_bot_fut_active = True
-            if fut_total > 0:
-                st.session_state.session_baseline_locked = False
-            st.rerun()
-    with col_btn2:
-        if st.button(t("stop_scanner"), use_container_width=True, key="btn_stop_master"):
-            st.session_state.scanner_active = False
-            st.session_state.trend_bot_fut_active = False
-            st.rerun()
+def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema_s, adx_min, max_single, lev_mode_val, lev_man, lev_max, stop_ev, scan_limit_pairs):
+    try:
+        ex_cls = getattr(ccxt, exchange_name.lower())
+        cfg = {
+            "apiKey": api_k,
+            "secret": secret_k,
+            "enableRateLimit": True,
+            "options": {"defaultType": "swap"}
+        }
+        if exchange_name.lower() in ["bitget", "okx"] and pass_k:
+            cfg["password"] = pass_k
+        ex_thread = ex_cls(cfg)
+    except Exception as e:
+        print(f"[Bot {timeframe}] Błąd inicjalizacji giełdy: {e}")
+        return
 
-    if st.session_state.get("scanner_active", False):
-        st.success(f"🟢 {t('status_active')} (TF: {fut_tf} | EMA: {ema_fast_val}/{ema_slow_val} | Min ADX: {min_adx_required} | SL ROE: {custom_stop_loss_roe}% | TP ROE: {custom_take_profit_roe}%)")
-    else:
-        st.warning(f"🔴 {t('status_stopped')}")
+    interval_sec = 30
+    if timeframe.endswith('m'):
+        interval_sec = max(10, int(timeframe[:-1]) * 60)
+    elif timeframe.endswith('h'):
+        interval_sec = int(timeframe[:-1]) * 3600
+    elif timeframe.endswith('d'):
+        interval_sec = int(timeframe[:-1]) * 86400
 
-# ==========================================
-# STRAŻNIK ROE WYKONYWANY NAJPIERW (PRIORYTET BEZPIECZEŃSTWA)
-# ==========================================
+    while not stop_ev.is_set():
+        try:
+            ex_thread.load_markets()
+            tickers = ex_thread.fetch_tickers()
+            valid_syms = [s for s, t in tickers.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
+            top_syms = sorted(valid_syms, key=lambda s: tickers.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:scan_limit_pairs]
+
+            for symbol in top_syms:
+                if stop_ev.is_set():
+                    break
+                try:
+                    ohlcv = ex_thread.fetch_ohlcv(symbol, timeframe=timeframe, limit=max(100, ema_s + 30))
+                    if ohlcv:
+                        df_b = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                        df_b = calculate_indicators(df_b, ema_fast=ema_f, ema_slow=ema_s, adx_period=14)
+                        last = df_b.iloc[-1]
+                        prev = df_b.iloc[-2]
+                        m_price = float(last['close'])
+                        c_adx = float(last['adx']) if 'adx' in last and not pd.isna(last['adx']) else 20.0
+                        c_rsi = float(last['rsi']) if 'rsi' in last and not pd.isna(last['rsi']) else 50.0
+
+                        bull = (prev['close'] <= prev['ema_fast']) and (last['close'] > last['ema_fast']) and (last['ema_fast'] > last['ema_slow']) and (c_rsi < 65)
+                        bear = (prev['close'] >= prev['ema_fast']) and (last['close'] < last['ema_fast']) and (last['ema_fast'] < last['ema_slow']) and (c_rsi > 35)
+
+                        sig = "NEUTRALNY"
+                        if bull and c_adx >= adx_min:
+                            sig = "LONG"
+                        elif bear and c_adx >= adx_min:
+                            sig = "SHORT"
+
+                        if sig in ["LONG", "SHORT"]:
+                            print(f"[{datetime.now().strftime('%H:%M:%S')}] [Bot {timeframe}] Wykryto sygnał {sig} na {symbol}!")
+                except Exception:
+                    pass
+        except Exception as e_w:
+            print(f"[Bot {timeframe}] Błąd w pętli: {e_w}")
+
+        for _ in range(interval_sec):
+            if stop_ev.is_set():
+                break
+            time.sleep(1)
+
+available_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+cols_tf = st.columns(len(available_timeframes))
+
+for idx, tf in enumerate(available_timeframes):
+    with cols_tf[idx]:
+        st.markdown(f"**📌 {tf}**")
+        
+        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
+        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
+        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
+
+        is_active = tf in st.session_state.active_mtf_bots
+        
+        if is_active:
+            st.success("🟢 AKTYWNY")
+            if st.button(f"Zatrzymaj {tf}", key=f"stop_tf_{tf}", use_container_width=True):
+                st.session_state.active_mtf_bots[tf]["stop_event"].set()
+                del st.session_state.active_mtf_bots[tf]
+                st.rerun()
+        else:
+            st.warning("🔴 WYŁĄCZONY")
+            if st.button(f"Uruchom {tf}", key=f"start_tf_{tf}", use_container_width=True):
+                if not st.session_state.api_key or not st.session_state.secret_key:
+                    st.error("Najpierw zapisz klucze API w panelu bocznym!")
+                else:
+                    stop_event = threading.Event()
+                    t_thread = threading.Thread(
+                        target=mtf_bot_worker,
+                        args=(tf, st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase, st.session_state.selected_exchange, ema_f_val, ema_s_val, adx_val, max_single_trade_usdt, leverage_mode, manual_leverage, max_allowed_leverage, stop_event, max_fut_scan_pairs),
+                        daemon=True
+                    )
+                    t_thread.start()
+                    st.session_state.active_mtf_bots[tf] = {
+                        "thread": t_thread,
+                        "stop_event": stop_event,
+                        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "ema_fast": ema_f_val,
+                        "ema_slow": ema_s_val,
+                        "min_adx": adx_val
+                    }
+                    st.success(f"Uruchomiono bota na {tf}!")
+                    st.rerun()
+
+# STRAŻNIK ROE
 existing_positions_map = {}
 existing_positions_amount = {}
 real_active_positions_count = 0
@@ -792,8 +853,7 @@ try:
                 existing_positions_amount[sym] = abs(contracts)
                 real_active_positions_count += 1
 
-                # STRAŻNIK ROE - natychmiastowe zamknięcie w przypadku przekroczenia SL/TP
-                if st.session_state.get("trend_bot_fut_active", False) and st.session_state.get("enable_roe_guard", True):
+                if len(st.session_state.active_mtf_bots) > 0 and st.session_state.get("enable_roe_guard", True):
                     try:
                         entry_price = float(p.get("entryPrice", 0) or 0)
                         leverage_val = float(p.get("leverage", 1) or 1)
@@ -825,232 +885,158 @@ try:
 except Exception as e_pos_fetch:
     print(f"[BŁĄD POBIERANIA POZYCJI]: {e_pos_fetch}")
 
-# Pobieranie symboli i rynków
-selected_symbols = []
+all_scan_results = []
 tickers_data = {}
 
 try:
     if futures_ex and hasattr(futures_ex, 'load_markets'):
         futures_ex.load_markets()
         tickers_data = futures_ex.fetch_tickers()
-        filtered = [s for s, t in tickers_data.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
-        selected_symbols = sorted(filtered, key=lambda s: tickers_data.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:max_fut_scan_pairs]
 except Exception as e_tickers:
     print(f"[BŁĄD TICKERÓW]: {e_tickers}")
 
-scan_results = []
-bot_active = st.session_state.get("trend_bot_fut_active", False)
+active_tf_list = list(st.session_state.active_mtf_bots.keys())
 
-if selected_symbols and futures_ex:
-    for symbol in selected_symbols:
-        signal_type = "NEUTRALNY"
-        current_adx = 20.0
-        current_rsi = 50.0
-        market_price = 0.0
-        trend_is_bullish = False
-        trend_is_bearish = False
-        sym_volume = 10_000_000
+if active_tf_list and tickers_data and futures_ex:
+    valid_syms = [s for s, t in tickers_data.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
+    selected_symbols = sorted(valid_syms, key=lambda s: tickers_data.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:max_fut_scan_pairs]
 
-        try:
-            t_info = tickers_data.get(symbol, {})
-            sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
+    for tf in active_tf_list:
+        bot_conf = st.session_state.active_mtf_bots[tf]
+        e_fast = bot_conf["ema_fast"]
+        e_slow = bot_conf["ema_slow"]
+        m_adx = bot_conf["min_adx"]
 
-            req_limit = max(100, ema_slow_val + 30)
-            ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=fut_tf, limit=req_limit)
-            
-            if ohlcv and len(ohlcv) > max(ema_fast_val, ema_slow_val):
-                df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                df_sym = calculate_indicators(df_sym, ema_fast=ema_fast_val, ema_slow=ema_slow_val, adx_period=14)
+        for symbol in selected_symbols:
+            signal_type = "NEUTRALNY"
+            current_adx = 20.0
+            current_rsi = 50.0
+            market_price = 0.0
+            sym_volume = 10_000_000
 
-                last_r = df_sym.iloc[-1]
-                market_price = float(last_r['close'])
+            try:
+                t_info = tickers_data.get(symbol, {})
+                sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
 
-                if 'adx' in last_r and not pd.isna(last_r['adx']):
-                    current_adx = float(last_r['adx'])
-                if 'rsi' in last_r and not pd.isna(last_r['rsi']):
-                    current_rsi = float(last_r['rsi'])
+                req_limit = max(100, e_slow + 30)
+                ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=tf, limit=req_limit)
+                
+                if ohlcv and len(ohlcv) > max(e_fast, e_slow):
+                    df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    df_sym = calculate_indicators(df_sym, ema_fast=e_fast, ema_slow=e_slow, adx_period=14)
 
-                trend_is_bullish = last_r['ema_fast'] > last_r['ema_slow']
-                trend_is_bearish = last_r['ema_fast'] < last_r['ema_slow']
+                    last_r = df_sym.iloc[-1]
+                    prev_r = df_sym.iloc[-2]
+                    market_price = float(last_r['close'])
 
-                if trend_is_bullish and current_adx >= min_adx_required and current_rsi < 70:
-                    signal_type = "LONG"
-                elif trend_is_bearish and current_adx >= min_adx_required and current_rsi > 30:
-                    signal_type = "SHORT"
-                else:
-                    signal_type = "NEUTRALNY"
-            
-            # Bezpieczny odstęp między zapytaniami dla par, chroniący przed banem API
-            time.sleep(0.05)
-        except Exception as e_sym_scan:
-            print(f"[BŁĄD SKANU {symbol}]: {e_sym_scan}")
+                    if 'adx' in last_r and not pd.isna(last_r['adx']):
+                        current_adx = float(last_r['adx'])
+                    if 'rsi' in last_r and not pd.isna(last_r['rsi']):
+                        current_rsi = float(last_r['rsi'])
 
-        scan_results.append({
-            "Para": symbol,
-            "Sygnał": signal_type,
-            "Wolumen": f"{sym_volume:,.0f}",
-            "ADX": f"{current_adx:.1f}",
-            "RSI": f"{current_rsi:.1f}",
-            "Cena": f"{market_price:.4f}" if market_price > 0 else "Błąd",
-            "Status": "Aktywny"
-        })
+                    cross_above_ema = (prev_r['close'] <= prev_r['ema_fast']) and (last_r['close'] > last_r['ema_fast'])
+                    trend_is_bullish = (
+                        cross_above_ema
+                        and last_r['ema_fast'] > last_r['ema_slow']
+                        and current_rsi < 65
+                    )
 
-        if bot_active:
-            current_pos_side = existing_positions_map.get(symbol, None)
-            position_contracts = existing_positions_amount.get(symbol, 0.0)
+                    cross_below_ema = (prev_r['close'] >= prev_r['ema_fast']) and (last_r['close'] < last_r['ema_fast'])
+                    trend_is_bearish = (
+                        cross_below_ema
+                        and last_r['ema_fast'] < last_r['ema_slow']
+                        and current_rsi > 35
+                    )
 
-            target_side = "buy" if signal_type == "LONG" else ("sell" if signal_type == "SHORT" else None)
-            cooldown_key = f"trend_bot_fut_{symbol}"
-            now_ts = time.time()
-            can_trade = now_ts > st.session_state.signal_cooldown.get(cooldown_key, 0)
+                    if trend_is_bullish and current_adx >= m_adx:
+                        signal_type = "LONG"
+                    elif trend_is_bearish and current_adx >= m_adx:
+                        signal_type = "SHORT"
 
-            if current_pos_side and position_contracts > 0:
-                is_long = current_pos_side in ["buy", "long"]
-                is_short = current_pos_side in ["sell", "short"]
-                should_reverse = (is_long and signal_type == "SHORT") or (is_short and signal_type == "LONG")
+                    all_scan_results.append({
+                        "Interwał": tf,
+                        "Para": symbol,
+                        "Cena": market_price,
+                        "ADX": round(current_adx, 2),
+                        "RSI": round(current_rsi, 2),
+                        "Sygnał": signal_type,
+                        "Wolumen": sym_volume
+                    })
 
-                if should_reverse and can_trade:
-                    try:
-                        if market_price <= 0:
-                            ticker = futures_ex.fetch_ticker(symbol)
-                            market_price = float(ticker.get("last") or ticker.get("close", 0))
+                    if symbol not in existing_positions_map and real_active_positions_count < max_active_futures_positions:
+                        if signal_type in ["LONG", "SHORT"]:
+                            cooldown_key = f"{tf}_{symbol}_{signal_type}"
+                            last_signal_time = st.session_state.signal_cooldown.get(cooldown_key, 0)
+                            if time.time() - last_signal_time > 300:
+                                try:
+                                    exchange_limit = get_exchange_max_leverage(futures_ex, symbol, default_max=15)
+                                    if leverage_mode == "Ręczny":
+                                        chosen_lev = min(manual_leverage, exchange_limit)
+                                    else:
+                                        chosen_lev = get_smart_leverage(current_adx, exchange_limit, preferred_max=max_allowed_leverage)
 
-                        if market_price > 0:
-                            exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
-                            lev_to_set = get_smart_leverage(current_adx, exch_max_lev, max_allowed_leverage) if "Autonomiczny" in leverage_mode else min(manual_leverage, exch_max_lev)
+                                    try:
+                                        futures_ex.set_leverage(chosen_lev, symbol)
+                                    except Exception:
+                                        pass
 
-                            sl_pct_from_roe = (custom_stop_loss_roe / 100.0) / lev_to_set
-                            estimated_sl_price = market_price * (1 - sl_pct_from_roe) if target_side == "buy" else market_price * (1 + sl_pct_from_roe)
+                                    notional_allocation = calculate_risk_based_allocation(
+                                        free_balance=fut_free,
+                                        entry_price=market_price,
+                                        stop_loss_price=market_price * 0.98 if signal_type == "LONG" else market_price * 1.02,
+                                        risk_percentage=0.01,
+                                        leverage=chosen_lev,
+                                        max_single_limit=max_single_trade_usdt
+                                    )
 
-                            notional_usdt = calculate_risk_based_allocation(
-                                fut_free if fut_free > 0 else 1000.0,
-                                market_price,
-                                estimated_sl_price,
-                                risk_percentage=0.01,
-                                leverage=lev_to_set,
-                                max_single_limit=max_single_trade_usdt
-                            )
-                            amount_contracts = notional_usdt / market_price
-                            try:
-                                amount_val = float(futures_ex.amount_to_precision(symbol, amount_contracts))
-                                if amount_val <= 0:
-                                    amount_val = amount_contracts
-                            except Exception:
-                                amount_val = amount_contracts
+                                    amount_coins = notional_allocation / market_price
+                                    amount_prec = float(futures_ex.amount_to_precision(symbol, amount_coins))
 
-                            if (amount_val * market_price) >= 5.0:
-                                close_side = "sell" if is_long else "buy"
-                                futures_ex.create_order(symbol, "market", close_side, position_contracts, params={'reduceOnly': True})
-                                futures_ex.set_leverage(lev_to_set, symbol)
-                                futures_ex.create_order(symbol, "market", target_side, amount_val, params={})
+                                    if amount_prec > 0:
+                                        order_side = "buy" if signal_type == "LONG" else "sell"
+                                        futures_ex.create_order(symbol, "market", order_side, amount_prec)
+                                        st.session_state.signal_cooldown[cooldown_key] = time.time()
+                                        st.session_state.trade_history.insert(0, {
+                                            "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            "Para": symbol,
+                                            "Typ": f"WEJŚCIE {signal_type} ({tf})",
+                                            "Cena": f"{market_price:.4f}",
+                                            "Ilość": f"{amount_prec:.4f}",
+                                            "Dźwignia": f"{chosen_lev}x"
+                                        })
+                                except Exception as e_order:
+                                    print(f"[BŁĄD ZLECENIA]: {e_order}")
+            except Exception as e_sym:
+                print(f"[BŁĄD ANALIZY {symbol} na {tf}]: {e_sym}")
 
-                                st.session_state.signal_cooldown[cooldown_key] = now_ts + 60
-                                st.session_state.trade_history.insert(0, {
-                                    "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Para": symbol,
-                                    "Typ": f"ODWRÓCENIE NA {signal_type}",
-                                    "Cena": f"{market_price:.4f}",
-                                    "Ilość": f"{amount_val:.4f}",
-                                    "Dźwignia": f"{lev_to_set}x"
-                                })
-                                existing_positions_map[symbol] = target_side
-                                existing_positions_amount[symbol] = amount_val
-                    except Exception as e_rev:
-                        print(f"[BŁĄD ODWRÓCENIA]: {e_rev}")
-
-            elif not current_pos_side and target_side and can_trade:
-                if real_active_positions_count < max_active_futures_positions:
-                    try:
-                        if market_price <= 0:
-                            ticker = futures_ex.fetch_ticker(symbol)
-                            market_price = float(ticker.get("last") or ticker.get("close", 0))
-
-                        if market_price > 0:
-                            exch_max_lev = get_exchange_max_leverage(futures_ex, symbol, default_max=20)
-                            lev_to_set = get_smart_leverage(current_adx, exch_max_lev, max_allowed_leverage) if "Autonomiczny" in leverage_mode else min(manual_leverage, exch_max_lev)
-
-                            sl_pct_from_roe = (custom_stop_loss_roe / 100.0) / lev_to_set
-                            estimated_sl_price = market_price * (1 - sl_pct_from_roe) if target_side == "buy" else market_price * (1 + sl_pct_from_roe)
-
-                            notional_usdt = calculate_risk_based_allocation(
-                                fut_free if fut_free > 0 else 1000.0,
-                                market_price,
-                                estimated_sl_price,
-                                risk_percentage=0.01,
-                                leverage=lev_to_set,
-                                max_single_limit=max_single_trade_usdt
-                            )
-                            amount_contracts = notional_usdt / market_price
-                            try:
-                                amount_val = float(futures_ex.amount_to_precision(symbol, amount_contracts))
-                                if amount_val <= 0:
-                                    amount_val = amount_contracts
-                            except Exception:
-                                amount_val = amount_contracts
-
-                            if (amount_val * market_price) >= 5.0:
-                                futures_ex.set_leverage(lev_to_set, symbol)
-                                futures_ex.create_order(symbol, "market", target_side, amount_val, params={})
-
-                                st.session_state.signal_cooldown[cooldown_key] = now_ts + 120
-                                st.session_state.trade_history.insert(0, {
-                                    "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    "Para": symbol,
-                                    "Typ": signal_type,
-                                    "Cena": f"{market_price:.4f}",
-                                    "Ilość": f"{amount_val:.4f}",
-                                    "Dźwignia": f"{lev_to_set}x"
-                                })
-                                existing_positions_map[symbol] = target_side
-                                existing_positions_amount[symbol] = amount_val
-                                real_active_positions_count += 1
-                    except Exception as e_open:
-                        print(f"[BŁĄD OTWARCIA]: {e_open}")
-
+# Wyświetlanie wyników
 st.markdown("---")
-st.markdown(f"### {t('market_scanner_results')}")
-if scan_results:
-    st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
+st.subheader(t('market_scanner_results'))
+
+if all_scan_results:
+    df_scan = pd.DataFrame(all_scan_results)
+    st.dataframe(df_scan, use_container_width=True)
 else:
     st.info(t("no_scanner"))
 
-col_tab1, col_tab2 = st.columns(2)
+st.markdown("---")
+st.subheader(t("active_positions"))
 
-with col_tab1:
-    st.markdown(f"### {t('active_positions')}")
-    raw_pos = []
-    try:
-        if futures_ex and hasattr(futures_ex, 'fetch_positions'):
-            raw_pos = futures_ex.fetch_positions()
-    except Exception:
-        pass
+if active_pos:
+    df_pos = pd.DataFrame(active_pos)
+    st.dataframe(df_pos, use_container_width=True)
+else:
+    st.info(t("no_positions"))
 
-    parsed_positions = []
-    if raw_pos:
-        for p in raw_pos:
-            contracts = p.get("contracts", p.get("amount", 0))
-            if contracts and float(contracts) != 0:
-                parsed_positions.append({
-                    "Para": p.get("symbol", "-"),
-                    "Strona": str(p.get("side", "-")).upper(),
-                    "Ilość": float(contracts),
-                    "Cena Wejścia": float(p.get("entryPrice", 0)),
-                    "Dźwignia": int(p.get("leverage", 1)),
-                    "PnL (USDT)": float(p.get("unrealizedPnL", 0))
-                })
+st.markdown("---")
+st.subheader(t("trade_history"))
 
-    if parsed_positions:
-        st.dataframe(pd.DataFrame(parsed_positions), use_container_width=True, hide_index=True)
-    else:
-        st.info(t("no_positions"))
+if st.session_state.trade_history:
+    df_hist = pd.DataFrame(st.session_state.trade_history)
+    st.dataframe(df_hist, use_container_width=True)
+else:
+    st.info(t("no_history"))
 
-with col_tab2:
-    st.markdown(f"### {t('trade_history')}")
-    if st.session_state.trade_history:
-        st.dataframe(pd.DataFrame(st.session_state.trade_history[:15]), use_container_width=True, hide_index=True)
-    else:
-        st.info(t("no_history"))
-
-if st.session_state.scanner_active:
-    time.sleep(scan_interval)
-    st.rerun()
+# AUTOMATYCZNE ODŚWIEŻANIE STRONY (AUTO-REFRESH)
+time.sleep(auto_refresh_seconds)
+st.rerun()
