@@ -156,7 +156,7 @@ def is_user_paid():
 def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     df["ema_fast"] = df["close"].ewm(span=ema_fast, adjust=False).mean()
     df["ema_slow"] = df["close"].ewm(span=ema_slow, adjust=False).mean()
-   
+    
     exp1 = df["close"].ewm(span=12, adjust=False).mean()
     exp2 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = exp1 - exp2
@@ -490,17 +490,17 @@ def get_exchange(api_k="", sec_k="", pass_k="", ex_name="Bitget"):
 def calculate_risk_based_allocation(free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0):
     if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
         return min(max_single_limit * tf_multiplier, max(5.0, free_balance * 0.1 * tf_multiplier))
-       
+        
     scaled_single_limit = max_single_limit * tf_multiplier
     max_risk_amount = free_balance * risk_percentage * tf_multiplier
     risk_distance_pct = abs(entry_price - stop_loss_price) / entry_price
     if risk_distance_pct == 0:
         risk_distance_pct = 0.02
-       
+        
     position_notional_value = max_risk_amount / risk_distance_pct
     max_allowed_value = min(free_balance * leverage * 0.9, scaled_single_limit * leverage)
     final_notional = min(position_notional_value, max_allowed_value)
-   
+    
     return max(5.0 * tf_multiplier, final_notional)
 
 def get_exchange_max_leverage(exchange, symbol, default_max=15):
@@ -875,14 +875,14 @@ cols_tf = st.columns(len(available_timeframes))
 for idx, tf in enumerate(available_timeframes):
     with cols_tf[idx]:
         st.markdown(f"**📌 {tf}**")
-       
+        
         ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
         ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
         adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
         tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=default_multipliers.get(tf, 1.0), step=0.5, key=f"cap_mult_{tf}")
 
         is_active = tf in st.session_state.active_mtf_bots
-       
+        
         if is_active:
             st.success("🟢 AKTYWNY")
             if st.button(f"Zatrzymaj {tf}", key=f"stop_tf_{tf}", use_container_width=True):
@@ -931,7 +931,6 @@ if st.session_state.trade_history:
 else:
     st.info(t("no_history"))
 
-# --- DODANE BRAKUJĄCE LINIE: Panel administracyjny zarządzania użytkownikami w bazie SQLite ---
 if is_user_admin():
     st.markdown("---")
     st.subheader(t("admin_panel"))
