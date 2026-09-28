@@ -49,7 +49,7 @@ TRANSLATIONS = {
         "sub_inactive": "⚠️ Brak aktywnej subskrypcji",
         "pay_btn": "OPŁAĆ DOSTĘP (49 PLN)",
         "capital_risk": "💰 Kapitał i Ryzyko",
-        "max_single": "Maksymalnie USDT na 1 pozycję",
+        "max_single": "Maksymalnie USDT na 1 pozycję (Bazowo)",
         "max_pos": "Maks. aktywne pozycje Futures",
         "roe_guard": "🛑 Zarządzanie Ryzykiem ROE (SL / TP)",
         "enable_roe": "Włącz strażnika SL / TP ROE",
@@ -59,7 +59,7 @@ TRANSLATIONS = {
         "lev_mode": "Tryb Dźwigni",
         "max_allowed_lev": "Maksymalna dozwolona dźwignia",
         "manual_lev": "Stała dźwignia Futures",
-        "bot_control": "🤖 Panel Sterowania Wieloma Botami MTF (Niezależne Parametry)",
+        "bot_control": "🤖 Panel Sterowania Botami MTF (Skala kapitału zależna od interwału)",
         "max_pairs": "Liczba par Futures do skanowania",
         "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
         "wallet_futures": "🔵 Portfel Futures",
@@ -104,7 +104,7 @@ TRANSLATIONS = {
         "sub_inactive": "⚠️ No active subscription",
         "pay_btn": "PAY ACCESS (49 PLN)",
         "capital_risk": "💰 Capital & Risk",
-        "max_single": "Max USDT per position",
+        "max_single": "Max USDT per position (Base)",
         "max_pos": "Max active Futures positions",
         "roe_guard": "🛑 ROE Risk Management (SL / TP)",
         "enable_roe": "Enable SL / TP ROE guard",
@@ -114,7 +114,7 @@ TRANSLATIONS = {
         "lev_mode": "Leverage Mode",
         "max_allowed_lev": "Maximum allowed leverage",
         "manual_lev": "Fixed Futures leverage",
-        "bot_control": "🤖 Multi-Timeframe Bot Control Panel (Independent Settings)",
+        "bot_control": "🤖 Multi-Timeframe Bot Control Panel (Interval-Dependent Capital Scaling)",
         "max_pairs": "Number of Futures pairs to scan",
         "kill_switch": "🔴 CLOSE ALL (KILL SWITCH)",
         "wallet_futures": "🔵 Futures Wallet",
@@ -721,9 +721,9 @@ st.markdown(
 
 st.markdown("---")
 st.subheader(f"🤖 {t('bot_control')}")
-st.text("Każdy interwał posiada własne, niezależne parametry EMA oraz ADX. Ustaw je według uznania i uruchom wybrane boty.")
+st.text("Każdy interwał posiada własne parametry EMA, ADX oraz MNOŻNIK KAPITAŁU (wyższe interwały handlują większą kwotą).")
 
-def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema_s, adx_min, max_single, lev_mode_val, lev_man, lev_max, stop_ev, scan_limit_pairs):
+def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema_s, adx_min, base_max_single, tf_multiplier, lev_mode_val, lev_man, lev_max, stop_ev, scan_limit_pairs):
     try:
         ex_cls = getattr(ccxt, exchange_name.lower())
         cfg = {
@@ -778,7 +778,7 @@ def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema
                             sig = "SHORT"
 
                         if sig in ["LONG", "SHORT"]:
-                            print(f"[{datetime.now().strftime('%H:%M:%S')}] [Bot {timeframe}] Wykryto sygnał {sig} na {symbol}!")
+                            print(f"[{datetime.now().strftime('%H:%M:%S')}] [Bot {timeframe}] Wykryto sygnał {sig} na {symbol} (Mnożnik: {tf_multiplier}x)!")
                 except Exception:
                     pass
         except Exception as e_w:
@@ -790,15 +790,19 @@ def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema
             time.sleep(1)
 
 available_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+default_multipliers = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
 cols_tf = st.columns(len(available_timeframes))
 
 for idx, tf in enumerate(available_timeframes):
     with cols_tf[idx]:
         st.markdown(f"**📌 {tf}**")
         
-        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9 if tf=="15m" else 9, key=f"ema_f_{tf}")
-        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21 if tf=="15m" else 21, key=f"ema_s_{tf}")
-        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 32.0 if tf=="15m" else 28.0, 1.0, key=f"adx_{tf}")
+        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
+        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
+        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
+        
+        # TUTAJ JEST KLUCZOWA ZMIANA: Skala / Mnożnik kapitału dla konkretnego interwału
+        tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=default_multipliers.get(tf, 1.0), step=0.5, key=f"cap_mult_{tf}")
 
         is_active = tf in st.session_state.active_mtf_bots
         
@@ -817,7 +821,7 @@ for idx, tf in enumerate(available_timeframes):
                     stop_event = threading.Event()
                     t_thread = threading.Thread(
                         target=mtf_bot_worker,
-                        args=(tf, st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase, st.session_state.selected_exchange, ema_f_val, ema_s_val, adx_val, max_single_trade_usdt, leverage_mode, manual_leverage, max_allowed_leverage, stop_event, max_fut_scan_pairs),
+                        args=(tf, st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase, st.session_state.selected_exchange, ema_f_val, ema_s_val, adx_val, max_single_trade_usdt, tf_cap_mult, leverage_mode, manual_leverage, max_allowed_leverage, stop_event, max_fut_scan_pairs),
                         daemon=True
                     )
                     t_thread.start()
@@ -827,9 +831,10 @@ for idx, tf in enumerate(available_timeframes):
                         "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "ema_fast": ema_f_val,
                         "ema_slow": ema_s_val,
-                        "min_adx": adx_val
+                        "min_adx": adx_val,
+                        "capital_multiplier": tf_cap_mult
                     }
-                    st.success(f"Uruchomiono bota na {tf}!")
+                    st.success(f"Uruchomiono bota na {tf} (Mnożnik kapitału: {tf_cap_mult}x)!")
                     st.rerun()
 
 existing_positions_map = {}
@@ -900,6 +905,7 @@ if active_tf_list and tickers_data and futures_ex:
         e_fast = bot_conf["ema_fast"]
         e_slow = bot_conf["ema_slow"]
         m_adx = bot_conf["min_adx"]
+        tf_mult = bot_conf.get("capital_multiplier", 1.0) # Pobranie mnożnika kapitału dla tego interwału
 
         for symbol in selected_symbols:
             signal_type = "NEUTRALNY"
@@ -974,13 +980,16 @@ if active_tf_list and tickers_data and futures_ex:
                                     except Exception:
                                         pass
 
+                                    # SKALOWANE ALOKOWANIE KAPITAŁU (Baza * Mnożnik Interwału)
+                                    effective_max_single = max_single_trade_usdt * tf_mult
+
                                     notional_allocation = calculate_risk_based_allocation(
                                         free_balance=fut_free,
                                         entry_price=market_price,
                                         stop_loss_price=market_price * 0.98 if signal_type == "LONG" else market_price * 1.02,
                                         risk_percentage=0.01,
                                         leverage=chosen_lev,
-                                        max_single_limit=max_single_trade_usdt
+                                        max_single_limit=effective_max_single
                                     )
 
                                     amount_coins = notional_allocation / market_price
@@ -993,7 +1002,7 @@ if active_tf_list and tickers_data and futures_ex:
                                         st.session_state.trade_history.insert(0, {
                                             "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                             "Para": symbol,
-                                            "Typ": f"WEJŚCIE {signal_type} ({tf})",
+                                            "Typ": f"WEJŚCIE {signal_type} ({tf}, {tf_mult}x)",
                                             "Cena": f"{market_price:.4f}",
                                             "Ilość": f"{amount_prec:.4f}",
                                             "Dźwignia": f"{chosen_lev}x"
@@ -1030,5 +1039,6 @@ if st.session_state.trade_history:
 else:
     st.info(t("no_history"))
 
-time.sleep(auto_refresh_seconds)
-st.rerun()
+if auto_refresh_seconds > 0:
+    time.sleep(auto_refresh_seconds)
+    st.rerun()
