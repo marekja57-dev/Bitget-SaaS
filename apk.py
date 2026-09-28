@@ -466,20 +466,21 @@ def get_exchange():
     except Exception:
         return None
 
-def calculate_risk_based_allocation(free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0):
+def calculate_risk_based_allocation(free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0):
     if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
-        return min(max_single_limit, max(5.0, free_balance * 0.1))
+        return min(max_single_limit * tf_multiplier, max(5.0, free_balance * 0.1 * tf_multiplier))
         
-    max_risk_amount = free_balance * risk_percentage
+    scaled_single_limit = max_single_limit * tf_multiplier
+    max_risk_amount = free_balance * risk_percentage * tf_multiplier
     risk_distance_pct = abs(entry_price - stop_loss_price) / entry_price
     if risk_distance_pct == 0:
         risk_distance_pct = 0.02
         
     position_notional_value = max_risk_amount / risk_distance_pct
-    max_allowed_value = min(free_balance * leverage * 0.9, max_single_limit * leverage)
+    max_allowed_value = min(free_balance * leverage * 0.9, scaled_single_limit * leverage)
     final_notional = min(position_notional_value, max_allowed_value)
     
-    return max(5.0, final_notional)
+    return max(5.0 * tf_multiplier, final_notional)
 
 def get_exchange_max_leverage(exchange, symbol, default_max=15):
     try:
@@ -800,8 +801,6 @@ for idx, tf in enumerate(available_timeframes):
         ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
         ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
         adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
-        
-        # TUTAJ JEST KLUCZOWA ZMIANA: Skala / Mnożnik kapitału dla konkretnego interwału
         tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=default_multipliers.get(tf, 1.0), step=0.5, key=f"cap_mult_{tf}")
 
         is_active = tf in st.session_state.active_mtf_bots
@@ -905,7 +904,7 @@ if active_tf_list and tickers_data and futures_ex:
         e_fast = bot_conf["ema_fast"]
         e_slow = bot_conf["ema_slow"]
         m_adx = bot_conf["min_adx"]
-        tf_mult = bot_conf.get("capital_multiplier", 1.0) # Pobranie mnożnika kapitału dla tego interwału
+        tf_mult = bot_conf.get("capital_multiplier", 1.0)
 
         for symbol in selected_symbols:
             signal_type = "NEUTRALNY"
@@ -980,16 +979,14 @@ if active_tf_list and tickers_data and futures_ex:
                                     except Exception:
                                         pass
 
-                                    # SKALOWANE ALOKOWANIE KAPITAŁU (Baza * Mnożnik Interwału)
-                                    effective_max_single = max_single_trade_usdt * tf_mult
-
                                     notional_allocation = calculate_risk_based_allocation(
                                         free_balance=fut_free,
                                         entry_price=market_price,
                                         stop_loss_price=market_price * 0.98 if signal_type == "LONG" else market_price * 1.02,
                                         risk_percentage=0.01,
                                         leverage=chosen_lev,
-                                        max_single_limit=effective_max_single
+                                        max_single_limit=max_single_trade_usdt,
+                                        tf_multiplier=tf_mult
                                     )
 
                                     amount_coins = notional_allocation / market_price
@@ -1040,5 +1037,14 @@ else:
     st.info(t("no_history"))
 
 if auto_refresh_seconds > 0:
-    time.sleep(auto_refresh_seconds)
-    st.rerun()
+    refresh_interval_ms = auto_refresh_seconds * 1000
+    st.markdown(
+        f"""
+        <script>
+            setTimeout(function() {{
+                window.location.reload();
+            }}, {refresh_interval_ms});
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
