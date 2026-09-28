@@ -5,12 +5,12 @@ import logging
 import os
 import sqlite3
 import time
-import threading
 import ccxt
 import numpy as np
 import pandas as pd
 import streamlit as st
 import stripe
+import gc
 
 st.set_page_config(
     page_title="Multi-Exchange Futures SaaS",
@@ -724,72 +724,6 @@ st.markdown("---")
 st.subheader(f"🤖 {t('bot_control')}")
 st.text("Każdy interwał posiada własne parametry EMA, ADX oraz MNOŻNIK KAPITAŁU (wyższe interwały handlują większą kwotą).")
 
-def mtf_bot_worker(timeframe, api_k, secret_k, pass_k, exchange_name, ema_f, ema_s, adx_min, base_max_single, tf_multiplier, lev_mode_val, lev_man, lev_max, stop_ev, scan_limit_pairs):
-    try:
-        ex_cls = getattr(ccxt, exchange_name.lower())
-        cfg = {
-            "apiKey": api_k,
-            "secret": secret_k,
-            "enableRateLimit": True,
-            "options": {"defaultType": "swap"}
-        }
-        if exchange_name.lower() in ["bitget", "okx"] and pass_k:
-            cfg["password"] = pass_k
-        ex_thread = ex_cls(cfg)
-    except Exception as e:
-        print(f"[Bot {timeframe}] Błąd inicjalizacji giełdy: {e}")
-        return
-
-    interval_sec = 30
-    if timeframe.endswith('m'):
-        interval_sec = max(10, int(timeframe[:-1]) * 60)
-    elif timeframe.endswith('h'):
-        interval_sec = int(timeframe[:-1]) * 3600
-    elif timeframe.endswith('d'):
-        interval_sec = int(timeframe[:-1]) * 86400
-
-    while not stop_ev.is_set():
-        try:
-            ex_thread.load_markets()
-            tickers = ex_thread.fetch_tickers()
-            valid_syms = [s for s, t in tickers.items() if (s.endswith('/USDT:USDT') or s.endswith(':USDT')) and (t.get('quoteVolume', 0) or 0) >= 5_000_000]
-            top_syms = sorted(valid_syms, key=lambda s: tickers.get(s, {}).get('quoteVolume', 0) or 0, reverse=True)[:scan_limit_pairs]
-
-            for symbol in top_syms:
-                if stop_ev.is_set():
-                    break
-                try:
-                    ohlcv = ex_thread.fetch_ohlcv(symbol, timeframe=timeframe, limit=max(100, ema_s + 30))
-                    if ohlcv:
-                        df_b = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                        df_b = calculate_indicators(df_b, ema_fast=ema_f, ema_slow=ema_s, adx_period=14)
-                        last = df_b.iloc[-1]
-                        prev = df_b.iloc[-2]
-                        m_price = float(last['close'])
-                        c_adx = float(last['adx']) if 'adx' in last and not pd.isna(last['adx']) else 20.0
-                        c_rsi = float(last['rsi']) if 'rsi' in last and not pd.isna(last['rsi']) else 50.0
-
-                        bull = (prev['close'] <= prev['ema_fast']) and (last['close'] > last['ema_fast']) and (last['ema_fast'] > last['ema_slow']) and (c_rsi < 65)
-                        bear = (prev['close'] >= prev['ema_fast']) and (last['close'] < last['ema_fast']) and (last['ema_fast'] < last['ema_slow']) and (c_rsi > 35)
-
-                        sig = "NEUTRALNY"
-                        if bull and c_adx >= adx_min:
-                            sig = "LONG"
-                        elif bear and c_adx >= adx_min:
-                            sig = "SHORT"
-
-                        if sig in ["LONG", "SHORT"]:
-                            print(f"[{datetime.now().strftime('%H:%M:%S')}] [Bot {timeframe}] Wykryto sygnał {sig} na {symbol} (Mnożnik: {tf_multiplier}x)!")
-                except Exception:
-                    pass
-        except Exception as e_w:
-            print(f"[Bot {timeframe}] Błąd w pętli: {e_w}")
-
-        for _ in range(interval_sec):
-            if stop_ev.is_set():
-                break
-            time.sleep(1)
-
 available_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 default_multipliers = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
 cols_tf = st.columns(len(available_timeframes))
@@ -808,7 +742,6 @@ for idx, tf in enumerate(available_timeframes):
         if is_active:
             st.success("🟢 AKTYWNY")
             if st.button(f"Zatrzymaj {tf}", key=f"stop_tf_{tf}", use_container_width=True):
-                st.session_state.active_mtf_bots[tf]["stop_event"].set()
                 del st.session_state.active_mtf_bots[tf]
                 st.rerun()
         else:
@@ -817,23 +750,14 @@ for idx, tf in enumerate(available_timeframes):
                 if not st.session_state.api_key or not st.session_state.secret_key:
                     st.error("Najpierw zapisz klucze API w panelu bocznym!")
                 else:
-                    stop_event = threading.Event()
-                    t_thread = threading.Thread(
-                        target=mtf_bot_worker,
-                        args=(tf, st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase, st.session_state.selected_exchange, ema_f_val, ema_s_val, adx_val, max_single_trade_usdt, tf_cap_mult, leverage_mode, manual_leverage, max_allowed_leverage, stop_event, max_fut_scan_pairs),
-                        daemon=True
-                    )
-                    t_thread.start()
                     st.session_state.active_mtf_bots[tf] = {
-                        "thread": t_thread,
-                        "stop_event": stop_event,
                         "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "ema_fast": ema_f_val,
                         "ema_slow": ema_s_val,
                         "min_adx": adx_val,
                         "capital_multiplier": tf_cap_mult
                     }
-                    st.success(f"Uruchomiono bota na {tf} (Mnożnik kapitału: {tf_cap_mult}x)!")
+                    st.success(f"Uruchomiono bota na {tf}!")
                     st.rerun()
 
 existing_positions_map = {}
@@ -917,10 +841,10 @@ if active_tf_list and tickers_data and futures_ex:
                 t_info = tickers_data.get(symbol, {})
                 sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
 
-                req_limit = max(100, e_slow + 30)
-                ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=tf, limit=req_limit)
+                limit_val = min(150, max(60, e_slow + 20)) if tf == '1d' else max(100, e_slow + 30)
+                ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=tf, limit=limit_val)
                 
-                if ohlcv and len(ohlcv) > max(e_fast, e_slow):
+                if ohlcv and len(ohlcv) > max(e_fast, 5):
                     df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     df_sym = calculate_indicators(df_sym, ema_fast=e_fast, ema_slow=e_slow, adx_period=14)
 
@@ -1007,7 +931,15 @@ if active_tf_list and tickers_data and futures_ex:
                                 except Exception as e_order:
                                     print(f"[BŁĄD ZLECENIA]: {e_order}")
             except Exception as e_sym:
-                print(f"[BŁĄD ANALIZY {symbol} na {tf}]: {e_sym}")
+                all_scan_results.append({
+                    "Interwał": tf,
+                    "Para": symbol,
+                    "Cena": 0.0,
+                    "ADX": 0.0,
+                    "RSI": 0.0,
+                    "Sygnał": "NEUTRALNY",
+                    "Wolumen": 0.0
+                })
 
 st.markdown("---")
 st.subheader(t('market_scanner_results'))
@@ -1035,6 +967,9 @@ if st.session_state.trade_history:
     st.dataframe(df_hist, use_container_width=True)
 else:
     st.info(t("no_history"))
+
+import gc
+gc.collect()
 
 if auto_refresh_seconds > 0:
     refresh_interval_ms = auto_refresh_seconds * 1000
