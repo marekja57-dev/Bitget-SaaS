@@ -44,7 +44,7 @@ TRANSLATIONS = {
         "save_keys_btn": "💾 ZAPISZ MOJE KLUCZE",
         "keys_saved": "Zapisano klucze dla",
         "keys_error": "Wypełnij wymagane pola kluczy.",
-        "sub_zone": "🛡️ Strefa Subskrypcji",
+        "sub_zone": "🛡 Strefa Subskrypcji",
         "sub_active": "Subskrypcja aktywna (Dostęp Pełny)",
         "sub_inactive": "⚠️ Brak aktywnej subskrypcji",
         "pay_btn": "OPŁAĆ DOSTĘP (49 PLN)",
@@ -68,7 +68,7 @@ TRANSLATIONS = {
         "pnl_usdt": "Pnl USDT",
         "slots_futures": "📈 Sloty Futures",
         "active_max": "Aktywne / Maksymalne",
-        "session_time": "⏱️ Czas Sesji",
+        "session_time": "⏱ Czas Sesji",
         "market_scanner_results": "📊 Wyniki Skanera Rynkowego (Aktywne Interwały)",
         "active_positions": "📈 Aktywne Pozycje Futures",
         "trade_history": "📜 Historia Ostatnich Transakcji",
@@ -124,7 +124,7 @@ TRANSLATIONS = {
         "pnl_usdt": "PnL USDT",
         "slots_futures": "📈 Futures Slots",
         "active_max": "Active / Maximum",
-        "session_time": "⏱️ Session Time",
+        "session_time": "⏱ Session Time",
         "market_scanner_results": "📊 Market Scanner Results (Active Timeframes)",
         "active_positions": "📈 Active Futures Positions",
         "trade_history": "📜 Recent Trade History",
@@ -139,7 +139,7 @@ def t(key):
     lang = st.session_state.get("lang", "Polski")
     return TRANSLATIONS.get(lang, TRANSLATIONS["Polski"]).get(key, key)
 
-ADMIN_EMAILS = ["marekjas57@wp.pl", "marekja57@wp.pl"]
+ADMIN_EMAILS = ["marekja57@wp.pl", "admin@bot-bitget.pl"]
 
 def is_user_admin():
     email = str(st.session_state.get("user_email", "")).strip().lower()
@@ -237,47 +237,23 @@ def init_db():
             (adm_email,),
         )
 
-    cursor.execute(
-        "SELECT * FROM users WHERE LOWER(TRIM(email)) = ?",
-        ("admin@bot-bitget.pl",),
-    )
-    if not cursor.fetchone():
-        admin_pass = st.secrets.get("ADMIN_PASSWORD", "TwojeTajneHaslo123")
-        cursor.execute(
-            "INSERT INTO users (email, password, is_admin, stripe_paid) VALUES (?, ?, 1, 1)",
-            ("admin@bot-bitget.pl", admin_pass),
-        )
     conn.commit()
     conn.close()
 
 init_db()
 
-def load_stripe_credentials():
-    if os.path.exists(STRIPE_CONFIG_FILE):
-        try:
-            with open(STRIPE_CONFIG_FILE, "r") as f:
-                data = json.load(f)
-                return (
-                    data.get("stripe_pk", ""),
-                    data.get("stripe_sk", ""),
-                    data.get("stripe_price_id", ""),
-                )
-        except Exception:
-            pass
-    return "", "", ""
-
-saved_stripe_pk, saved_stripe_sk, saved_stripe_price_id = load_stripe_credentials()
-stripe_pk_val = saved_stripe_pk or st.secrets.get("STRIPE_PK", "")
-stripe_sk_val = saved_stripe_sk or st.secrets.get("STRIPE_SK", "")
-stripe_price_id_val = saved_stripe_price_id or st.secrets.get("STRIPE_PRICE_ID", "")
+stripe_pk_val = "pk_test_51UCp3y3wtM9kxsPEoVsGNrCzVfWWEYAnvfpoe8Rgxm3f8Yv5F8aek5FqdVKyWfTWExP5yve5FHSiDvOs48IzezTw00oX3rdD6F"
+stripe_sk_val = "sk_test_51UCp3y3wtM9kxsPEoOQK8G9hWidflsfC1pidsagWukvFJd8W4tEEP6BVh2H3BsZhHl6Fiw0nRvotGucgtdP8RnN00k9ljpLCW"
+stripe_price_id_val = "price_1UCpMQ3wtM9kxsPESCDtQYdk"
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 def create_stripe_checkout_session(user_email, price_id):
+    fallback_url = "https://buy.stripe.com/00w0kecLSfbc8c13qA88"
     try:
         if not stripe.api_key or not price_id:
-            return None
+            return fallback_url
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -289,9 +265,9 @@ def create_stripe_checkout_session(user_email, price_id):
             cancel_url='https://bot-bitget.pl/?success=false',
             customer_email=user_email,
         )
-        return session.url
+        return session.url if session and session.url else fallback_url
     except Exception:
-        return None
+        return fallback_url
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -584,11 +560,22 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success(t("sub_active"))
 else:
     st.sidebar.warning(t("sub_inactive"))
+    
     checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", ""), stripe_price_id_val)
-    if checkout_url:
-        st.sidebar.link_button(t("pay_btn"), checkout_url)
-    else:
-        st.sidebar.link_button(t("pay_btn"), "https://buy.stripe.com/00w0kecLiSfbc8c13qA88")
+    st.sidebar.link_button(t("pay_btn"), checkout_url, use_container_width=True)
+    
+    if st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast", use_container_width=True):
+        st.session_state.stripe_paid = True
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.get("user_id"),))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        st.success("Subskrypcja aktywowana testowo!")
+        st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"### {t('capital_risk')}")
@@ -735,6 +722,7 @@ if futures_ex:
             e_fast = bot_conf["ema_fast"]
             e_slow = bot_conf["ema_slow"]
             m_adx = bot_conf["min_adx"]
+            max_rsi_limit = bot_conf.get("max_rsi", 75.0)
             tf_mult = bot_conf.get("capital_multiplier", 1.0)
 
             for symbol in selected_symbols:
@@ -755,7 +743,7 @@ if futures_ex:
                         current_rsi = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 50.0
 
                         cross_above = (prev_r['close'] <= prev_r['ema_fast']) and (last_r['close'] > last_r['ema_fast'])
-                        trend_bull = cross_above and (last_r['ema_fast'] > last_r['ema_slow']) and (current_rsi < 65)
+                        trend_bull = cross_above and (last_r['ema_fast'] > last_r['ema_slow']) and (current_rsi < max_rsi_limit)
 
                         cross_below = (prev_r['close'] >= prev_r['ema_fast']) and (last_r['close'] < last_r['ema_fast'])
                         trend_bear = cross_below and (last_r['ema_fast'] < last_r['ema_slow']) and (current_rsi > 35)
@@ -866,7 +854,7 @@ st.markdown(
 
 st.markdown("---")
 st.subheader(f"🤖 {t('bot_control')}")
-st.text("Każdy interwał posiada własne parametry EMA, ADX oraz MNOŻNIK KAPITAŁU (wyższe interwały handlują większą kwotą).")
+st.text("Każdy interwał posiada własne parametry EMA, ADX, Max RSI oraz MNOŻNIK KAPITAŁU.")
 
 available_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 default_multipliers = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
@@ -876,10 +864,38 @@ for idx, tf in enumerate(available_timeframes):
     with cols_tf[idx]:
         st.markdown(f"**📌 {tf}**")
         
-        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=9, key=f"ema_f_{tf}")
-        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=21, key=f"ema_s_{tf}")
-        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, 28.0, 1.0, key=f"adx_{tf}")
-        tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=default_multipliers.get(tf, 1.0), step=0.5, key=f"cap_mult_{tf}")
+        prev_conf = st.session_state.active_mtf_bots.get(tf, {})
+        def_ema_f = prev_conf.get("ema_fast", 9)
+        def_ema_s = prev_conf.get("ema_slow", 21)
+        def_adx = prev_conf.get("min_adx", 28.0)
+        def_max_rsi = prev_conf.get("max_rsi", 75.0)
+        def_mult = prev_conf.get("capital_multiplier", default_multipliers.get(tf, 1.0))
+
+        if f"ema_f_val_{tf}" not in st.session_state:
+            st.session_state[f"ema_f_val_{tf}"] = def_ema_f
+        if f"ema_s_val_{tf}" not in st.session_state:
+            st.session_state[f"ema_s_val_{tf}"] = def_ema_s
+        if f"adx_val_{tf}" not in st.session_state:
+            st.session_state[f"adx_val_{tf}"] = float(def_adx)
+        if f"max_rsi_val_{tf}" not in st.session_state:
+            st.session_state[f"max_rsi_val_{tf}"] = float(def_max_rsi)
+        if f"tf_cap_mult_{tf}" not in st.session_state:
+            st.session_state[f"tf_cap_mult_{tf}"] = float(def_mult)
+
+        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=st.session_state[f"ema_f_val_{tf}"], key=f"ema_f_{tf}")
+        st.session_state[f"ema_f_val_{tf}"] = ema_f_val
+
+        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=st.session_state[f"ema_s_val_{tf}"], key=f"ema_s_{tf}")
+        st.session_state[f"ema_s_val_{tf}"] = ema_s_val
+
+        adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, float(st.session_state[f"adx_val_{tf}"]), 1.0, key=f"adx_{tf}")
+        st.session_state[f"adx_val_{tf}"] = adx_val
+
+        max_rsi_val = st.slider(f"Max RSI ({tf})", 50.0, 95.0, float(st.session_state[f"max_rsi_val_{tf}"]), 1.0, key=f"max_rsi_{tf}")
+        st.session_state[f"max_rsi_val_{tf}"] = max_rsi_val
+
+        tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=float(st.session_state[f"tf_cap_mult_{tf}"]), step=0.5, key=f"cap_mult_{tf}")
+        st.session_state[f"tf_cap_mult_{tf}"] = tf_cap_mult
 
         is_active = tf in st.session_state.active_mtf_bots
         
@@ -899,6 +915,7 @@ for idx, tf in enumerate(available_timeframes):
                         "ema_fast": ema_f_val,
                         "ema_slow": ema_s_val,
                         "min_adx": adx_val,
+                        "max_rsi": max_rsi_val,
                         "capital_multiplier": tf_cap_mult
                     }
                     st.success(f"Uruchomiono bota na {tf}!")
@@ -934,39 +951,54 @@ else:
 if is_user_admin():
     st.markdown("---")
     st.subheader(t("admin_panel"))
+    
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        target_uid = st.number_input("ID użytkownika do nadania subskrypcji", min_value=1, step=1, key="admin_target_uid")
+        if st.button("Aktywuj subskrypcję użytkownikowi", use_container_width=True):
+            try:
+                conn = sqlite3.connect(DB_FILE, timeout=30.0)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (int(target_uid),))
+                conn.commit()
+                conn.close()
+                st.success(f"Aktywowano subskrypcję dla użytkownika ID: {target_uid}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Błąd: {e}")
+                
+    with col_u2:
+        st.markdown("##### Usuń użytkownika z bazy")
+        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        users_list_df = pd.read_sql_query("SELECT id, email FROM users", conn)
+        conn.close()
+
+        if not users_list_df.empty:
+            user_options = {f"ID {row['id']} - {row['email']}": row['id'] for _, row in users_list_df.iterrows()}
+            selected_user_label = st.selectbox("Wybierz użytkownika do usunięcia", list(user_options.keys()), key="admin_del_select_box")
+            target_del_uid = user_options[selected_user_label]
+
+            if st.button("Usuń zaznaczonego użytkownika", use_container_width=True, type="primary"):
+                if target_del_uid == st.session_state.get("user_id"):
+                    st.error("Nie możesz usunąć samego siebie!")
+                else:
+                    try:
+                        conn_del = sqlite3.connect(DB_FILE, timeout=30.0)
+                        cur_del = conn_del.cursor()
+                        cur_del.execute("DELETE FROM users WHERE id = ?", (int(target_del_uid),))
+                        conn_del.commit()
+                        conn_del.close()
+                        st.success(f"Usunięto użytkownika o ID: {target_del_uid}")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Błąd: {e}")
+
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
         df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid FROM users", conn)
         conn.close()
         st.dataframe(df_users, use_container_width=True)
-        
-        col_u1, col_u2 = st.columns(2)
-        with col_u1:
-            target_uid = st.number_input("ID użytkownika do nadania subskrypcji", min_value=1, step=1, key="admin_target_uid")
-            if st.button("Aktywuj subskrypcję użytkownikowi", use_container_width=True):
-                try:
-                    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (int(target_uid),))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Aktywowano subskrypcję dla użytkownika ID: {target_uid}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Błąd: {e}")
-        with col_u2:
-            target_del_uid = st.number_input("ID użytkownika do usunięcia", min_value=1, step=1, key="admin_target_del_uid")
-            if st.button("Usuń użytkownika", use_container_width=True, type="primary"):
-                try:
-                    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM users WHERE id = ?", (int(target_del_uid),))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Usunięto użytkownika ID: {target_del_uid}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Błąd: {e}")
     except Exception:
         pass
 
