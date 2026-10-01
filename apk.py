@@ -204,27 +204,22 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     return df
 
 def get_optimal_dynamic_parameters(df_recent, tf):
-    """
-    Automatycznie dobiera najkorzystniejsze parametry (EMA fast/slow, ADX, Max RSI, Mnożnik)
-    na podstawie bieżącej zmienności (ATR / odchylenie standardowe) oraz dynamiki rynku.
-    """
     try:
         closes = df_recent['close'].values
         returns = np.diff(closes) / closes[:-1]
         volatility = np.std(returns) * np.sqrt(len(returns))
         
-        # Bazowe parametry w zależności od interwału i zmienności
         if tf in ["1m", "5m"]:
-            if volatility > 0.02: # Wysoka zmienność - szybka reakcja
+            if volatility > 0.02:
                 return {"ema_fast": 5, "ema_slow": 13, "min_adx": 22.0, "max_rsi": 72.0, "capital_multiplier": 0.6}
-            else: # Niska zmienność - filtruj szum
+            else:
                 return {"ema_fast": 9, "ema_slow": 21, "min_adx": 26.0, "max_rsi": 75.0, "capital_multiplier": 0.8}
         elif tf in ["15m", "30m"]:
             if volatility > 0.03:
                 return {"ema_fast": 7, "ema_slow": 18, "min_adx": 24.0, "max_rsi": 70.0, "capital_multiplier": 1.0}
             else:
                 return {"ema_fast": 10, "ema_slow": 25, "min_adx": 25.0, "max_rsi": 78.0, "capital_multiplier": 1.2}
-        else: # 1h, 4h, 1d - dłuższe horyzonty trendowe
+        else:
             return {"ema_fast": 12, "ema_slow": 26, "min_adx": 20.0, "max_rsi": 80.0, "capital_multiplier": 2.5}
     except Exception:
         return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "capital_multiplier": 1.0}
@@ -311,6 +306,8 @@ if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
 if "signal_cooldown" not in st.session_state:
     st.session_state.signal_cooldown = {}
+if "symbol_cooldown" not in st.session_state:
+    st.session_state.symbol_cooldown = {} # Blokada ponownego wejścia po SL/TP dla danej pary
 if "lang" not in st.session_state:
     st.session_state.lang = "Polski"
 if "api_key" not in st.session_state:
@@ -615,9 +612,12 @@ enable_roe_guard = st.sidebar.checkbox(t("enable_roe"), value=True, key="enable_
 if enable_roe_guard:
     custom_stop_loss_roe = st.sidebar.slider(t("sl_roe"), 0.5, 50.0, 4.0, 0.5, key="custom_stop_loss_roe")
     custom_take_profit_roe = st.sidebar.slider(t("tp_roe"), 1.0, 100.0, 15.0, 0.5, key="custom_take_profit_roe")
+    # Czas oddechu (cooldown) po zamknięciu przez SL/TP w minutach
+    cooldown_after_sl_tp_minutes = st.sidebar.slider("Czas oddechu po SL/TP (minuty)", 1, 120, 15, 1, key="sb_cooldown_sl_tp")
 else:
     custom_stop_loss_roe = 999.0
     custom_take_profit_roe = 999.0
+    cooldown_after_sl_tp_minutes = 15
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"### {t('leverage_mgmt')}")
@@ -657,6 +657,7 @@ if emergency_kill:
 
     st.session_state.active_mtf_bots = {}
     st.session_state.trade_history = []
+    st.session_state.symbol_cooldown = {}
     st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures i zatrzymano wszystkie boty.")
     time.sleep(2)
     st.rerun()
@@ -711,6 +712,10 @@ if futures_ex:
                         if roe <= -float(custom_stop_loss_roe) or roe >= float(custom_take_profit_roe):
                             c_side = "sell" if side_str in ["buy", "long"] else "buy"
                             futures_ex.create_order(sym, "market", c_side, abs(contracts), params={'reduceOnly': True})
+                            
+                            # Ustawiamy blokadę (czas oddechu) dla tej pary po zamknięciu przez SL/TP
+                            st.session_state.symbol_cooldown[sym] = time.time() + (cooldown_after_sl_tp_minutes * 60)
+
                             st.session_state.trade_history.insert(0, {
                                 "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Para": sym,
@@ -753,6 +758,11 @@ if futures_ex:
 
             for symbol in selected_symbols:
                 try:
+                    # Sprawdzamy, czy para nie znajduje się w okresie "oddechu" po SL/TP
+                    cooldown_until = st.session_state.symbol_cooldown.get(symbol, 0)
+                    if time.time() < cooldown_until:
+                        continue # Pomijamy tę parę, dajemy jej odpocząć
+
                     t_info = tickers.get(symbol, {}) or {}
                     sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
                     limit_val = min(150, max(60, e_slow + 20)) if tf == '1d' else max(100, e_slow + 30)
@@ -761,7 +771,6 @@ if futures_ex:
                     if ohlcv and len(ohlcv) > max(e_fast, 5):
                         df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                         
-                        # Jeśli włączony tryb automatyczny, dostosowujemy parametry dynamicznie pod rynki
                         if bot_conf.get("mode") == "Automatyczny":
                             opt = get_optimal_dynamic_parameters(df_sym, tf)
                             e_fast = opt["ema_fast"]
@@ -921,7 +930,6 @@ for idx, tf in enumerate(available_timeframes):
         if f"tf_cap_mult_{tf}" not in st.session_state:
             st.session_state[f"tf_cap_mult_{tf}"] = float(def_mult)
 
-        # Przełącznik trybu: Automatyczny / Ręczny
         bot_mode = st.radio(f"Tryb ({tf})", ["Automatyczny", "Ręczny"], index=0 if st.session_state[f"bot_mode_{tf}"]=="Automatyczny" else 1, key=f"radio_mode_{tf}")
         st.session_state[f"bot_mode_{tf}"] = bot_mode
 
@@ -1048,7 +1056,7 @@ if is_user_admin():
 
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid FROM users", conn)
+        df_users = p.read_sql_query("SELECT id, email, is_admin, stripe_paid FROM users", conn)
         conn.close()
         st.dataframe(df_users, use_container_width=True)
     except Exception:
