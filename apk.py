@@ -211,18 +211,18 @@ def get_optimal_dynamic_parameters(df_recent, tf):
         
         if tf in ["1m", "5m"]:
             if volatility > 0.02:
-                return {"ema_fast": 5, "ema_slow": 13, "min_adx": 22.0, "max_rsi": 72.0, "capital_multiplier": 0.6}
+                return {"ema_fast": 5, "ema_slow": 13, "min_adx": 22.0, "max_rsi": 72.0, "min_rsi": 28.0, "capital_multiplier": 0.6}
             else:
-                return {"ema_fast": 9, "ema_slow": 21, "min_adx": 26.0, "max_rsi": 75.0, "capital_multiplier": 0.8}
+                return {"ema_fast": 9, "ema_slow": 21, "min_adx": 26.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 0.8}
         elif tf in ["15m", "30m"]:
             if volatility > 0.03:
-                return {"ema_fast": 7, "ema_slow": 18, "min_adx": 24.0, "max_rsi": 70.0, "capital_multiplier": 1.0}
+                return {"ema_fast": 7, "ema_slow": 18, "min_adx": 24.0, "max_rsi": 70.0, "min_rsi": 30.0, "capital_multiplier": 1.0}
             else:
-                return {"ema_fast": 10, "ema_slow": 25, "min_adx": 25.0, "max_rsi": 78.0, "capital_multiplier": 1.2}
+                return {"ema_fast": 10, "ema_slow": 25, "min_adx": 25.0, "max_rsi": 78.0, "min_rsi": 22.0, "capital_multiplier": 1.2}
         else:
-            return {"ema_fast": 12, "ema_slow": 26, "min_adx": 20.0, "max_rsi": 80.0, "capital_multiplier": 2.5}
+            return {"ema_fast": 12, "ema_slow": 26, "min_adx": 20.0, "max_rsi": 80.0, "min_rsi": 20.0, "capital_multiplier": 2.5}
     except Exception:
-        return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "capital_multiplier": 1.0}
+        return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 1.0}
 
 def init_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -307,7 +307,7 @@ if "trade_history" not in st.session_state:
 if "signal_cooldown" not in st.session_state:
     st.session_state.signal_cooldown = {}
 if "symbol_cooldown" not in st.session_state:
-    st.session_state.symbol_cooldown = {} # Blokada ponownego wejścia po SL/TP dla danej pary
+    st.session_state.symbol_cooldown = {}
 if "lang" not in st.session_state:
     st.session_state.lang = "Polski"
 if "api_key" not in st.session_state:
@@ -612,7 +612,6 @@ enable_roe_guard = st.sidebar.checkbox(t("enable_roe"), value=True, key="enable_
 if enable_roe_guard:
     custom_stop_loss_roe = st.sidebar.slider(t("sl_roe"), 0.5, 50.0, 4.0, 0.5, key="custom_stop_loss_roe")
     custom_take_profit_roe = st.sidebar.slider(t("tp_roe"), 1.0, 100.0, 15.0, 0.5, key="custom_take_profit_roe")
-    # Czas oddechu (cooldown) po zamknięciu przez SL/TP w minutach
     cooldown_after_sl_tp_minutes = st.sidebar.slider("Czas oddechu po SL/TP (minuty)", 1, 120, 15, 1, key="sb_cooldown_sl_tp")
 else:
     custom_stop_loss_roe = 999.0
@@ -713,7 +712,6 @@ if futures_ex:
                             c_side = "sell" if side_str in ["buy", "long"] else "buy"
                             futures_ex.create_order(sym, "market", c_side, abs(contracts), params={'reduceOnly': True})
                             
-                            # Ustawiamy blokadę (czas oddechu) dla tej pary po zamknięciu przez SL/TP
                             st.session_state.symbol_cooldown[sym] = time.time() + (cooldown_after_sl_tp_minutes * 60)
 
                             st.session_state.trade_history.insert(0, {
@@ -754,14 +752,14 @@ if futures_ex:
             e_slow = bot_conf["ema_slow"]
             m_adx = bot_conf["min_adx"]
             max_rsi_limit = bot_conf.get("max_rsi", 75.0)
+            min_rsi_limit = bot_conf.get("min_rsi", 25.0) # Poprawione: dedykowane RSI dla Short
             tf_mult = bot_conf.get("capital_multiplier", 1.0)
 
             for symbol in selected_symbols:
                 try:
-                    # Sprawdzamy, czy para nie znajduje się w okresie "oddechu" po SL/TP
                     cooldown_until = st.session_state.symbol_cooldown.get(symbol, 0)
                     if time.time() < cooldown_until:
-                        continue # Pomijamy tę parę, dajemy jej odpocząć
+                        continue
 
                     t_info = tickers.get(symbol, {}) or {}
                     sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
@@ -777,6 +775,7 @@ if futures_ex:
                             e_slow = opt["ema_slow"]
                             m_adx = opt["min_adx"]
                             max_rsi_limit = opt["max_rsi"]
+                            min_rsi_limit = opt["min_rsi"] # Uwzględnienie w automacie
                             tf_mult = opt["capital_multiplier"]
 
                         df_sym = calculate_indicators(df_sym, ema_fast=e_fast, ema_slow=e_slow, adx_period=14)
@@ -791,7 +790,8 @@ if futures_ex:
                         trend_bull = cross_above and (last_r['ema_fast'] > last_r['ema_slow']) and (current_rsi < max_rsi_limit)
 
                         cross_below = (prev_r['close'] >= prev_r['ema_fast']) and (last_r['close'] < last_r['ema_fast'])
-                        trend_bear = cross_below and (last_r['ema_fast'] < last_r['ema_slow']) and (current_rsi > 35)
+                        # Poprawiony warunek dla Short: korzysta z min_rsi_limit zamiast sztywnej 35
+                        trend_bear = cross_below and (last_r['ema_fast'] < last_r['ema_slow']) and (current_rsi > min_rsi_limit)
 
                         signal_type = "NEUTRALNY"
                         if trend_bull and current_adx >= m_adx:
@@ -915,6 +915,7 @@ for idx, tf in enumerate(available_timeframes):
         def_ema_s = prev_conf.get("ema_slow", 21)
         def_adx = prev_conf.get("min_adx", 28.0)
         def_max_rsi = prev_conf.get("max_rsi", 75.0)
+        def_min_rsi = prev_conf.get("min_rsi", 25.0)
         def_mult = prev_conf.get("capital_multiplier", default_multipliers.get(tf, 1.0))
 
         if f"bot_mode_{tf}" not in st.session_state:
@@ -927,6 +928,8 @@ for idx, tf in enumerate(available_timeframes):
             st.session_state[f"adx_val_{tf}"] = float(def_adx)
         if f"max_rsi_val_{tf}" not in st.session_state:
             st.session_state[f"max_rsi_val_{tf}"] = float(def_max_rsi)
+        if f"min_rsi_val_{tf}" not in st.session_state:
+            st.session_state[f"min_rsi_val_{tf}"] = float(def_min_rsi)
         if f"tf_cap_mult_{tf}" not in st.session_state:
             st.session_state[f"tf_cap_mult_{tf}"] = float(def_mult)
 
@@ -943,8 +946,11 @@ for idx, tf in enumerate(available_timeframes):
             adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, float(st.session_state[f"adx_val_{tf}"]), 1.0, key=f"adx_{tf}")
             st.session_state[f"adx_val_{tf}"] = adx_val
 
-            max_rsi_val = st.slider(f"Max RSI ({tf})", 50.0, 95.0, float(st.session_state[f"max_rsi_val_{tf}"]), 1.0, key=f"max_rsi_{tf}")
+            max_rsi_val = st.slider(f"Max RSI Long ({tf})", 50.0, 95.0, float(st.session_state[f"max_rsi_val_{tf}"]), 1.0, key=f"max_rsi_{tf}")
             st.session_state[f"max_rsi_val_{tf}"] = max_rsi_val
+
+            min_rsi_val = st.slider(f"Min RSI Short ({tf})", 5.0, 50.0, float(st.session_state[f"min_rsi_val_{tf}"]), 1.0, key=f"min_rsi_{tf}")
+            st.session_state[f"min_rsi_val_{tf}"] = min_rsi_val
 
             tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=float(st.session_state[f"tf_cap_mult_{tf}"]), step=0.5, key=f"cap_mult_{tf}")
             st.session_state[f"tf_cap_mult_{tf}"] = tf_cap_mult
@@ -954,6 +960,7 @@ for idx, tf in enumerate(available_timeframes):
             ema_s_val = st.session_state[f"ema_s_val_{tf}"]
             adx_val = st.session_state[f"adx_val_{tf}"]
             max_rsi_val = st.session_state[f"max_rsi_val_{tf}"]
+            min_rsi_val = st.session_state[f"min_rsi_val_{tf}"]
             tf_cap_mult = st.session_state[f"tf_cap_mult_{tf}"]
 
         is_active = tf in st.session_state.active_mtf_bots
@@ -976,6 +983,7 @@ for idx, tf in enumerate(available_timeframes):
                         "ema_slow": ema_s_val,
                         "min_adx": adx_val,
                         "max_rsi": max_rsi_val,
+                        "min_rsi": min_rsi_val,
                         "capital_multiplier": tf_cap_mult
                     }
                     st.success(f"Uruchomiono bota na {tf}!")
@@ -1056,7 +1064,7 @@ if is_user_admin():
 
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        df_users = p.read_sql_query("SELECT id, email, is_admin, stripe_paid FROM users", conn)
+        df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid", conn) #, conn)
         conn.close()
         st.dataframe(df_users, use_container_width=True)
     except Exception:
@@ -1067,3 +1075,4 @@ gc.collect()
 if auto_refresh_seconds > 0:
     time.sleep(auto_refresh_seconds)
     st.rerun()
+
