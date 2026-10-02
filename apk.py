@@ -73,6 +73,8 @@ TRANSLATIONS = {
         "active_positions": "📈 Aktywne Pozycje Futures",
         "trade_history": "📜 Historia Ostatnich Transakcji",
         "admin_panel": "👑 Panel Administratora (Użytkownicy)",
+        "manual_tab": "📖 Instrukcja Obsługi",
+        "terms_tab": "📜 Regulamin Serwisu",
         "no_positions": "Brak otwartych pozycji futures.",
         "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
         "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania. Uruchom przynajmniej jeden bot."
@@ -94,13 +96,13 @@ TRANSLATIONS = {
         "sidebar_role_admin": "Role: Administrator",
         "sidebar_role_client": "Role: SaaS Client",
         "logout_btn": "🚪 LOG OUT",
-        "exchange_settings": "⚙️ Exchange & API Settings",
+        "exchange_settings": "⚙ Exchange & API Settings",
         "select_exchange": "Select Exchange:",
         "api_keys_header": "API Keys",
         "save_keys_btn": "💾 SAVE MY KEYS",
         "keys_saved": "Keys saved for",
         "keys_error": "Please fill in required key fields.",
-        "sub_zone": "🛡️ Subscription Zone",
+        "sub_zone": "🛡 Subscription Zone",
         "sub_active": "Subscription active (Full Access)",
         "sub_inactive": "⚠️ No active subscription",
         "pay_btn": "PAY ACCESS (49 PLN)",
@@ -129,6 +131,8 @@ TRANSLATIONS = {
         "active_positions": "📈 Active Futures Positions",
         "trade_history": "📜 Recent Trade History",
         "admin_panel": "👑 Admin Panel (Users)",
+        "manual_tab": "📖 User Manual",
+        "terms_tab": "📜 Terms of Service",
         "no_positions": "No open futures positions.",
         "no_history": "No recorded trades in this session.",
         "no_scanner": "No active MTF bots or scanner results. Start at least one bot."
@@ -187,14 +191,17 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     return df
 
 def get_optimal_dynamic_parameters(df_recent, tf):
-    # Pobieramy wartości bezpośrednio z suwaków Streamlita (session_state)
-    return {
-        "ema_fast": st.session_state.get("slider_ema_fast", 9),
-        "ema_slow": st.session_state.get("slider_ema_slow", 21),
-        "min_adx": st.session_state.get("slider_min_adx", 20.0),
-        "max_rsi": st.session_state.get("slider_max_rsi", 75.0),
-        "min_rsi": st.session_state.get("slider_min_rsi", 25.0)
-    }
+    try:
+        return {
+            "ema_fast": int(st.session_state.get("slider_ema_fast", 9)),
+            "ema_slow": int(st.session_state.get("slider_ema_slow", 21)),
+            "min_adx": float(st.session_state.get("slider_min_adx", 25.0)),
+            "max_rsi": float(st.session_state.get("slider_max_rsi", 75.0)),
+            "min_rsi": float(st.session_state.get("slider_min_rsi", 25.0)),
+            "capital_multiplier": 1.0
+        }
+    except Exception:
+        return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 1.0}
 
 def init_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -372,7 +379,7 @@ if not st.session_state.logged_in:
 <div class="retro-subtitle">{t("subtitle")}</div>""",
         unsafe_allow_html=True,
     )
-    tab_login, tab_register = st.tabs([t("login_tab"), t("register_tab")])
+    tab_login, tab_register, tab_manual, tab_terms = st.tabs([t("login_tab"), t("register_tab"), t("manual_tab"), t("terms_tab")])
     with tab_login:
         st.markdown(f"<p style='color: #f3d57a; font-family: Cinzel, serif;'>{t('login_tab')}</p>", unsafe_allow_html=True)
         login_email = st.text_input(t("email_label"), key="log_email")
@@ -426,6 +433,34 @@ if not st.session_state.logged_in:
                     st.error(t("reg_error_exists"))
             else:
                 st.error(t("reg_error_fill"))
+
+    with tab_manual:
+        st.markdown("""
+        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
+        <h3>📖 Instrukcja Obsługi systemu Bitget Futures SaaS</h3>
+        <ol>
+            <li><b>Rejestracja i Logowanie:</b> Załóż konto za pomocą swojego adresu e-mail oraz silnego hasła w zakładce rejestracji, a następnie zaloguj się do systemu.</li>
+            <li><b>Konfiguracja Kluczy API:</b> W panelu bocznym wybierz giełdę (np. Bitget), wprowadź swoje klucze API Key, Secret Key oraz Passphrase i kliknij "Zapisz moje klucze".</li>
+            <li><b>Aktywacja Dostępu (Subskrypcja):</b> Opłać dostęp do oprogramowania za pośrednictwem bezpiecznej bramki płatności Stripe lub skorzystaj z testowej aktywacji przez administratora.</li>
+            <li><b>Zarządzanie Ryzykiem:</b> Ustaw maksymalny budżet na pojedynczą pozycję w USDT, limity pozycji oraz strażnika ROE (Stop-Loss / Take-Profit).</li>
+            <li><b>Uruchomienie Bota:</b> System automatycznie skanuje rynki kryptowalut przy użyciu wskaźników technicznych (EMA, RSI, ADX) i otwiera oraz zarządza pozycjami autonomicznie.</li>
+        </ol>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tab_terms:
+        st.markdown("""
+        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
+        <h3>📜 Regulamin Serwisu i Zasady Korzystania</h3>
+        <p><b>§ 1. Postanowienia Ogólne</b><br>
+        Niniejszy regulamin określa zasady korzystania z autonomicznej platformy transakcyjnej Bitget Futures SaaS. Korzystanie z serwisu oznacza pełną akceptację poniższych warunków.</p>
+        <p><b>§ 2. Odpowiedzialność za Inwestycje</b><br>
+        Handel kontraktami futures na rynkach kryptowalut wiąże się z wysokim stopniem ryzyka finansowego i możliwością utraty całego zainwestowanego kapitału. Oprogramowanie ma charakter wyłącznie analityczny i narzędziowy. Twórcy nie ponoszą żadnej odpowiedzialności za straty finansowe wynikające z działania algorytmów.</p>
+        <p><b>§ 3. Bezpieczeństwo Kluczy API</b><br>
+        Użytkownik ponosi pełną odpowiedzialność za poufność swoich kluczy API giełdy. Zaleca się stosowanie kluczy z ograniczeniem uprawnień wyłącznie do handlu (bez praw do wypłat środków).</p>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
@@ -589,6 +624,14 @@ max_allowed_leverage = st.sidebar.slider(t("max_allowed_lev"), 1, 50, 15, 1, key
 manual_leverage = st.sidebar.slider(t("manual_lev"), 1, 50, 5, 1, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎛 Parametry Wskaźników (Strategia)")
+slider_ema_fast = st.sidebar.slider("EMA Fast", 3, 20, 9, key="slider_ema_fast")
+slider_ema_slow = st.sidebar.slider("EMA Slow", 10, 50, 21, key="slider_ema_slow")
+slider_min_adx = st.sidebar.slider("Min ADX", 10.0, 40.0, 25.0, 0.5, key="slider_min_adx")
+slider_max_rsi = st.sidebar.slider("Max RSI", 60.0, 90.0, 75.0, 1.0, key="slider_max_rsi")
+slider_min_rsi = st.sidebar.slider("Min RSI", 10.0, 40.0, 25.0, 1.0, key="slider_min_rsi")
+
+st.sidebar.markdown("---")
 max_fut_scan_pairs = st.sidebar.slider(t("max_pairs"), 1, 100, 30, 1, key="sb_max_fut_pairs")
 
 st.sidebar.markdown("---")
@@ -703,263 +746,137 @@ if futures_ex:
     except Exception:
         pass
 
-    bots = st.session_state.get("active_mtf_bots", {})
-    if bots:
-        for tf, bot_conf in bots.items():
-            e_fast = bot_conf["ema_fast"]
-            e_slow = bot_conf["ema_slow"]
-            m_adx = bot_conf["min_adx"]
-            max_rsi_limit = bot_conf.get("max_rsi", 75.0)
-            min_rsi_limit = bot_conf.get("min_rsi", 25.0)
-            tf_mult = bot_conf.get("capital_multiplier", 1.0)
+    if not st.session_state.session_baseline_locked and fut_total > 0:
+        st.session_state.session_start_balance = fut_total
+        st.session_state.session_baseline_locked = True
 
-            for symbol in selected_symbols:
+    current_time_ts = time.time()
+    for sym in selected_symbols:
+        if sym in existing_pos_map:
+            continue
+        if sym in st.session_state.symbol_cooldown:
+            if current_time_ts < st.session_state.symbol_cooldown[sym]:
+                continue
+            else:
+                del st.session_state.symbol_cooldown[sym]
+
+        try:
+            ohlcv = futures_ex.fetch_ohlcv(sym, timeframe="15m", limit=60)
+            if not ohlcv or len(ohlcv) < 30:
+                continue
+            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            params = get_optimal_dynamic_parameters(df, "15m")
+            df = calculate_indicators(df, ema_fast=params["ema_fast"], ema_slow=params["ema_slow"])
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
+
+            adx = float(last.get("adx", 0) or 0)
+            rsi = float(last.get("rsi", 50) or 50)
+            ema_f = float(last.get("ema_fast", 0) or 0)
+            ema_s = float(last.get("ema_slow", 0) or 0)
+            close_p = float(last.get("close", 0) or 0)
+
+            signal = "NEUTRAL"
+            if adx >= params["min_adx"]:
+                if ema_f > ema_s and rsi < params["max_rsi"]:
+                    signal = "LONG"
+                elif ema_f < ema_s and rsi > params["min_rsi"]:
+                    signal = "SHORT"
+
+            scan_results.append({
+                "symbol": sym,
+                "timeframe": "15m",
+                "signal": signal,
+                "adx": adx,
+                "rsi": rsi,
+                "close": close_p
+            })
+
+            if signal in ["LONG", "SHORT"] and active_positions_count < max_active_futures_positions:
+                ex_max_lev = get_exchange_max_leverage(futures_ex, sym, 15)
+                chosen_lev = manual_leverage if leverage_mode == "Ręczny" else get_smart_leverage(adx, ex_max_lev, max_allowed_leverage)
                 try:
-                    cooldown_until = st.session_state.symbol_cooldown.get(symbol, 0)
-                    if time.time() < cooldown_until:
-                        continue
-
-                    t_info = tickers.get(symbol, {}) or {}
-                    sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
-                    limit_val = min(150, max(60, e_slow + 20)) if tf == '1d' else max(100, e_slow + 30)
-                    ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=tf, limit=limit_val)
-
-                    if ohlcv and len(ohlcv) > max(e_fast, 5):
-                        df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                        if bot_conf.get("mode") == "Automatyczny":
-                            opt = get_optimal_dynamic_parameters(df_sym, tf)
-                            e_fast = opt["ema_fast"]
-                            e_slow = opt["ema_slow"]
-                            m_adx = opt["min_adx"]
-                            max_rsi_limit = opt["max_rsi"]
-                            min_rsi_limit = opt["min_rsi"]
-                            tf_mult = opt["capital_multiplier"]
-
-                        df_sym = calculate_indicators(df_sym, ema_fast=e_fast, ema_slow=e_slow, adx_period=14)
-                        last_r = df_sym.iloc[-1]
-                        prev_r = df_sym.iloc[-2]
-                        market_price = float(last_r['close'])
-                        current_adx = float(last_r['adx']) if 'adx' in last_r and not pd.isna(last_r['adx']) else 20.0
-                        current_rsi = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 50.0
-
-                        cross_above = (prev_r['close'] <= prev_r['ema_fast']) and (last_r['close'] > last_r['ema_fast'])
-                        trend_bull = cross_above and (last_r['ema_fast'] > last_r['ema_slow']) and (current_rsi < max_rsi_limit)
-                        cross_below = (prev_r['close'] >= prev_r['ema_fast']) and (last_r['close'] < last_r['ema_fast'])
-                        trend_bear = cross_below and (last_r['ema_fast'] < last_r['ema_slow']) and (current_rsi > min_rsi_limit)
-
-                        signal_type = "NEUTRALNY"
-                        if trend_bull and current_adx >= m_adx:
-                            signal_type = "LONG"
-                        elif trend_bear and current_adx >= m_adx:
-                            signal_type = "SHORT"
-
-                        scan_results.append({
-                            "Interwał": tf,
-                            "Para": symbol,
-                            "Cena": market_price,
-                            "ADX": round(current_adx, 2),
-                            "RSI": round(current_rsi, 2),
-                            "Sygnał": signal_type,
-                            "Wolumen": sym_volume
-                        })
-
-                        current_pos_side = existing_pos_map.get(symbol)
-                        if current_pos_side:
-                            if (current_pos_side in ["buy", "long"] and signal_type == "SHORT") or \
-                               (current_pos_side in ["sell", "short"] and signal_type == "LONG"):
-                                try:
-                                    matching_p = next((p for p in active_pos if p.get("symbol") == symbol), None)
-                                    if matching_p:
-                                        contracts_to_close = abs(float(matching_p.get("contracts", matching_p.get("amount", 0))))
-                                        close_side = "sell" if current_pos_side in ["buy", "long"] else "buy"
-                                        contracts_prec_close = float(futures_ex.amount_to_precision(symbol, contracts_to_close))
-                                        if contracts_prec_close > 0:
-                                            futures_ex.create_order(symbol, "market", close_side, contracts_prec_close, params={"reduceOnly": True})
-                                            st.session_state.trade_history.insert(0, {
-                                                "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                                "Para": symbol,
-                                                "Typ": f"ZMIANA TRENDU -> ZAMKNIĘCIE ({tf})",
-                                                "Cena": f"{market_price:.4f}",
-                                                "Ilość": f"{contracts_prec_close:.4f}",
-                                                "Dźwignia": f"{int(matching_p.get('leverage', 1))}x"
-                                            })
-                                            existing_pos_map.pop(symbol, None)
-                                            active_positions_count = max(0, active_positions_count - 1)
-                                except Exception:
-                                    pass
-
-                        if symbol not in existing_pos_map and active_positions_count < max_active_futures_positions:
-                            if signal_type in ["LONG", "SHORT"]:
-                                cooldown_key = f"{tf}_{symbol}_{signal_type}"
-                                last_sig = st.session_state.signal_cooldown.get(cooldown_key, 0)
-                                if time.time() - last_sig > 300:
-                                    try:
-                                        ex_lim = get_exchange_max_leverage(futures_ex, symbol, default_max=15)
-                                        chosen_lev = min(manual_leverage, ex_lim) if leverage_mode == "Ręczny" else get_smart_leverage(current_adx, ex_lim, preferred_max=max_allowed_leverage)
-                                        try:
-                                            futures_ex.set_leverage(chosen_lev, symbol)
-                                        except Exception:
-                                            pass
-
-                                        notional = calculate_risk_based_allocation(
-                                            free_balance=fut_free,
-                                            entry_price=market_price,
-                                            stop_loss_price=market_price * 0.98 if signal_type == "LONG" else market_price * 1.02,
-                                            risk_percentage=0.01,
-                                            leverage=chosen_lev,
-                                            max_single_limit=max_single_trade_usdt,
-                                            tf_multiplier=tf_mult
-                                        )
-                                        amt_coins = notional / market_price
-                                        amt_prec = float(futures_ex.amount_to_precision(symbol, amt_coins))
-                                        if amt_prec > 0:
-                                            o_side = "buy" if signal_type == "LONG" else "sell"
-                                            futures_ex.create_order(symbol, "market", o_side, amt_prec)
-                                            st.session_state.signal_cooldown[cooldown_key] = time.time()
-                                            st.session_state.trade_history.insert(0, {
-                                                "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                                "Para": symbol,
-                                                "Typ": f"WEJŚCIE {signal_type} ({tf})",
-                                                "Cena": f"{market_price:.4f}",
-                                                "Ilość": f"{amt_prec:.4f}",
-                                                "Dźwignia": f"{chosen_lev}x"
-                                            })
-                                            active_positions_count += 1
-                                            existing_pos_map[symbol] = o_side
-                                    except Exception:
-                                        pass
+                    futures_ex.set_leverage(chosen_lev, sym)
                 except Exception:
                     pass
 
-if (not st.session_state.session_baseline_locked or st.session_state.session_start_balance == 0.0) and fut_total > 0:
-    st.session_state.session_start_balance = fut_total
-    st.session_state.session_baseline_locked = True
+                stop_loss_dist = close_p * 0.02
+                sl_price = close_p - stop_loss_dist if signal == "LONG" else close_p + stop_loss_dist
+                notional = calculate_risk_based_allocation(
+                    free_balance=fut_free,
+                    entry_price=close_p,
+                    stop_loss_price=sl_price,
+                    risk_percentage=0.01,
+                    leverage=chosen_lev,
+                    max_single_limit=max_single_trade_usdt,
+                    tf_multiplier=params["capital_multiplier"]
+                )
+                amount = notional * chosen_lev / close_p
+                try:
+                    amount_precision = float(futures_ex.amount_to_precision(sym, amount))
+                    if amount_precision > 0:
+                        order_side = "buy" if signal == "LONG" else "sell"
+                        futures_ex.create_order(sym, "market", order_side, amount_precision)
+                        active_positions_count += 1
+                        st.session_state.symbol_cooldown[sym] = time.time() + 300
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Para": sym,
+                            "Typ": f"WEJŚCIE {signal}",
+                            "Cena": f"{close_p:.4f}",
+                            "Ilość": f"{amount_precision:.4f}",
+                            "Dźwignia": f"{chosen_lev}x"
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-start_val = st.session_state.get("session_start_time", datetime.now())
-try:
-    session_elapsed = int(time.time() - start_val.timestamp())
-except Exception:
-    session_elapsed = 0
+st.title(f"👑 {t('title')}")
+st.markdown(f"### {t('subtitle')}")
 
-hours, rem = divmod(session_elapsed, 3600)
-minutes, seconds = divmod(rem, 60)
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+with col_m1:
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{t('wallet_futures')} ({selected_exchange})</div>
+            <div class="metric-value">{fut_total:.2f} USDT</div>
+            <div class="metric-delta">{t('free_balance')}: {fut_free:.2f} USDT</div>
+        </div>
+    """, unsafe_allow_html=True)
 
-session_pnl_pct_display = 0.0
-if st.session_state.session_start_balance > 0 and fut_total > 0:
-    session_pnl_pct_display = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
+with col_m2:
+    session_pnl_pct = 0.0
+    if st.session_state.session_start_balance > 0:
+        session_pnl_pct = ((fut_total - st.session_state.session_start_balance) / st.session_state.session_start_balance) * 100
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{t('session_results')}</div>
+            <div class="metric-value" style="color: {'#4CAF50' if session_pnl_pct >= 0 else '#F44336'};">{session_pnl_pct:+.2f}%</div>
+            <div class="metric-delta">{t('pnl_usdt')}: {total_unrealized_pnl:+.2f} USDT</div>
+        </div>
+    """, unsafe_allow_html=True)
 
-st.markdown(
-    f"""
-<div class="metrics-row">
-<div class="metric-card">
-<div class="metric-label">{t("wallet_futures")}</div>
-<div class="metric-value">{fut_total:.2f} USDT</div>
-<div class="metric-delta">{t("free_balance")}: {fut_free:.2f} USDT</div>
-</div>
-<div class="metric-card">
-<div class="metric-label">{t("session_results")}</div>
-<div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
-<div class="metric-delta">{t("pnl_usdt")}: {total_unrealized_pnl:+.2f} USDT</div>
-</div>
-<div class="metric-card">
-<div class="metric-label">{t("slots_futures")}</div>
-<div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
-<div class="metric-delta">{t("active_max")}</div>
-</div>
-<div class="metric-card">
-<div class="metric-label">{t("session_time")}</div>
-<div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
-<div class="metric-delta">Aktywne boty MTF: {len(st.session_state.active_mtf_bots)}</div>
-</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+with col_m3:
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{t('slots_futures')}</div>
+            <div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
+            <div class="metric-delta">{t('active_max')}</div>
+        </div>
+    """, unsafe_allow_html=True)
 
-st.markdown("---")
-st.subheader(f"🤖 {t('bot_control')}")
-st.text("Wybierz tryb (Automatyczny – optymalizowany w locie, lub Ręczny) dla każdego interwału.")
-
-available_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
-default_multipliers = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
-cols_tf = st.columns(len(available_timeframes))
-
-for idx, tf in enumerate(available_timeframes):
-    with cols_tf[idx]:
-        st.markdown(f"**📌 {tf}**")
-        prev_conf = st.session_state.active_mtf_bots.get(tf, {})
-        def_mode = prev_conf.get("mode", "Automatyczny")
-        def_ema_f = prev_conf.get("ema_fast", 9)
-        def_ema_s = prev_conf.get("ema_slow", 21)
-        def_adx = prev_conf.get("min_adx", 28.0)
-        def_max_rsi = prev_conf.get("max_rsi", 75.0)
-        def_min_rsi = prev_conf.get("min_rsi", 25.0)
-        def_mult = prev_conf.get("capital_multiplier", default_multipliers.get(tf, 1.0))
-
-        if f"bot_mode_{tf}" not in st.session_state:
-            st.session_state[f"bot_mode_{tf}"] = def_mode
-        if f"ema_f_val_{tf}" not in st.session_state:
-            st.session_state[f"ema_f_val_{tf}"] = def_ema_f
-        if f"ema_s_val_{tf}" not in st.session_state:
-            st.session_state[f"ema_s_val_{tf}"] = def_ema_s
-        if f"adx_val_{tf}" not in st.session_state:
-            st.session_state[f"adx_val_{tf}"] = float(def_adx)
-        if f"max_rsi_val_{tf}" not in st.session_state:
-            st.session_state[f"max_rsi_val_{tf}"] = float(def_max_rsi)
-        if f"min_rsi_val_{tf}" not in st.session_state:
-            st.session_state[f"min_rsi_val_{tf}"] = float(def_min_rsi)
-        if f"tf_cap_mult_{tf}" not in st.session_state:
-            st.session_state[f"tf_cap_mult_{tf}"] = float(def_mult)
-
-        bot_mode = st.radio(f"Tryb ({tf})", ["Automatyczny", "Ręczny"], index=0 if st.session_state[f"bot_mode_{tf}"]=="Automatyczny" else 1, key=f"radio_mode_{tf}")
-        st.session_state[f"bot_mode_{tf}"] = bot_mode
-
-        if bot_mode == "Ręczny":
-            ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, value=st.session_state[f"ema_f_val_{tf}"], key=f"ema_f_{tf}")
-            st.session_state[f"ema_f_val_{tf}"] = ema_f_val
-            ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, value=st.session_state[f"ema_s_val_{tf}"], key=f"ema_s_{tf}")
-            st.session_state[f"ema_s_val_{tf}"] = ema_s_val
-            adx_val = st.slider(f"Min ADX ({tf})", 10.0, 50.0, float(st.session_state[f"adx_val_{tf}"]), 1.0, key=f"adx_{tf}")
-            st.session_state[f"adx_val_{tf}"] = adx_val
-            max_rsi_val = st.slider(f"Max RSI Long ({tf})", 50.0, 95.0, float(st.session_state[f"max_rsi_val_{tf}"]), 1.0, key=f"max_rsi_{tf}")
-            st.session_state[f"max_rsi_val_{tf}"] = max_rsi_val
-            min_rsi_val = st.slider(f"Min RSI Short ({tf})", 5.0, 50.0, float(st.session_state[f"min_rsi_val_{tf}"]), 1.0, key=f"min_rsi_{tf}")
-            st.session_state[f"min_rsi_val_{tf}"] = min_rsi_val
-            tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, value=float(st.session_state[f"tf_cap_mult_{tf}"]), step=0.5, key=f"cap_mult_{tf}")
-            st.session_state[f"tf_cap_mult_{tf}"] = tf_cap_mult
-        else:
-            st.info("⚡ Włączony optymalizator automatyczny. Parametry dostosowują się same w locie.")
-            ema_f_val = st.session_state[f"ema_f_val_{tf}"]
-            ema_s_val = st.session_state[f"ema_s_val_{tf}"]
-            adx_val = st.session_state[f"adx_val_{tf}"]
-            max_rsi_val = st.session_state[f"max_rsi_val_{tf}"]
-            min_rsi_val = st.session_state[f"min_rsi_val_{tf}"]
-            tf_cap_mult = st.session_state[f"tf_cap_mult_{tf}"]
-
-        is_active = tf in st.session_state.active_mtf_bots
-        if is_active:
-            st.success("🟢 AKTYWNY")
-            if st.button(f"Zatrzymaj {tf}", key=f"stop_tf_{tf}", use_container_width=True):
-                del st.session_state.active_mtf_bots[tf]
-                st.rerun()
-        else:
-            st.warning("🔴 WYŁĄCZONY")
-            if st.button(f"Uruchom {tf}", key=f"start_tf_{tf}", use_container_width=True):
-                if not st.session_state.api_key or not st.session_state.secret_key:
-                    st.error("Najpierw zapisz klucze API w panelu bocznym!")
-                else:
-                    st.session_state.active_mtf_bots[tf] = {
-                        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "mode": bot_mode,
-                        "ema_fast": ema_f_val,
-                        "ema_slow": ema_s_val,
-                        "min_adx": adx_val,
-                        "max_rsi": max_rsi_val,
-                        "min_rsi": min_rsi_val,
-                        "capital_multiplier": tf_cap_mult
-                    }
-                    st.success(f"Uruchomiono bota na {tf}!")
-                    st.rerun()
+with col_m4:
+    elapsed_time = datetime.now() - st.session_state.session_start_time
+    hours, remainder = divmod(int(elapsed_time.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{t('session_time')}</div>
+            <div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
+            <div class="metric-delta">Autonomiczny tryb MTF</div>
+        </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("---")
 st.subheader(t('market_scanner_results'))
@@ -967,75 +884,89 @@ if scan_results:
     df_scan = pd.DataFrame(scan_results)
     st.dataframe(df_scan, use_container_width=True)
 else:
-    st.info(t("no_scanner"))
+    st.info(t('no_scanner'))
 
-st.markdown("---")
-st.subheader(t("active_positions"))
-if active_pos:
-    df_pos = pd.DataFrame(active_pos)
-    st.dataframe(df_pos, use_container_width=True)
-else:
-    st.info(t("no_positions"))
+col_pos, col_hist = st.columns(2)
+with col_pos:
+    st.subheader(t('active_positions'))
+    if active_pos:
+        df_pos = pd.DataFrame(active_pos)
+        st.dataframe(df_pos, use_container_width=True)
+    else:
+        st.info(t('no_positions'))
 
-st.markdown("---")
-st.subheader(t("trade_history"))
-if st.session_state.trade_history:
-    df_hist = pd.DataFrame(st.session_state.trade_history)
-    st.dataframe(df_hist, use_container_width=True)
-else:
-    st.info(t("no_history"))
+with col_hist:
+    st.subheader(t('trade_history'))
+    if st.session_state.trade_history:
+        df_hist = pd.DataFrame(st.session_state.trade_history)
+        st.dataframe(df_hist, use_container_width=True)
+    else:
+        st.info(t('no_history'))
 
 if is_user_admin():
     st.markdown("---")
-    st.subheader(t("admin_panel"))
-    col_u1, col_u2 = st.columns(2)
-    with col_u1:
-        target_uid = st.number_input("ID użytkownika do nadania subskrypcji", min_value=1, step=1, key="admin_target_uid")
-        if st.button("Aktywuj subskrypcję użytkownikowi", use_container_width=True):
-            try:
+    st.subheader(t('admin_panel'))
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, email, is_admin, stripe_paid FROM users")
+        users_list = cursor.fetchall()
+        conn.close()
+        df_users = pd.DataFrame(users_list, columns=["ID", "Email", "Admin", "Opłacone"])
+        st.dataframe(df_users, use_container_width=True)
+        
+        col_adm1, col_adm2 = st.columns(2)
+        with col_adm1:
+            target_id = st.number_input("ID użytkownika do aktywacji subskrypcji", min_value=1, step=1, key="admin_target_sub")
+            if st.button("Aktywuj subskrypcję użytkownikowi"):
                 conn = sqlite3.connect(DB_FILE, timeout=30.0)
                 cursor = conn.cursor()
-                cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (int(target_uid),))
+                cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (target_id,))
                 conn.commit()
                 conn.close()
-                st.success(f"Aktywowano subskrypcję dla użytkownika ID: {target_uid}")
+                st.success(f"Aktywowano subskrypcję dla ID {target_id}!")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Błąd: {e}")
-    with col_u2:
-        st.markdown("##### Usuń użytkownika z bazy")
-        conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        users_list_df = pd.read_sql_query("SELECT id, email FROM users", conn)
-        conn.close()
-        if not users_list_df.empty:
-            user_options = {f"ID {row['id']} - {row['email']}": row['id'] for _, row in users_list_df.iterrows()}
-            selected_user_label = st.selectbox("Wybierz użytkownika do usunięcia", list(user_options.keys()), key="admin_del_select_box")
-            target_del_uid = user_options[selected_user_label]
-            if st.button("Usuń zaznaczonego użytkownika", use_container_width=True, type="primary"):
-                if target_del_uid == st.session_state.get("user_id"):
+        with col_adm2:
+            target_del = st.number_input("ID użytkownika do usunięcia", min_value=1, step=1, key="admin_target_del")
+            if st.button("Usuń użytkownika"):
+                if target_del == st.session_state.get("user_id"):
                     st.error("Nie możesz usunąć samego siebie!")
                 else:
                     try:
-                        conn_del = sqlite3.connect(DB_FILE, timeout=30.0)
-                        cur_del = conn_del.cursor()
-                        cur_del.execute("DELETE FROM users WHERE id = ?", (int(target_del_uid),))
-                        conn_del.commit()
-                        conn_del.close()
-                        st.success(f"Usunięto użytkownika o ID: {target_del_uid}")
+                        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM users WHERE id = ?", (int(target_del),))
+                        conn.commit()
+                        conn.close()
+                        st.success(f"Usunięto użytkownika ID {target_del}!")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Błąd: {e}")
-    try:
-        conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid", conn)
-        conn.close()
-        st.dataframe(df_users, use_container_width=True)
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Błąd panelu administratora: {e}")
+
+try:
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE users 
+    SET api_key = ?, secret_key = ?, passphrase = ? 
+    WHERE id = ?
+    """, (
+        st.session_state.get("api_key", ""),
+        st.session_state.get("secret_key", ""),
+        st.session_state.get("passphrase", ""),
+        st.session_state.get("user_id")
+    ))
+    conn.commit()
+    conn.close()
+except Exception as e:
+    pass
 
 gc.collect()
 
 if auto_refresh_seconds > 0:
     time.sleep(auto_refresh_seconds)
     st.rerun()
+
