@@ -243,9 +243,9 @@ def init_db():
 
 init_db()
 
-stripe_pk_val = "pk_test_51UCp3y3wtM9kxsPEoVsGNrCzVfWWEYAnvfpoe8Rgxm3f8Yv5F8aek5FqdVKyWfTWExP5yve5FHSiDvOs48IzezTw00oX3rdD6F"
-stripe_sk_val = "sk_test_51UCp3y3wtM9kxsPEoOQK8G9hWidflsfC1pidsagWukvFJd8W4tEEP6BVh2H3BsZhHl6Fiw0nRvotGucgtdP8RnN00k9ljpLCW"
-stripe_price_id_val = "price_1UCpMQ3wtM9kxsPESCDtQYdk"
+stripe_pk_val = "pk_live_51UCp3eKe18kT9JGHZvz9RGblVSUvyuaKfQ49DDvXymKf8IDjIgHyO4wfpaDnqSWQKvcGbXcQ2yhPJx2id6O8wLa800mN6pFhEA"
+stripe_sk_val = "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"
+stripe_price_id_val = "price_1UCpMQ3wtM9kxsPESCDtQYd"
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
