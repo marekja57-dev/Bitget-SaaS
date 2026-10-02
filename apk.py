@@ -73,8 +73,8 @@ TRANSLATIONS = {
         "active_positions": "📈 Aktywne Pozycje Futures",
         "trade_history": "📜 Historia Ostatnich Transakcji",
         "admin_panel": "👑 Panel Administratora (Użytkownicy)",
-        "manual_card": "📖 Instrukcja Obsługi",
-        "terms_card": "📜 Regulamin Serwisu",
+        "manual_tab": "📖 Instrukcja Obsługi",
+        "terms_tab": "📜 Regulamin Serwisu",
         "no_positions": "Brak otwartych pozycji futures.",
         "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
         "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania. Uruchom przynajmniej jeden bot."
@@ -131,8 +131,8 @@ TRANSLATIONS = {
         "active_positions": "📈 Active Futures Positions",
         "trade_history": "📜 Recent Trade History",
         "admin_panel": "👑 Admin Panel (Users)",
-        "manual_card": "📖 User Manual",
-        "terms_card": "📜 Terms of Service",
+        "manual_tab": "📖 User Manual",
+        "terms_tab": "📜 Terms of Service",
         "no_positions": "No open futures positions.",
         "no_history": "No recorded trades in this session.",
         "no_scanner": "No active MTF bots or scanner results. Start at least one bot."
@@ -367,38 +367,10 @@ section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px 
     font-size: 0.75rem;
     color: #e6c687;
 }
-.hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 30px; padding-bottom: 20px; }
-.retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 30px 25px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 650px; text-align: center; }
-.retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 2.5rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 5px; }
-.retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1rem; letter-spacing: 2px; margin-bottom: 20px; }
-
-/* Styl kafelków informacyjnych (Instrukcja / Regulamin) */
-.info-tile {
-    background: linear-gradient(135deg, #122818 0%, #0a170f 100%);
-    border: 3px solid #f3d57a;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 15px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 0 15px rgba(30, 77, 43, 0.4);
-    text-align: left;
-    color: #e6c687;
-    font-family: 'Cinzel', serif;
-}
-.info-tile h3 {
-    color: #f3d57a;
-    font-family: 'Cinzel', serif;
-    margin-top: 0;
-    border-bottom: 1px solid rgba(243, 213, 122, 0.3);
-    padding-bottom: 8px;
-    font-size: 1.1rem;
-}
-.info-tile p, .info-tile li {
-    font-family: sans-serif;
-    font-size: 0.9rem;
-    color: #dcd6c9;
-    line-height: 1.5;
-}
-
+.hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
+.retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
+.retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
+.retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; }
 div.stButton > button { background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; }
 div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #163d22 100%) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); }
 </style>""",
@@ -413,9 +385,7 @@ if not st.session_state.logged_in:
 <div class="retro-subtitle">{t("subtitle")}</div>""",
         unsafe_allow_html=True,
     )
-    
-    tab_login, tab_register, tab_manual, tab_terms = st.tabs([t("login_tab"), t("register_tab"), t("manual_card"), t("terms_card")])
-    
+    tab_login, tab_register, tab_manual, tab_terms = st.tabs([t("login_tab"), t("register_tab"), t("manual_tab"), t("terms_tab")])
     with tab_login:
         st.markdown(f"<p style='color: #f3d57a; font-family: Cinzel, serif;'>{t('login_tab')}</p>", unsafe_allow_html=True)
         login_email = st.text_input(t("email_label"), key="log_email")
@@ -472,28 +442,28 @@ if not st.session_state.logged_in:
 
     with tab_manual:
         st.markdown("""
-        <div class="info-tile">
-            <h3>📖 Instrukcja Obsługi systemu Bitget Futures SaaS</h3>
-            <ol>
-                <li><b>Rejestracja i Logowanie:</b> Załóż konto za pomocą swojego adresu e-mail oraz silnego hasła w zakładce rejestracji, a następnie zaloguj się do systemu.</li>
-                <li><b>Konfiguracja Kluczy API:</b> W panelu bocznym wybierz giełdę (np. Bitget), wprowadź swoje klucze API Key, Secret Key oraz Passphrase i kliknij zapis.</li>
-                <li><b>Aktywacja Dostępu (Subskrypcja):</b> Opłać dostęp do oprogramowania za pośrednictwem bramki płatności Stripe lub skorzystaj z aktywacji testowej.</li>
-                <li><b>Zarządzanie Ryzykiem:</b> Ustaw maksymalny budżet na pojedynczą pozycję w USDT, limity pozycji oraz strażnika ROE (Stop-Loss / Take-Profit).</li>
-                <li><b>Uruchomienie Bota:</b> System automatycznie skanuje rynki przy użyciu wskaźników technicznych (EMA, RSI, ADX) i zarządza pozycjami autonomicznie.</li>
-            </ol>
+        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
+        <h3>📖 Instrukcja Obsługi systemu Bitget Futures SaaS</h3>
+        <ol>
+            <li><b>Rejestracja i Logowanie:</b> Załóż konto za pomocą swojego adresu e-mail oraz silnego hasła w zakładce rejestracji, a następnie zaloguj się do systemu.</li>
+            <li><b>Konfiguracja Kluczy API:</b> W panelu bocznym wybierz giełdę (np. Bitget), wprowadź swoje klucze API Key, Secret Key oraz Passphrase i kliknij "Zapisz moje klucze".</li>
+            <li><b>Aktywacja Dostępu (Subskrypcja):</b> Opłać dostęp do oprogramowania za pośrednictwem bezpiecznej bramki płatności Stripe lub skorzystaj z testowej aktywacji przez administratora.</li>
+            <li><b>Zarządzanie Ryzykiem:</b> Ustaw maksymalny budżet na pojedynczą pozycję w USDT, limity pozycji oraz strażnika ROE (Stop-Loss / Take-Profit).</li>
+            <li><b>Uruchomienie Bota:</b> System automatycznie skanuje rynki kryptowalut przy użyciu wskaźników technicznych (EMA, RSI, ADX) i otwiera oraz zarządza pozycjami autonomicznie.</li>
+        </ol>
         </div>
         """, unsafe_allow_html=True)
 
     with tab_terms:
         st.markdown("""
-        <div class="info-tile">
-            <h3>📜 Regulamin Serwisu i Zasady Korzystania</h3>
-            <p><b>§ 1. Postanowienia Ogólne</b><br>
-            Niniejszy regulamin określa zasady korzystania z autonomicznej platformy transakcyjnej Bitget Futures SaaS. Korzystanie z serwisu oznacza pełną akceptację poniższych warunków.</p>
-            <p><b>§ 2. Odpowiedzialność za Inwestycje</b><br>
-            Handel kontraktami futures na rynkach kryptowalut wiąże się z wysokim stopniem ryzyka finansowego i możliwością utraty całego zainwestowanego kapitału. Oprogramowanie ma charakter wyłącznie analityczny i narzędziowy. Twórcy nie ponoszą żadnej odpowiedzialności za straty finansowe wynikające z działania algorytmów.</p>
-            <p><b>§ 3. Bezpieczeństwo Kluczy API</b><br>
-            Użytkownik ponosi pełną odpowiedzialność za poufność swoich kluczy API giełdy. Zaleca się stosowanie kluczy z ograniczeniem uprawnień wyłącznie do handlu (bez praw do wypłat środków).</p>
+        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
+        <h3>📜 Regulamin Serwisu i Zasady Korzystania</h3>
+        <p><b>§ 1. Postanowienia Ogólne</b><br>
+        Niniejszy regulamin określa zasady korzystania z autonomicznej platformy transakcyjnej Bitget Futures SaaS. Korzystanie z serwisu oznacza pełną akceptację poniższych warunków.</p>
+        <p><b>§ 2. Odpowiedzialność za Inwestycje</b><br>
+        Handel kontraktami futures na rynkach kryptowalut wiąże się z wysokim stopniem ryzyka finansowego i możliwością utraty całego zainwestowanego kapitału. Oprogramowanie ma charakter wyłącznie analityczny i narzędziowy. Twórcy nie ponoszą żadnej odpowiedzialności za straty finansowe wynikające z działania algorytmów.</p>
+        <p><b>§ 3. Bezpieczeństwo Kluczy API</b><br>
+        Użytkownik ponosi pełną odpowiedzialność za poufność swoich kluczy API giełdy. Zaleca się stosowanie kluczy z ograniczeniem uprawnień wyłącznie do handlu (bez praw do wypłat środków).</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -701,6 +671,7 @@ st.markdown(f"### {t('subtitle')}")
 st.markdown("---")
 st.subheader(t('bot_control'))
 
+# PANEL STEROWANIA NA ŚRODKU (NORMALNY UKŁAD SEKCJI DLA KAŻDEGO INTERWAŁU)
 timeframes_list = ["1m", "5m", "15m", "1h", "4h"]
 
 for tf in timeframes_list:
