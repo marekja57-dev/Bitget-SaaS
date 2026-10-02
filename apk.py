@@ -187,24 +187,14 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     return df
 
 def get_optimal_dynamic_parameters(df_recent, tf):
-    try:
-        closes = df_recent['close'].values
-        returns = np.diff(closes) / closes[:-1]
-        volatility = np.std(returns) * np.sqrt(len(returns))
-        if tf in ["1m", "5m"]:
-            if volatility > 0.02:
-                return {"ema_fast": 5, "ema_slow": 13, "min_adx": 22.0, "max_rsi": 72.0, "min_rsi": 28.0, "capital_multiplier": 0.6}
-            else:
-                return {"ema_fast": 9, "ema_slow": 21, "min_adx": 26.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 0.8}
-        elif tf in ["15m", "30m"]:
-            if volatility > 0.03:
-                return {"ema_fast": 7, "ema_slow": 18, "min_adx": 24.0, "max_rsi": 70.0, "min_rsi": 30.0, "capital_multiplier": 1.0}
-            else:
-                return {"ema_fast": 10, "ema_slow": 25, "min_adx": 25.0, "max_rsi": 78.0, "min_rsi": 22.0, "capital_multiplier": 1.2}
-        else:
-            return {"ema_fast": 12, "ema_slow": 26, "min_adx": 20.0, "max_rsi": 80.0, "min_rsi": 20.0, "capital_multiplier": 2.5}
-    except Exception:
-        return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 1.0}
+    # Pobieramy wartości bezpośrednio z suwaków Streamlita (session_state)
+    return {
+        "ema_fast": st.session_state.get("slider_ema_fast", 9),
+        "ema_slow": st.session_state.get("slider_ema_slow", 21),
+        "min_adx": st.session_state.get("slider_min_adx", 20.0),
+        "max_rsi": st.session_state.get("slider_max_rsi", 75.0),
+        "min_rsi": st.session_state.get("slider_min_rsi", 25.0)
+    }
 
 def init_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -245,7 +235,7 @@ init_db()
 
 stripe_pk_val = "pk_live_51UCp3eKe18kT9JGHZvz9RGblVSUvyuaKfQ49DDvXymKf8IDjIgHyO4wfpaDnqSWQKvcGbXcQ2yhPJx2id6O8wLa800mN6pFhEA"
 stripe_sk_val = "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"
-stripe_price_id_val = "price_1UCpMQ3wtM9kxsPESCDtQYd"
+stripe_price_id_val = "price_1UDAQAKe18kT9JGHUGVXkqi8"
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
