@@ -73,8 +73,6 @@ TRANSLATIONS = {
         "active_positions": "📈 Aktywne Pozycje Futures",
         "trade_history": "📜 Historia Ostatnich Transakcji",
         "admin_panel": "👑 Panel Administratora (Użytkownicy)",
-        "manual_tab": "📖 Instrukcja Obsługi",
-        "terms_tab": "📜 Regulamin Serwisu",
         "no_positions": "Brak otwartych pozycji futures.",
         "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
         "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania. Uruchom przynajmniej jeden bot."
@@ -131,8 +129,6 @@ TRANSLATIONS = {
         "active_positions": "📈 Active Futures Positions",
         "trade_history": "📜 Recent Trade History",
         "admin_panel": "👑 Admin Panel (Users)",
-        "manual_tab": "📖 User Manual",
-        "terms_tab": "📜 Terms of Service",
         "no_positions": "No open futures positions.",
         "no_history": "No recorded trades in this session.",
         "no_scanner": "No active MTF bots or scanner results. Start at least one bot."
@@ -193,12 +189,12 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
 def get_optimal_dynamic_parameters(df_recent, tf):
     try:
         return {
-            "ema_fast": int(st.session_state.get(f"tf_{tf}_ema_fast", 9)),
-            "ema_slow": int(st.session_state.get(f"tf_{tf}_ema_slow", 21)),
-            "min_adx": float(st.session_state.get(f"tf_{tf}_min_adx", 25.0)),
-            "max_rsi": float(st.session_state.get(f"tf_{tf}_max_rsi", 75.0)),
-            "min_rsi": float(st.session_state.get(f"tf_{tf}_min_rsi", 25.0)),
-            "capital_multiplier": float(st.session_state.get(f"tf_{tf}_cap", 1.0))
+            "ema_fast": int(st.session_state.get("slider_ema_fast", 9)),
+            "ema_slow": int(st.session_state.get("slider_ema_slow", 21)),
+            "min_adx": float(st.session_state.get("slider_min_adx", 25.0)),
+            "max_rsi": float(st.session_state.get("slider_max_rsi", 75.0)),
+            "min_rsi": float(st.session_state.get("slider_min_rsi", 25.0)),
+            "capital_multiplier": 1.0
         }
     except Exception:
         return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 1.0}
@@ -300,13 +296,7 @@ if "session_start_balance" not in st.session_state:
 if "session_baseline_locked" not in st.session_state:
     st.session_state.session_baseline_locked = False
 if "active_mtf_bots" not in st.session_state:
-    st.session_state.active_mtf_bots = {
-        "1m": False,
-        "5m": False,
-        "15m": True,
-        "1h": False,
-        "4h": False
-    }
+    st.session_state.active_mtf_bots = {}
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -385,7 +375,7 @@ if not st.session_state.logged_in:
 <div class="retro-subtitle">{t("subtitle")}</div>""",
         unsafe_allow_html=True,
     )
-    tab_login, tab_register, tab_manual, tab_terms = st.tabs([t("login_tab"), t("register_tab"), t("manual_tab"), t("terms_tab")])
+    tab_login, tab_register = st.tabs([t("login_tab"), t("register_tab")])
     with tab_login:
         st.markdown(f"<p style='color: #f3d57a; font-family: Cinzel, serif;'>{t('login_tab')}</p>", unsafe_allow_html=True)
         login_email = st.text_input(t("email_label"), key="log_email")
@@ -439,34 +429,6 @@ if not st.session_state.logged_in:
                     st.error(t("reg_error_exists"))
             else:
                 st.error(t("reg_error_fill"))
-
-    with tab_manual:
-        st.markdown("""
-        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
-        <h3>📖 Instrukcja Obsługi systemu Bitget Futures SaaS</h3>
-        <ol>
-            <li><b>Rejestracja i Logowanie:</b> Załóż konto za pomocą swojego adresu e-mail oraz silnego hasła w zakładce rejestracji, a następnie zaloguj się do systemu.</li>
-            <li><b>Konfiguracja Kluczy API:</b> W panelu bocznym wybierz giełdę (np. Bitget), wprowadź swoje klucze API Key, Secret Key oraz Passphrase i kliknij "Zapisz moje klucze".</li>
-            <li><b>Aktywacja Dostępu (Subskrypcja):</b> Opłać dostęp do oprogramowania za pośrednictwem bezpiecznej bramki płatności Stripe lub skorzystaj z testowej aktywacji przez administratora.</li>
-            <li><b>Zarządzanie Ryzykiem:</b> Ustaw maksymalny budżet na pojedynczą pozycję w USDT, limity pozycji oraz strażnika ROE (Stop-Loss / Take-Profit).</li>
-            <li><b>Uruchomienie Bota:</b> System automatycznie skanuje rynki kryptowalut przy użyciu wskaźników technicznych (EMA, RSI, ADX) i otwiera oraz zarządza pozycjami autonomicznie.</li>
-        </ol>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with tab_terms:
-        st.markdown("""
-        <div style='color: #e6c687; text-align: left; font-family: sans-serif; font-size: 0.9rem;'>
-        <h3>📜 Regulamin Serwisu i Zasady Korzystania</h3>
-        <p><b>§ 1. Postanowienia Ogólne</b><br>
-        Niniejszy regulamin określa zasady korzystania z autonomicznej platformy transakcyjnej Bitget Futures SaaS. Korzystanie z serwisu oznacza pełną akceptację poniższych warunków.</p>
-        <p><b>§ 2. Odpowiedzialność za Inwestycje</b><br>
-        Handel kontraktami futures na rynkach kryptowalut wiąże się z wysokim stopniem ryzyka finansowego i możliwością utraty całego zainwestowanego kapitału. Oprogramowanie ma charakter wyłącznie analityczny i narzędziowy. Twórcy nie ponoszą żadnej odpowiedzialności za straty finansowe wynikające z działania algorytmów.</p>
-        <p><b>§ 3. Bezpieczeństwo Kluczy API</b><br>
-        Użytkownik ponosi pełną odpowiedzialność za poufność swoich kluczy API giełdy. Zaleca się stosowanie kluczy z ograniczeniem uprawnień wyłącznie do handlu (bez praw do wypłat środków).</p>
-        </div>
-        """, unsafe_allow_html=True)
-
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
@@ -630,6 +592,14 @@ max_allowed_leverage = st.sidebar.slider(t("max_allowed_lev"), 1, 50, 15, 1, key
 manual_leverage = st.sidebar.slider(t("manual_lev"), 1, 50, 5, 1, key="sb_manual_leverage")
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎛 Parametry Wskaźników (Strategia)")
+slider_ema_fast = st.sidebar.slider("EMA Fast", 3, 20, 9, key="slider_ema_fast")
+slider_ema_slow = st.sidebar.slider("EMA Slow", 10, 50, 21, key="slider_ema_slow")
+slider_min_adx = st.sidebar.slider("Min ADX", 10.0, 40.0, 25.0, 0.5, key="slider_min_adx")
+slider_max_rsi = st.sidebar.slider("Max RSI", 60.0, 90.0, 75.0, 1.0, key="slider_max_rsi")
+slider_min_rsi = st.sidebar.slider("Min RSI", 10.0, 40.0, 25.0, 1.0, key="slider_min_rsi")
+
+st.sidebar.markdown("---")
 max_fut_scan_pairs = st.sidebar.slider(t("max_pairs"), 1, 100, 30, 1, key="sb_max_fut_pairs")
 
 st.sidebar.markdown("---")
@@ -664,30 +634,6 @@ if emergency_kill:
     st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures i zatrzymano wszystkie boty.")
     time.sleep(2)
     st.rerun()
-
-st.title(f"👑 {t('title')}")
-st.markdown(f"### {t('subtitle')}")
-
-st.markdown("---")
-st.subheader(t('bot_control'))
-
-# PANEL STEROWANIA NA ŚRODKU (NORMALNY UKŁAD SEKCJI DLA KAŻDEGO INTERWAŁU)
-timeframes_list = ["1m", "5m", "15m", "1h", "4h"]
-
-for tf in timeframes_list:
-    with st.expander(f"⚙️ Ustawienia i aktywacja bota dla interwału: {tf}", expanded=(tf == "15m")):
-        is_active = st.checkbox(f"Włącz bot {tf}", value=st.session_state.active_mtf_bots.get(tf, False), key=f"cb_bot_{tf}")
-        st.session_state.active_mtf_bots[tf] = is_active
-        
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            st.slider(f"EMA Fast ({tf})", 3, 20, 9, key=f"tf_{tf}_ema_fast")
-            st.slider(f"EMA Slow ({tf})", 10, 50, 21, key=f"tf_{tf}_ema_slow")
-            st.slider(f"Min ADX ({tf})", 10.0, 40.0, 25.0, 0.5, key=f"tf_{tf}_min_adx")
-        with col_s2:
-            st.slider(f"Max RSI ({tf})", 60.0, 90.0, 75.0, 1.0, key=f"tf_{tf}_max_rsi")
-            st.slider(f"Min RSI ({tf})", 10.0, 40.0, 25.0, 1.0, key=f"tf_{tf}_min_rsi")
-            st.slider(f"Mnożnik kapitału ({tf})", 0.5, 5.0, 1.0, 0.1, key=f"tf_{tf}_cap")
 
 scan_results = []
 active_pos = []
@@ -773,90 +719,90 @@ if futures_ex:
         st.session_state.session_baseline_locked = True
 
     current_time_ts = time.time()
-    active_tfs = [tf for tf, active in st.session_state.active_mtf_bots.items() if active]
-
-    for tf in active_tfs:
-        for sym in selected_symbols:
-            if sym in existing_pos_map:
+    for sym in selected_symbols:
+        if sym in existing_pos_map:
+            continue
+        if sym in st.session_state.symbol_cooldown:
+            if current_time_ts < st.session_state.symbol_cooldown[sym]:
                 continue
-            if sym in st.session_state.symbol_cooldown:
-                if current_time_ts < st.session_state.symbol_cooldown[sym]:
-                    continue
-                else:
-                    del st.session_state.symbol_cooldown[sym]
+            else:
+                del st.session_state.symbol_cooldown[sym]
 
-            try:
-                ohlcv = futures_ex.fetch_ohlcv(sym, timeframe=tf, limit=60)
-                if not ohlcv or len(ohlcv) < 30:
-                    continue
-                df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                params = get_optimal_dynamic_parameters(df, tf)
-                df = calculate_indicators(df, ema_fast=params["ema_fast"], ema_slow=params["ema_slow"])
-                last = df.iloc[-1]
+        try:
+            ohlcv = futures_ex.fetch_ohlcv(sym, timeframe="15m", limit=60)
+            if not ohlcv or len(ohlcv) < 30:
+                continue
+            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            params = get_optimal_dynamic_parameters(df, "15m")
+            df = calculate_indicators(df, ema_fast=params["ema_fast"], ema_slow=params["ema_slow"])
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
 
-                adx = float(last.get("adx", 0) or 0)
-                rsi = float(last.get("rsi", 50) or 50)
-                ema_f = float(last.get("ema_fast", 0) or 0)
-                ema_s = float(last.get("ema_slow", 0) or 0)
-                close_p = float(last.get("close", 0) or 0)
+            adx = float(last.get("adx", 0) or 0)
+            rsi = float(last.get("rsi", 50) or 50)
+            ema_f = float(last.get("ema_fast", 0) or 0)
+            ema_s = float(last.get("ema_slow", 0) or 0)
+            close_p = float(last.get("close", 0) or 0)
 
-                signal = "NEUTRAL"
-                if adx >= params["min_adx"]:
-                    if ema_f > ema_s and rsi < params["max_rsi"]:
-                        signal = "LONG"
-                    elif ema_f < ema_s and rsi > params["min_rsi"]:
-                        signal = "SHORT"
+            signal = "NEUTRAL"
+            if adx >= params["min_adx"]:
+                if ema_f > ema_s and rsi < params["max_rsi"]:
+                    signal = "LONG"
+                elif ema_f < ema_s and rsi > params["min_rsi"]:
+                    signal = "SHORT"
 
-                scan_results.append({
-                    "symbol": sym,
-                    "timeframe": tf,
-                    "signal": signal,
-                    "adx": adx,
-                    "rsi": rsi,
-                    "close": close_p
-                })
+            scan_results.append({
+                "symbol": sym,
+                "timeframe": "15m",
+                "signal": signal,
+                "adx": adx,
+                "rsi": rsi,
+                "close": close_p
+            })
 
-                if signal in ["LONG", "SHORT"] and active_positions_count < max_active_futures_positions:
-                    ex_max_lev = get_exchange_max_leverage(futures_ex, sym, 15)
-                    chosen_lev = manual_leverage if leverage_mode == "Ręczny" else get_smart_leverage(adx, ex_max_lev, max_allowed_leverage)
-                    try:
-                        futures_ex.set_leverage(chosen_lev, sym)
-                    except Exception:
-                        pass
+            if signal in ["LONG", "SHORT"] and active_positions_count < max_active_futures_positions:
+                ex_max_lev = get_exchange_max_leverage(futures_ex, sym, 15)
+                chosen_lev = manual_leverage if leverage_mode == "Ręczny" else get_smart_leverage(adx, ex_max_lev, max_allowed_leverage)
+                try:
+                    futures_ex.set_leverage(chosen_lev, sym)
+                except Exception:
+                    pass
 
-                    stop_loss_dist = close_p * 0.02
-                    sl_price = close_p - stop_loss_dist if signal == "LONG" else close_p + stop_loss_dist
-                    notional = calculate_risk_based_allocation(
-                        free_balance=fut_free,
-                        entry_price=close_p,
-                        stop_loss_price=sl_price,
-                        risk_percentage=0.01,
-                        leverage=chosen_lev,
-                        max_single_limit=max_single_trade_usdt,
-                        tf_multiplier=params["capital_multiplier"]
-                    )
-                    amount = notional * chosen_lev / close_p
-                    try:
-                        amount_precision = float(futures_ex.amount_to_precision(sym, amount))
-                        if amount_precision > 0:
-                            order_side = "buy" if signal == "LONG" else "sell"
-                            futures_ex.create_order(sym, "market", order_side, amount_precision)
-                            active_positions_count += 1
-                            st.session_state.symbol_cooldown[sym] = time.time() + 300
-                            st.session_state.trade_history.insert(0, {
-                                "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "Para": sym,
-                                "Typ": f"WEJŚCIE {signal} ({tf})",
-                                "Cena": f"{close_p:.4f}",
-                                "Ilość": f"{amount_precision:.4f}",
-                                "Dźwignia": f"{chosen_lev}x"
-                            })
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                stop_loss_dist = close_p * 0.02
+                sl_price = close_p - stop_loss_dist if signal == "LONG" else close_p + stop_loss_dist
+                notional = calculate_risk_based_allocation(
+                    free_balance=fut_free,
+                    entry_price=close_p,
+                    stop_loss_price=sl_price,
+                    risk_percentage=0.01,
+                    leverage=chosen_lev,
+                    max_single_limit=max_single_trade_usdt,
+                    tf_multiplier=params["capital_multiplier"]
+                )
+                amount = notional * chosen_lev / close_p
+                try:
+                    amount_precision = float(futures_ex.amount_to_precision(sym, amount))
+                    if amount_precision > 0:
+                        order_side = "buy" if signal == "LONG" else "sell"
+                        futures_ex.create_order(sym, "market", order_side, amount_precision)
+                        active_positions_count += 1
+                        st.session_state.symbol_cooldown[sym] = time.time() + 300
+                        st.session_state.trade_history.insert(0, {
+                            "Czas": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Para": sym,
+                            "Typ": f"WEJŚCIE {signal}",
+                            "Cena": f"{close_p:.4f}",
+                            "Ilość": f"{amount_precision:.4f}",
+                            "Dźwignia": f"{chosen_lev}x"
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-st.markdown("---")
+st.title(f"👑 {t('title')}")
+st.markdown(f"### {t('subtitle')}")
+
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 with col_m1:
     st.markdown(f"""
@@ -970,20 +916,9 @@ if is_user_admin():
 
 try:
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    cursor = conn.cursor()
-    cursor.execute("""
-    UPDATE users 
-    SET api_key = ?, secret_key = ?, passphrase = ? 
-    WHERE id = ?
-    """, (
-        st.session_state.get("api_key", ""),
-        st.session_state.get("secret_key", ""),
-        st.session_state.get("passphrase", ""),
-        st.session_state.get("user_id")
-    ))
-    conn.commit()
+    df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid, api_key FROM users", conn)
     conn.close()
-except Exception as e:
+except Exception:
     pass
 
 gc.collect()
