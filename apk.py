@@ -182,30 +182,24 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     df["macd"] = exp1 - exp2
     df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["signal"]
-    
     df["tr0"] = abs(df["high"] - df["low"])
     df["tr1"] = abs(df["high"] - df["close"].shift(1))
     df["tr2"] = abs(df["low"] - df["close"].shift(1))
     df["tr"] = df[["tr0", "tr1", "tr2"]].max(axis=1)
-    
     df["up_move"] = df["high"] - df["high"].shift(1)
     df["down_move"] = df["low"].shift(1) - df["low"]
     df["plus_dm"] = np.where((df["up_move"] > df["down_move"]) & (df["up_move"] > 0), df["up_move"], 0)
     df["minus_dm"] = np.where((df["down_move"] > df["up_move"]) & (df["down_move"] > 0), df["down_move"], 0)
-    
     alpha = 1 / adx_period
     df["tr_smooth"] = df["tr"].ewm(alpha=alpha, adjust=False).mean()
     df["plus_di_smooth"] = df["plus_dm"].ewm(alpha=alpha, adjust=False).mean()
     df["minus_di_smooth"] = df["minus_dm"].ewm(alpha=alpha, adjust=False).mean()
-    
     tr_smooth = df["tr_smooth"].replace(0, np.nan)
     df["plus_di"] = 100 * (df["plus_di_smooth"] / tr_smooth)
     df["minus_di"] = 100 * (df["minus_di_smooth"] / tr_smooth)
-    
     di_sum = (df["plus_di"] + df["minus_di"]).replace(0, np.nan)
     df["dx"] = 100 * abs(df["plus_di"] - df["minus_di"]) / di_sum
     df["adx"] = df["dx"].ewm(alpha=alpha, adjust=False).mean()
-    
     delta = df["close"].diff()
     gain = (delta.where(delta > 0, 0)).ewm(span=14, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(span=14, adjust=False).mean()
@@ -234,6 +228,8 @@ def get_optimal_dynamic_parameters(df_recent, tf):
         return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25.0, "max_rsi": 75.0, "min_rsi": 25.0, "capital_multiplier": 1.0}
 
 def blend_params(base, opt, base_weight=0.5):
+    """Laczy wartosci bazowe z suwakow z wynikiem automatycznego optymalizatora.
+    base_weight=1.0 -> tylko suwaki (jak tryb Reczny), 0.0 -> tylko optymalizator."""
     w = max(0.0, min(1.0, float(base_weight)))
     return {
         "ema_fast": max(1, int(round(base["ema_fast"] * w + opt["ema_fast"] * (1 - w)))),
@@ -248,6 +244,8 @@ AVAILABLE_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 DEFAULT_TF_MULTIPLIERS = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
 
 def build_bot_config_from_state(state, tf):
+    """Buduje konfiguracje bota z AKTUALNYCH wartosci widgetow (session_state).
+    Zwraca None, jesli widgety dla tego interwalu nie istnieja jeszcze w sesji."""
     k_f = f"ema_f_{tf}"
     k_s = f"ema_s_{tf}"
     k_adx = f"adx_{tf}"
@@ -279,6 +277,9 @@ def build_bot_config_from_state(state, tf):
     }
 
 def sync_running_bots_from_widgets(state, timeframes=None):
+    """Wpycha biezace wartosci suwakow do WSZYSTKICH uruchomionych botow.
+    Wywolywane PRZED petla skanujaca, dlatego zmiana suwaka dziala od razu,
+    w tym samym przebiegu skryptu, bez czekania na kolejne odswiezenie."""
     bots = state.get("active_mtf_bots")
     if not isinstance(bots, dict) or not bots:
         return 0
@@ -296,16 +297,16 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE,
-            password TEXT,
-            is_admin INTEGER DEFAULT 0,
-            stripe_paid INTEGER DEFAULT 0,
-            api_key TEXT,
-            secret_key TEXT,
-            passphrase TEXT
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE,
+        password TEXT,
+        is_admin INTEGER DEFAULT 0,
+        stripe_paid INTEGER DEFAULT 0,
+        api_key TEXT,
+        secret_key TEXT,
+        passphrase TEXT
+    )
     """)
     for col, col_type in [
         ("api_key", "TEXT"),
@@ -329,6 +330,7 @@ def init_db():
 init_db()
 
 def _get_secret(name, default=""):
+    """Sekrety pobierane ze zmiennych srodowiskowych lub st.secrets - bez kluczy w kodzie."""
     val = os.getenv(name)
     if val:
         return val
@@ -421,11 +423,43 @@ st.markdown(
 @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
 .stApp { background-color: #0d0b0a; }
 section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; }
-.metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; }
-.metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); }
-.metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; }
-.metric-delta { font-size: 0.75rem; color: #e6c687; }
+.metrics-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap !important;
+    gap: 14px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+.metric-card {
+    flex: 1;
+    min-width: 0;
+    border: 2px solid #f3d57a;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background-color: rgba(243, 213, 122, 0.03);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.metric-label {
+    font-family: 'Cinzel', serif;
+    color: #f3d57a;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+.metric-delta {
+    font-size: 0.75rem;
+    color: #e6c687;
+}
 .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; }
 .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; }
 .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; }
@@ -439,9 +473,9 @@ div.stButton > button:hover { background: linear-gradient(135deg, #28663a 0%, #1
 if not st.session_state.logged_in:
     st.markdown(
         f"""<div class="hero-wrapper">
-            <div class="retro-ornate-frame">
-                <div class="retro-vintage-title">{t("title")}</div>
-                <div class="retro-subtitle">{t("subtitle")}</div>""",
+<div class="retro-ornate-frame">
+<div class="retro-vintage-title">{t("title")}</div>
+<div class="retro-subtitle">{t("subtitle")}</div>""",
         unsafe_allow_html=True,
     )
     tab_login, tab_register = st.tabs([t("login_tab"), t("register_tab")])
@@ -509,12 +543,8 @@ if not st.session_state.logged_in:
                 st.error(t("reg_error_fill"))
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
-
 st.session_state.lang = st.sidebar.selectbox(
-    "🌐 Język / Language",
-    ["Polski", "English"],
-    index=0 if st.session_state.get("lang", "Polski") == "Polski" else 1,
-    key="lang_selector"
+    "🌐 Język / Language", ["Polski", "English"], index=0 if st.session_state.get("lang", "Polski") == "Polski" else 1, key="lang_selector"
 )
 
 def get_exchange(api_k="", sec_k="", pass_k="", ex_name="Bitget"):
@@ -594,11 +624,13 @@ selected_exchange = st.sidebar.selectbox(
     key="sidebar_selected_exchange_sb"
 )
 st.session_state["selected_exchange"] = selected_exchange
-st.sidebar.markdown("---")
 
+st.sidebar.markdown("---")
 st.sidebar.subheader(f"🔑 {t('api_keys_header')} ({selected_exchange})")
+
 input_api = st.sidebar.text_input(f"API Key ({selected_exchange}):", value=st.session_state.get("api_key", ""), type="password", key=f"key_{selected_exchange}")
 input_secret = st.sidebar.text_input(f"API Secret ({selected_exchange}):", value=st.session_state.get("secret_key", ""), type="password", key=f"secret_{selected_exchange}")
+
 if selected_exchange in ["Bitget", "OKX"]:
     input_pass = st.sidebar.text_input(f"Passphrase ({selected_exchange}):", value=st.session_state.get("passphrase", ""), type="password", key=f"pass_{selected_exchange}")
 else:
@@ -631,23 +663,21 @@ if is_user_admin() or is_user_paid():
     st.sidebar.success(t("sub_active"))
 else:
     st.sidebar.warning(t("sub_inactive"))
-
-checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", ""), stripe_price_id_val)
-st.sidebar.link_button(t("pay_btn"), checkout_url, use_container_width=True)
-
-if ALLOW_TEST_ACTIVATION:
-    if st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast", use_container_width=True):
-        st.session_state.stripe_paid = True
-        try:
-            conn = sqlite3.connect(DB_FILE, timeout=30.0)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.get("user_id"),))
-            conn.commit()
-            conn.close()
-        except Exception:
-            pass
-        st.success("Subskrypcja aktywowana testowo!")
-        st.rerun()
+    checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", ""), stripe_price_id_val)
+    st.sidebar.link_button(t("pay_btn"), checkout_url, use_container_width=True)
+    if ALLOW_TEST_ACTIVATION:
+        if st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast", use_container_width=True):
+            st.session_state.stripe_paid = True
+            try:
+                conn = sqlite3.connect(DB_FILE, timeout=30.0)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.get("user_id"),))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+            st.success("Subskrypcja aktywowana testowo!")
+            st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"### {t('capital_risk')}")
@@ -657,6 +687,7 @@ max_active_futures_positions = st.sidebar.slider(t("max_pos"), 1, 20, 5, key="sb
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"### {t('roe_guard')}")
 enable_roe_guard = st.sidebar.checkbox(t("enable_roe"), value=True, key="enable_roe_guard")
+
 if enable_roe_guard:
     custom_stop_loss_roe = st.sidebar.slider(t("sl_roe"), 0.5, 50.0, 4.0, 0.5, key="custom_stop_loss_roe")
     custom_take_profit_roe = st.sidebar.slider(t("tp_roe"), 1.0, 100.0, 15.0, 0.5, key="custom_take_profit_roe")
@@ -692,6 +723,11 @@ emergency_kill = st.sidebar.button(t("kill_switch"), type="primary", use_contain
 
 futures_ex = get_exchange(st.session_state.get("api_key"), st.session_state.get("secret_key"), st.session_state.get("passphrase"), st.session_state.get("selected_exchange", "Bitget"))
 
+# --- NAJWAZNIEJSZA POPRAWKA ---
+# Streamlit przed uruchomieniem skryptu zapisuje nowa wartosc suwaka do session_state,
+# wiec odczyt kluczy widgetow TUTAJ (przed petla skanujaca) oznacza, ze zmiana
+# EMA / ADX / RSI wplywa na decyzje bota w tym samym przebiegu. Wczesniej parametry
+# byly kopiowane tylko raz, przy kliknieciu "Uruchom", i dlatego suwaki byly "na sztywno".
 synced_bots_count = sync_running_bots_from_widgets(st.session_state, AVAILABLE_TIMEFRAMES)
 
 if emergency_kill:
@@ -717,7 +753,6 @@ if emergency_kill:
     st.success("🔴 KILL SWITCH WYKONANY. Zamknięto wszystkie pozycje Futures i zatrzymano wszystkie boty.")
     time.sleep(2)
     st.rerun()
-
 scan_results = []
 active_pos = []
 fut_free, fut_total = 0.0, 0.0
@@ -756,7 +791,6 @@ if futures_ex:
             total_unrealized_pnl += float(p.get("unrealizedPnl", 0) or 0)
             total_margin_used += float(p.get("initialMargin", 0) or p.get("margin", 0) or 0)
             active_pos.append(p)
-
             if enable_roe_guard:
                 try:
                     ep = float(p.get("entryPrice", 0) or 0)
@@ -802,6 +836,8 @@ if futures_ex:
     if bots:
         for tf, bot_conf in bots.items():
             for symbol in selected_symbols:
+                # WAZNE: parametry sa resetowane dla KAZDEJ pary osobno, zeby wartosci
+                # z trybu Auto nie "przeciekaly" z poprzedniego symbolu.
                 e_fast = int(bot_conf.get("ema_fast", 9))
                 e_slow = int(bot_conf.get("ema_slow", 21))
                 m_adx = float(bot_conf.get("min_adx", 28.0))
@@ -818,9 +854,9 @@ if futures_ex:
                     sym_volume = float(t_info.get("quoteVolume", 10_000_000) or 10_000_000)
                     limit_val = min(150, max(60, e_slow + 20)) if tf == '1d' else max(100, e_slow + 30)
                     ohlcv = futures_ex.fetch_ohlcv(symbol, timeframe=tf, limit=limit_val)
+
                     if ohlcv and len(ohlcv) > max(e_fast, 5):
                         df_sym = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-
                         if bot_conf.get("mode") == "Automatyczny":
                             opt = get_optimal_dynamic_parameters(df_sym, tf)
                             blended = blend_params(
@@ -848,14 +884,12 @@ if futures_ex:
                         df_sym = calculate_indicators(df_sym, ema_fast=e_fast, ema_slow=e_slow, adx_period=14)
                         last_r = df_sym.iloc[-1]
                         prev_r = df_sym.iloc[-2]
-
                         market_price = float(last_r['close'])
                         current_adx = float(last_r['adx']) if 'adx' in last_r and not pd.isna(last_r['adx']) else 20.0
                         current_rsi = float(last_r['rsi']) if 'rsi' in last_r and not pd.isna(last_r['rsi']) else 50.0
 
                         cross_above = (prev_r['close'] <= prev_r['ema_fast']) and (last_r['close'] > last_r['ema_fast'])
                         trend_bull = cross_above and (last_r['ema_fast'] > last_r['ema_slow']) and (current_rsi < max_rsi_limit)
-
                         cross_below = (prev_r['close'] >= prev_r['ema_fast']) and (last_r['close'] < last_r['ema_fast'])
                         trend_bear = cross_below and (last_r['ema_fast'] < last_r['ema_slow']) and (current_rsi > min_rsi_limit)
 
@@ -962,29 +996,29 @@ if st.session_state.session_start_balance > 0 and fut_total > 0:
 
 st.markdown(
     f"""
-    <div class="metrics-row">
-        <div class="metric-card">
-            <div class="metric-label">{t("wallet_futures")}</div>
-            <div class="metric-value">{fut_total:.2f} USDT</div>
-            <div class="metric-delta">{t("free_balance")}: {fut_free:.2f} USDT</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">{t("session_results")}</div>
-            <div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
-            <div class="metric-delta">{t("pnl_usdt")}: {total_unrealized_pnl:+.2f} USDT</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">{t("slots_futures")}</div>
-            <div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
-            <div class="metric-delta">{t("active_max")}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">{t("session_time")}</div>
-            <div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
-            <div class="metric-delta">Aktywne boty MTF: {len(st.session_state.active_mtf_bots)}</div>
-        </div>
-    </div>
-    """,
+<div class="metrics-row">
+<div class="metric-card">
+<div class="metric-label">{t("wallet_futures")}</div>
+<div class="metric-value">{fut_total:.2f} USDT</div>
+<div class="metric-delta">{t("free_balance")}: {fut_free:.2f} USDT</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">{t("session_results")}</div>
+<div class="metric-value">{session_pnl_pct_display:+.2f}%</div>
+<div class="metric-delta">{t("pnl_usdt")}: {total_unrealized_pnl:+.2f} USDT</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">{t("slots_futures")}</div>
+<div class="metric-value">{active_positions_count} / {max_active_futures_positions}</div>
+<div class="metric-delta">{t("active_max")}</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">{t("session_time")}</div>
+<div class="metric-value">{hours:02d}:{minutes:02d}:{seconds:02d}</div>
+<div class="metric-delta">Aktywne boty MTF: {len(st.session_state.active_mtf_bots)}</div>
+</div>
+</div>
+""",
     unsafe_allow_html=True,
 )
 
@@ -993,41 +1027,37 @@ st.subheader(f"🤖 {t('bot_control')}")
 st.text("Suwaki EMA / ADX / RSI działają na żywo. Zmiana wartości natychmiast wpływa na uruchomione boty.")
 
 cols_tf = st.columns(len(AVAILABLE_TIMEFRAMES))
+
 for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
     with cols_tf[idx]:
         st.markdown(f"**📌 {tf}**")
         prev_conf = st.session_state.active_mtf_bots.get(tf, {})
-        
-        # Bezpieczne domyślne wartości zamiast 0/1
-        def_fast = prev_conf.get("ema_fast", 9)
-        def_slow = prev_conf.get("ema_slow", 21)
-        def_adx = prev_conf.get("min_adx", 28.0)
-        def_max_rsi = prev_conf.get("max_rsi", 75.0)
-        def_min_rsi = prev_conf.get("min_rsi", 25.0)
-        def_cap = prev_conf.get("capital_multiplier", DEFAULT_TF_MULTIPLIERS.get(tf, 1.0))
 
+        # JEDNO ZRODLO PRAWDY: stan poczatkowy ustawiamy raz, potem widget jest wlascicielem
+        # swojej wartosci (klucz w session_state). Bez podwojnego stanu wartosci nie "odskakuja".
         if f"radio_mode_{tf}" not in st.session_state:
             st.session_state[f"radio_mode_{tf}"] = prev_conf.get("mode", "Automatyczny")
         if f"ema_f_{tf}" not in st.session_state:
-            st.session_state[f"ema_f_{tf}"] = int(min(200, max(1, def_fast)))
+            st.session_state[f"ema_f_{tf}"] = int(min(200, max(1, prev_conf.get("ema_fast", 9))))
         if f"ema_s_{tf}" not in st.session_state:
-            st.session_state[f"ema_s_{tf}"] = int(min(300, max(2, def_slow)))
+            st.session_state[f"ema_s_{tf}"] = int(min(300, max(2, prev_conf.get("ema_slow", 21))))
         if f"adx_{tf}" not in st.session_state:
-            st.session_state[f"adx_{tf}"] = float(min(50.0, max(10.0, def_adx)))
+            st.session_state[f"adx_{tf}"] = float(min(50.0, max(10.0, prev_conf.get("min_adx", 28.0))))
         if f"max_rsi_{tf}" not in st.session_state:
-            st.session_state[f"max_rsi_{tf}"] = float(min(95.0, max(50.0, def_max_rsi)))
+            st.session_state[f"max_rsi_{tf}"] = float(min(95.0, max(50.0, prev_conf.get("max_rsi", 75.0))))
         if f"min_rsi_{tf}" not in st.session_state:
-            st.session_state[f"min_rsi_{tf}"] = float(min(50.0, max(5.0, def_min_rsi)))
+            st.session_state[f"min_rsi_{tf}"] = float(min(50.0, max(5.0, prev_conf.get("min_rsi", 25.0))))
         if f"cap_mult_{tf}" not in st.session_state:
-            st.session_state[f"cap_mult_{tf}"] = float(min(20.0, max(0.1, def_cap)))
+            st.session_state[f"cap_mult_{tf}"] = float(min(20.0, max(0.1, prev_conf.get("capital_multiplier", DEFAULT_TF_MULTIPLIERS.get(tf, 1.0)))))
 
         bot_mode = st.radio(f"Tryb ({tf})", ["Automatyczny", "Ręczny"], key=f"radio_mode_{tf}")
-        
+
+        # Suwaki sa ZAWSZE widoczne i zawsze sluza jako wartosci bazowe.
         ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, step=1, key=f"ema_f_{tf}")
         ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, step=1, key=f"ema_s_{tf}")
-        
         if ema_f_val >= ema_s_val:
-            eff_ema_fast, eff_ema_slow = int(ema_s_val), max(1, int(ema_s_val) - 1)
+            st.warning("⚠️ EMA szybka ≥ EMA wolna — używam zamienionych wartości (szybka < wolna).")
+            eff_ema_fast, eff_ema_slow = int(ema_s_val), int(ema_f_val)
         else:
             eff_ema_fast, eff_ema_slow = int(ema_f_val), int(ema_s_val)
 
@@ -1037,10 +1067,12 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
         tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, step=0.5, key=f"cap_mult_{tf}")
 
         if bot_mode == "Automatyczny":
-            st.info(f"⚡ Auto: suwaki to baza ({st.session_state.get('sb_auto_base_influence', 50)}% wpływu).")
+            st.info(f"⚡ Auto: suwaki to baza (obecnie {st.session_state.get('sb_auto_base_influence', 50)}% wpływu), resztę dobiera optymalizator w locie.")
         else:
-            st.caption("🎛️ Ręczny: bot używa wartości z suwaków.")
+            st.caption("🎛️ Ręczny: bot używa dokładnie wartości z suwaków powyżej.")
 
+        # SYNCHRONIZACJA NA ZYWO: przy kazdym przeliczeniu aktualne wartosci suwakow
+        # trafiaja do dzialajacego bota - dlatego zmiana suwaka dziala natychmiast.
         if tf in st.session_state.active_mtf_bots:
             st.session_state.active_mtf_bots[tf].update({
                 "mode": bot_mode,
@@ -1118,7 +1150,6 @@ if is_user_admin():
                 st.rerun()
             except Exception as e:
                 st.error(f"Błąd: {e}")
-
     with col_u2:
         st.markdown("##### Usuń użytkownika z bazy")
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -1143,7 +1174,6 @@ if is_user_admin():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Błąd: {e}")
-
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
         df_users = pd.read_sql_query("SELECT id, email, is_admin, stripe_paid FROM users", conn)
@@ -1157,4 +1187,3 @@ gc.collect()
 if auto_refresh_seconds > 0:
     time.sleep(auto_refresh_seconds)
     st.rerun()
-
