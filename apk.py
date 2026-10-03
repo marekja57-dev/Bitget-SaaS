@@ -339,9 +339,9 @@ def _get_secret(name, default=""):
     except Exception:
         return default
 
-stripe_pk_val = _get_secret("STRIPE_PUBLISHABLE_KEY", "")
-stripe_sk_val = _get_secret("STRIPE_SECRET_KEY", "")
-stripe_price_id_val = _get_secret("STRIPE_PRICE_ID", "")
+stripe_pk_val = _get_secret("pk_live_51UCp3eKe18kT9JGHZvz9RGblVSUvyuaKfQ49DDvXymKf8IDjIgHyO4wfpaDnqSWQKvcGbXcQ2yhPJx2id6O8wLa800mN6pFhEA")
+stripe_sk_val = _get_secret("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")
+stripe_price_id_val = _get_secret("price_1UDAQAKe18kT9JGHUGVXkqi8")
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
