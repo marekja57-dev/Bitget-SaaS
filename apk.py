@@ -219,13 +219,13 @@ for key, default_value in SESSION_DEFAULTS.items():
 AVAILABLE_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 DEFAULT_TF_VALUES = {
-    "1m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.5},
-    "5m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.8},
+    "1m":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.5},
+    "5m":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.8},
     "15m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 1.0},
     "30m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 1.5},
-    "1h": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 2.5},
-    "4h": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 4.0},
-    "1d": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 6.0},
+    "1h":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 2.5},
+    "4h":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 4.0},
+    "1d":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 6.0},
 }
 
 for tf in AVAILABLE_TIMEFRAMES:
@@ -302,11 +302,29 @@ def init_db():
         cursor.execute("PRAGMA journal_mode=WAL;")
 
         cursor.execute(
-            """ CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT, is_admin INTEGER DEFAULT 0, stripe_paid INTEGER DEFAULT 0, api_key TEXT, secret_key TEXT, passphrase TEXT ) """
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE,
+                password TEXT,
+                is_admin INTEGER DEFAULT 0,
+                stripe_paid INTEGER DEFAULT 0,
+                api_key TEXT,
+                secret_key TEXT,
+                passphrase TEXT
+            )
+            """
         )
 
         cursor.execute(
-            """ CREATE TABLE IF NOT EXISTS user_mtf_settings ( user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """
+            """
+            CREATE TABLE IF NOT EXISTS user_mtf_settings (
+                user_id INTEGER PRIMARY KEY,
+                settings_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
         )
 
         columns = [
@@ -327,7 +345,11 @@ def init_db():
 
         for adm_email in ADMIN_EMAILS:
             cursor.execute(
-                """ UPDATE users SET is_admin = 1, stripe_paid = 1 WHERE LOWER(TRIM(email)) = ? """,
+                """
+                UPDATE users
+                SET is_admin = 1, stripe_paid = 1
+                WHERE LOWER(TRIM(email)) = ?
+                """,
                 (adm_email,),
             )
 
@@ -345,7 +367,10 @@ def _mtf_default_settings():
 
 
 def load_mtf_settings_for_user(user_id):
-    """ Ładuje ustawienia MTF danego użytkownika z SQLite. Jeśli użytkownik nie ma jeszcze zapisu, używane są wartości domyślne. """
+    """
+    Ładuje ustawienia MTF danego użytkownika z SQLite.
+    Jeśli użytkownik nie ma jeszcze zapisu, używane są wartości domyślne.
+    """
     if not user_id:
         return
 
@@ -387,7 +412,10 @@ def load_mtf_settings_for_user(user_id):
 
 
 def save_mtf_settings_for_user(user_id):
-    """ Zapisuje aktualne ustawienia suwaków MTF do SQLite. Dzięki temu nie znikają po odświeżeniu/reconnectcie Streamlit. """
+    """
+    Zapisuje aktualne ustawienia suwaków MTF do SQLite.
+    Dzięki temu nie znikają po odświeżeniu/reconnectcie Streamlit.
+    """
     if not user_id:
         return
 
@@ -433,7 +461,14 @@ def save_mtf_settings_for_user(user_id):
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
         conn.execute(
-            """ INSERT INTO user_mtf_settings (user_id, settings_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at """,
+            """
+            INSERT INTO user_mtf_settings
+                (user_id, settings_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                settings_json = excluded.settings_json,
+                updated_at = excluded.updated_at
+            """,
             (
                 int(user_id),
                 json.dumps(payload, ensure_ascii=False),
@@ -693,7 +728,12 @@ def blend_params(base, opt, base_weight=0.5):
     }
 
 
-def get_exchange( api_k="", sec_k="", pass_k="", ex_name="Bitget", ):
+def get_exchange(
+    api_k="",
+    sec_k="",
+    pass_k="",
+    ex_name="Bitget",
+):
     if not api_k:
         return None
 
@@ -722,7 +762,15 @@ def get_exchange( api_k="", sec_k="", pass_k="", ex_name="Bitget", ):
         return None
 
 
-def calculate_risk_based_allocation( free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0, ):
+def calculate_risk_based_allocation(
+    free_balance,
+    entry_price,
+    stop_loss_price,
+    risk_percentage=0.01,
+    leverage=1,
+    max_single_limit=50.0,
+    tf_multiplier=1.0,
+):
     if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
         return max(
             5.0 * tf_multiplier,
@@ -762,7 +810,11 @@ def calculate_risk_based_allocation( free_balance, entry_price, stop_loss_price,
     )
 
 
-def get_exchange_max_leverage( exchange, symbol, default_max=15, ):
+def get_exchange_max_leverage(
+    exchange,
+    symbol,
+    default_max=15,
+):
     try:
         market = exchange.market(symbol)
         limits = market.get("limits", {})
@@ -778,7 +830,11 @@ def get_exchange_max_leverage( exchange, symbol, default_max=15, ):
     return default_max
 
 
-def get_smart_leverage( adx_val, exchange_limit, preferred_max=15, ):
+def get_smart_leverage(
+    adx_val,
+    exchange_limit,
+    preferred_max=15,
+):
     effective_max = min(
         preferred_max,
         exchange_limit,
@@ -840,7 +896,11 @@ if st.query_params.get("success") == "true":
             )
             cursor = conn.cursor()
             cursor.execute(
-                """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
+                """
+                UPDATE users
+                SET stripe_paid = 1
+                WHERE id = ?
+                """,
                 (st.session_state.user_id,),
             )
             conn.commit()
@@ -860,7 +920,133 @@ if st.query_params.get("success") == "true":
 # ============================================================
 
 st.markdown(
-    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } </style> """,
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap');
+
+.stApp {
+    background-color: #0d0b0a;
+}
+
+section[data-testid="stSidebar"] {
+    background-color: #141110;
+    border-right: 2px solid #3d2f1f;
+}
+
+.metrics-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap !important;
+    gap: 14px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.metric-card {
+    flex: 1;
+    min-width: 0;
+    border: 2px solid #f3d57a;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background-color: rgba(243, 213, 122, 0.03);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.metric-label {
+    font-family: 'Cinzel', serif;
+    color: #f3d57a;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.metric-delta {
+    font-size: 0.75rem;
+    color: #e6c687;
+}
+
+.hero-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding-top: 50px;
+    padding-bottom: 20px;
+}
+
+.retro-ornate-frame {
+    position: relative;
+    background: radial-gradient(circle, #221a14 0%, #110d0a 100%);
+    border: 6px double #f3d57a;
+    padding: 40px 30px;
+    border-radius: 16px;
+    box-shadow:
+        0 0 50px rgba(243, 213, 122, 0.4),
+        inset 0 0 35px rgba(0, 0, 0, 0.9);
+    width: 100%;
+    max-width: 600px;
+    text-align: center;
+}
+
+.retro-vintage-title {
+    font-family: 'Bungee Inline', cursive, sans-serif;
+    font-size: 3rem;
+    color: #f3d57a;
+    letter-spacing: 4px;
+    text-shadow:
+        4px 4px 0px #8b0000,
+        8px 8px 0px rgba(0,0,0,0.95);
+    margin-bottom: 10px;
+}
+
+.retro-subtitle {
+    font-family: 'Cinzel', serif;
+    color: #e6c687;
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    margin-bottom: 25px;
+}
+
+div.stButton > button {
+    background: linear-gradient(
+        135deg,
+        #1e4d2b 0%,
+        #0f2b17 100%
+    ) !important;
+    color: #f3d57a !important;
+    border: 2px solid #f3d57a !important;
+    font-family: 'Cinzel', serif !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    padding: 10px 24px !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important;
+    transition: all 0.3s ease !important;
+}
+
+div.stButton > button:hover {
+    background: linear-gradient(
+        135deg,
+        #28663a 0%,
+        #163d22 100%
+    ) !important;
+    border-color: #ffe89d !important;
+    color: #ffe89d !important;
+    box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important;
+    transform: translateY(-2px);
+}
+</style>
+""",
     unsafe_allow_html=True,
 )
 
@@ -871,7 +1057,16 @@ st.markdown(
 
 if not st.session_state.logged_in:
     st.markdown(
-        f""" <div class="hero-wrapper"> <div class="retro-ornate-frame"> <div class="retro-vintage-title"> {t("title")} </div> <div class="retro-subtitle"> {t("subtitle")} </div> """,
+        f"""
+        <div class="hero-wrapper">
+            <div class="retro-ornate-frame">
+                <div class="retro-vintage-title">
+                    {t("title")}
+                </div>
+                <div class="retro-subtitle">
+                    {t("subtitle")}
+                </div>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -881,7 +1076,11 @@ if not st.session_state.logged_in:
 
     with tab_login:
         st.markdown(
-            f""" <p style='color:#f3d57a;font-family:Cinzel,serif;'> {t('login_tab')} </p> """,
+            f"""
+            <p style='color:#f3d57a;font-family:Cinzel,serif;'>
+                {t('login_tab')}
+            </p>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -907,7 +1106,19 @@ if not st.session_state.logged_in:
             cursor = conn.cursor()
 
             cursor.execute(
-                """ SELECT id, email, password, is_admin, stripe_paid, api_key, secret_key, passphrase FROM users WHERE LOWER(TRIM(email)) = ? """,
+                """
+                SELECT
+                    id,
+                    email,
+                    password,
+                    is_admin,
+                    stripe_paid,
+                    api_key,
+                    secret_key,
+                    passphrase
+                FROM users
+                WHERE LOWER(TRIM(email)) = ?
+                """,
                 (login_email.strip().lower(),),
             )
 
@@ -951,7 +1162,11 @@ if not st.session_state.logged_in:
                         )
                         cur_up = conn_up.cursor()
                         cur_up.execute(
-                            """ UPDATE users SET password = ? WHERE id = ? """,
+                            """
+                            UPDATE users
+                            SET password = ?
+                            WHERE id = ?
+                            """,
                             (
                                 hash_password(login_pass),
                                 user_row[0],
@@ -973,7 +1188,11 @@ if not st.session_state.logged_in:
 
     with tab_register:
         st.markdown(
-            f""" <p style='color:#f3d57a;font-family:Cinzel,serif;'> {t('register_tab')} </p> """,
+            f"""
+            <p style='color:#f3d57a;font-family:Cinzel,serif;'>
+                {t('register_tab')}
+            </p>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -1013,7 +1232,16 @@ if not st.session_state.logged_in:
                     is_paid = 1 if is_adm else 0
 
                     cursor.execute(
-                        """ INSERT INTO users ( email, password, is_admin, stripe_paid ) VALUES (?, ?, ?, ?) """,
+                        """
+                        INSERT INTO users
+                        (
+                            email,
+                            password,
+                            is_admin,
+                            stripe_paid
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
                         (
                             clean_reg,
                             hash_password(reg_pass),
@@ -1175,7 +1403,13 @@ if st.sidebar.button(
             cursor = conn.cursor()
 
             cursor.execute(
-                """ UPDATE users SET api_key = ?, secret_key = ?, passphrase = ? WHERE id = ? """,
+                """
+                UPDATE users
+                SET api_key = ?,
+                    secret_key = ?,
+                    passphrase = ?
+                WHERE id = ?
+                """,
                 (
                     input_api,
                     input_secret,
@@ -1240,7 +1474,11 @@ if ALLOW_TEST_ACTIVATION:
             cursor = conn.cursor()
 
             cursor.execute(
-                """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
+                """
+                UPDATE users
+                SET stripe_paid = 1
+                WHERE id = ?
+                """,
                 (st.session_state.user_id,),
             )
 
@@ -2397,7 +2635,61 @@ if (
 # ============================================================
 
 st.markdown(
-    f""" <div class="metrics-row"> <div class="metric-card"> <div class="metric-label"> {t("wallet_futures")} </div> <div class="metric-value"> {fut_total:.2f} USDT </div> <div class="metric-delta"> {t("free_balance")}: {fut_free:.2f} USDT </div> </div> <div class="metric-card"> <div class="metric-label"> {t("session_results")} </div> <div class="metric-value"> {session_pnl_pct_display:+.2f}% </div> <div class="metric-delta"> {t("pnl_usdt")}: {total_unrealized_pnl:+.2f} USDT </div> </div> <div class="metric-card"> <div class="metric-label"> {t("slots_futures")} </div> <div class="metric-value"> {active_positions_count} / {max_active_futures_positions} </div> <div class="metric-delta"> {t("active_max")} </div> </div> <div class="metric-card"> <div class="metric-label"> {t("session_time")} </div> <div class="metric-value"> {hours:02d}:{minutes:02d}:{seconds:02d} </div> <div class="metric-delta"> Aktywne boty MTF: {len(st.session_state.active_mtf_bots)} </div> </div> </div> """,
+    f"""
+    <div class="metrics-row">
+
+        <div class="metric-card">
+            <div class="metric-label">
+                {t("wallet_futures")}
+            </div>
+            <div class="metric-value">
+                {fut_total:.2f} USDT
+            </div>
+            <div class="metric-delta">
+                {t("free_balance")}: {fut_free:.2f} USDT
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">
+                {t("session_results")}
+            </div>
+            <div class="metric-value">
+                {session_pnl_pct_display:+.2f}%
+            </div>
+            <div class="metric-delta">
+                {t("pnl_usdt")}: {total_unrealized_pnl:+.2f} USDT
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">
+                {t("slots_futures")}
+            </div>
+            <div class="metric-value">
+                {active_positions_count}
+                / {max_active_futures_positions}
+            </div>
+            <div class="metric-delta">
+                {t("active_max")}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">
+                {t("session_time")}
+            </div>
+            <div class="metric-value">
+                {hours:02d}:{minutes:02d}:{seconds:02d}
+            </div>
+            <div class="metric-delta">
+                Aktywne boty MTF:
+                {len(st.session_state.active_mtf_bots)}
+            </div>
+        </div>
+
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -2733,7 +3025,11 @@ if is_user_admin():
                 cursor = conn.cursor()
 
                 cursor.execute(
-                    """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
+                    """
+                    UPDATE users
+                    SET stripe_paid = 1
+                    WHERE id = ?
+                    """,
                     (int(target_uid),),
                 )
 
@@ -2824,7 +3120,10 @@ if is_user_admin():
                         )
 
                         cur_del.execute(
-                            """ DELETE FROM users WHERE id = ? """,
+                            """
+                            DELETE FROM users
+                            WHERE id = ?
+                            """,
                             (int(target_del_uid),),
                         )
 
@@ -2851,7 +3150,14 @@ if is_user_admin():
         )
 
         df_users = pd.read_sql_query(
-            """ SELECT id, email, is_admin, stripe_paid FROM users """,
+            """
+            SELECT
+                id,
+                email,
+                is_admin,
+                stripe_paid
+            FROM users
+            """,
             conn,
         )
 
