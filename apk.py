@@ -5,6 +5,7 @@ import os
 import sqlite3
 import time
 import gc
+import json
 
 import ccxt
 import numpy as np
@@ -207,6 +208,7 @@ SESSION_DEFAULTS = {
     "session_start_balance": 0.0,
     "session_baseline_locked": False,
     "active_mtf_bots": {},
+    "_mtf_loaded_user_id": None,
 }
 
 for key, default_value in SESSION_DEFAULTS.items():
@@ -303,6 +305,10 @@ def init_db():
             """ CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT, is_admin INTEGER DEFAULT 0, stripe_paid INTEGER DEFAULT 0, api_key TEXT, secret_key TEXT, passphrase TEXT ) """
         )
 
+        cursor.execute(
+            """ CREATE TABLE IF NOT EXISTS user_mtf_settings ( user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """
+        )
+
         columns = [
             ("api_key", "TEXT"),
             ("secret_key", "TEXT"),
@@ -328,6 +334,117 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+
+
+def _mtf_default_settings():
+    """Zwraca niezależną kopię domyślnych ustawień MTF."""
+    return {
+        tf: dict(values)
+        for tf, values in DEFAULT_TF_VALUES.items()
+    }
+
+
+def load_mtf_settings_for_user(user_id):
+    """ Ładuje ustawienia MTF danego użytkownika z SQLite. Jeśli użytkownik nie ma jeszcze zapisu, używane są wartości domyślne. """
+    if not user_id:
+        return
+
+    settings = _mtf_default_settings()
+
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        row = conn.execute(
+            "SELECT settings_json FROM user_mtf_settings WHERE user_id = ?",
+            (int(user_id),),
+        ).fetchone()
+        conn.close()
+
+        if row and row[0]:
+            stored = json.loads(row[0])
+            if isinstance(stored, dict):
+                for tf in AVAILABLE_TIMEFRAMES:
+                    if isinstance(stored.get(tf), dict):
+                        settings[tf].update(stored[tf])
+    except Exception:
+        # Przy błędzie bazy aplikacja nadal działa na wartościach domyślnych.
+        pass
+
+    for tf in AVAILABLE_TIMEFRAMES:
+        defaults = settings[tf]
+        st.session_state[f"radio_mode_{tf}"] = (
+            "Ręczny"
+            if defaults.get("mode") == "Ręczny"
+            else "Automatyczny"
+        )
+        st.session_state[f"ema_f_{tf}"] = int(defaults["ema_fast"])
+        st.session_state[f"ema_s_{tf}"] = int(defaults["ema_slow"])
+        st.session_state[f"adx_{tf}"] = float(defaults["adx"])
+        st.session_state[f"max_rsi_{tf}"] = float(defaults["max_rsi"])
+        st.session_state[f"min_rsi_{tf}"] = float(defaults["min_rsi"])
+        st.session_state[f"cap_mult_{tf}"] = float(defaults["cap_mult"])
+
+    st.session_state["_mtf_loaded_user_id"] = int(user_id)
+
+
+def save_mtf_settings_for_user(user_id):
+    """ Zapisuje aktualne ustawienia suwaków MTF do SQLite. Dzięki temu nie znikają po odświeżeniu/reconnectcie Streamlit. """
+    if not user_id:
+        return
+
+    payload = {}
+
+    for tf in AVAILABLE_TIMEFRAMES:
+        payload[tf] = {
+            "mode": st.session_state.get(
+                f"radio_mode_{tf}", "Automatyczny"
+            ),
+            "ema_fast": int(
+                st.session_state.get(
+                    f"ema_f_{tf}", DEFAULT_TF_VALUES[tf]["ema_fast"]
+                )
+            ),
+            "ema_slow": int(
+                st.session_state.get(
+                    f"ema_s_{tf}", DEFAULT_TF_VALUES[tf]["ema_slow"]
+                )
+            ),
+            "adx": float(
+                st.session_state.get(
+                    f"adx_{tf}", DEFAULT_TF_VALUES[tf]["adx"]
+                )
+            ),
+            "max_rsi": float(
+                st.session_state.get(
+                    f"max_rsi_{tf}", DEFAULT_TF_VALUES[tf]["max_rsi"]
+                )
+            ),
+            "min_rsi": float(
+                st.session_state.get(
+                    f"min_rsi_{tf}", DEFAULT_TF_VALUES[tf]["min_rsi"]
+                )
+            ),
+            "cap_mult": float(
+                st.session_state.get(
+                    f"cap_mult_{tf}", DEFAULT_TF_VALUES[tf]["cap_mult"]
+                )
+            ),
+        }
+
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        conn.execute(
+            """ INSERT INTO user_mtf_settings (user_id, settings_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at """,
+            (
+                int(user_id),
+                json.dumps(payload, ensure_ascii=False),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        # Nie blokujemy działania bota, jeśli chwilowo nie można zapisać ustawień.
+        pass
 
 
 def get_secret(name, default=""):
@@ -845,6 +962,9 @@ if not st.session_state.logged_in:
                     except Exception:
                         pass
 
+                # WAŻNE: po każdym logowaniu odtwarzamy zapisane ustawienia MTF.
+                load_mtf_settings_for_user(user_row[0])
+
                 st.success(t("login_success"))
                 st.rerun()
 
@@ -969,6 +1089,7 @@ if st.sidebar.button(
     st.session_state.secret_key = ""
     st.session_state.passphrase = ""
     st.session_state.active_mtf_bots = {}
+    st.session_state["_mtf_loaded_user_id"] = None
     st.rerun()
 
 
@@ -2285,6 +2406,16 @@ st.markdown(
 # PANEL BOTÓW
 # ============================================================
 
+# Jeśli Streamlit utworzył nową sesję, odtwórz ustawienia z SQLite
+# zanim widgety MTF zostaną narysowane.
+if (
+    st.session_state.get("logged_in")
+    and st.session_state.get("user_id")
+    and st.session_state.get("_mtf_loaded_user_id")
+    != st.session_state.get("user_id")
+):
+    load_mtf_settings_for_user(st.session_state.user_id)
+
 st.markdown("---")
 st.subheader(
     f"🤖 {t('bot_control')}"
@@ -2485,6 +2616,15 @@ for idx, tf in enumerate(
                     )
 
                     st.rerun()
+
+
+# Zapisujemy ustawienia MTF do SQLite przy każdym rerunie.
+# Zmiana dowolnego suwaka, trybu albo auto-refresh nie kasuje wartości.
+if (
+    st.session_state.get("logged_in")
+    and st.session_state.get("user_id")
+):
+    save_mtf_settings_for_user(st.session_state.user_id)
 
 
 # ============================================================
@@ -2730,9 +2870,9 @@ if is_user_admin():
 # AUTO REFRESH
 # ============================================================
 # Najważniejsze:
-# rerun() NIE resetuje session_state.
-# Ponieważ wszystkie suwaki mają stabilne klucze i nie są
-# ponownie nadpisywane, ich wartości pozostają zachowane.
+# rerun() nie kasuje session_state, a ustawienia MTF są dodatkowo
+# zapisywane w SQLite per użytkownik. Dzięki temu przetrwają również
+# reconnect/odświeżenie sesji Streamlit i ponowne logowanie.
 # ============================================================
 
 gc.collect()
