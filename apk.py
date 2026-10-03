@@ -21,7 +21,6 @@ st.set_page_config(
 DB_FILE = "users.db"
 STRIPE_CONFIG_FILE = "stripe_config.json"
 
-# Przycisk testowej aktywacji dostepu - domyslnie WYLACZONY (zabezpieczenie przed darmowym dostepem).
 ALLOW_TEST_ACTIVATION = os.getenv("ALLOW_TEST_ACTIVATION", "0") == "1"
 
 TRANSLATIONS = {
@@ -248,53 +247,6 @@ def blend_params(base, opt, base_weight=0.5):
 AVAILABLE_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 DEFAULT_TF_MULTIPLIERS = {"1m": 0.5, "5m": 0.8, "15m": 1.0, "30m": 1.5, "1h": 2.5, "4h": 4.0, "1d": 6.0}
 
-def build_bot_config_from_state(state, tf):
-    k_f = f"ema_f_{tf}"
-    k_s = f"ema_s_{tf}"
-    k_adx = f"adx_{tf}"
-    k_max_rsi = f"max_rsi_{tf}"
-    k_min_rsi = f"min_rsi_{tf}"
-    k_cap = f"cap_mult_{tf}"
-    k_mode = f"radio_mode_{tf}"
-    
-    if k_f not in state or k_s not in state:
-        return None
-    try:
-        ema_f = int(state[k_f])
-        ema_s = int(state[k_s])
-        adx = float(state[k_adx])
-        max_rsi = float(state[k_max_rsi])
-        min_rsi = float(state[k_min_rsi])
-        cap = float(state[k_cap])
-    except (TypeError, ValueError, KeyError):
-        return None
-    
-    if ema_f >= ema_s:
-        ema_f, ema_s = ema_s, ema_f
-        
-    return {
-        "mode": str(state.get(k_mode, "Automatyczny")),
-        "ema_fast": max(1, ema_f),
-        "ema_slow": max(2, ema_s),
-        "min_adx": min(50.0, max(10.0, adx)),
-        "max_rsi": min(95.0, max(50.0, max_rsi)),
-        "min_rsi": min(50.0, max(5.0, min_rsi)),
-        "capital_multiplier": min(20.0, max(0.1, cap)),
-    }
-
-def sync_running_bots_from_widgets(state, timeframes=None):
-    bots = state.get("active_mtf_bots")
-    if not isinstance(bots, dict) or not bots:
-        return 0
-    updated = 0
-    for tf in list(bots.keys()):
-        cfg = build_bot_config_from_state(state, tf)
-        if not cfg:
-            continue
-        bots[tf].update(cfg)
-        updated += 1
-    return updated
-
 def init_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
     cursor = conn.cursor()
@@ -404,23 +356,22 @@ if "session_baseline_locked" not in st.session_state:
 if "active_mtf_bots" not in st.session_state:
     st.session_state.active_mtf_bots = {}
 
-# --- GŁÓWNA POPRAWKA: Inicjalizacja stanów widgetów interwałów na samym starcie ---
+# BEZPIECZNA INICJALIZACJA STANÓW WIDŻETÓW (RAZ, NA STARCIE SESJI)
 for tf in AVAILABLE_TIMEFRAMES:
-    prev_conf = st.session_state.active_mtf_bots.get(tf, {})
     if f"radio_mode_{tf}" not in st.session_state:
-        st.session_state[f"radio_mode_{tf}"] = prev_conf.get("mode", "Automatyczny")
+        st.session_state[f"radio_mode_{tf}"] = "Automatyczny"
     if f"ema_f_{tf}" not in st.session_state:
-        st.session_state[f"ema_f_{tf}"] = int(min(200, max(1, prev_conf.get("ema_fast", 9))))
+        st.session_state[f"ema_f_{tf}"] = 9
     if f"ema_s_{tf}" not in st.session_state:
-        st.session_state[f"ema_s_{tf}"] = int(min(300, max(2, prev_conf.get("ema_slow", 21))))
+        st.session_state[f"ema_s_{tf}"] = 21
     if f"adx_{tf}" not in st.session_state:
-        st.session_state[f"adx_{tf}"] = float(min(50.0, max(10.0, prev_conf.get("min_adx", 28.0))))
+        st.session_state[f"adx_{tf}"] = 28.0
     if f"max_rsi_{tf}" not in st.session_state:
-        st.session_state[f"max_rsi_{tf}"] = float(min(95.0, max(50.0, prev_conf.get("max_rsi", 75.0))))
+        st.session_state[f"max_rsi_{tf}"] = 75.0
     if f"min_rsi_{tf}" not in st.session_state:
-        st.session_state[f"min_rsi_{tf}"] = float(min(50.0, max(5.0, prev_conf.get("min_rsi", 25.0))))
+        st.session_state[f"min_rsi_{tf}"] = 25.0
     if f"cap_mult_{tf}" not in st.session_state:
-        st.session_state[f"cap_mult_{tf}"] = float(min(20.0, max(0.1, prev_conf.get("capital_multiplier", DEFAULT_TF_MULTIPLIERS.get(tf, 1.0)))))
+        st.session_state[f"cap_mult_{tf}"] = DEFAULT_TF_MULTIPLIERS.get(tf, 1.0)
 
 if st.query_params.get("success") == "true":
     if st.session_state.logged_in and st.session_state.user_id:
@@ -798,8 +749,6 @@ emergency_kill = st.sidebar.button(t("kill_switch"), type="primary", use_contain
 
 futures_ex = get_exchange(st.session_state.get("api_key"), st.session_state.get("secret_key"), st.session_state.get("passphrase"), st.session_state.get("selected_exchange", "Bitget"))
 
-synced_bots_count = sync_running_bots_from_widgets(st.session_state, AVAILABLE_TIMEFRAMES)
-
 if emergency_kill:
     if futures_ex:
         try:
@@ -1122,6 +1071,7 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
         else:
             st.caption("🎛️ Ręczny: bot używa dokładnie wartości z suwaków powyżej.")
 
+        # Aktualizujemy parametry bota na bieżąco, korzystając bezpośrednio z wartości widżetów w sesji
         if tf in st.session_state.active_mtf_bots:
             st.session_state.active_mtf_bots[tf].update({
                 "mode": bot_mode,
