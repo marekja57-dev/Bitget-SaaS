@@ -332,22 +332,22 @@ init_db()
 def _get_secret(name, default=""):
     """Sekrety pobierane ze zmiennych srodowiskowych lub st.secrets - bez kluczy w kodzie."""
     val = os.getenv(name)
-    if val:
+    if val: 
         return val
     try:
         return st.secrets[name]
     except Exception:
         return default
 
-stripe_pk_val = ("pk_live_51UCp3eKe18kT9JGHZvz9RGblVSUvyuaKfQ49DDvXymKf8IDjIgHyO4wfpaDnqSWQKvcGbXcQ2yhPJx2id6O8wLa800mN6pFhEA")
-stripe_sk_val = ("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")
-stripe_price_id_val = ("price_1UDAQAKe18kT9JGHUGVXkqi8")
+stripe_pk_val = _get_secret("pk_live_51UCp3eKe18kT9JGHZvz9RGblVSUvyuaKfQ49DDvXymKf8IDjIgHyO4wfpaDnqSWQKvcGbXcQ2yhPJx2id6O8wLa800mN6pFhEA","")
+stripe_sk_val = _get_secret("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", "")
+stripe_price_id_val = _get_secret("price_1UDAQAKe18kT9JGHUGVXkqi8", "")
 
 if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 def create_stripe_checkout_session(user_email, price_id):
-    fallback_url = "https://buy.stripe.com/00w0kecLSfbc8c13qA88"
+    fallback_url = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
     try:
         if not stripe.api_key or not price_id:
             return fallback_url
