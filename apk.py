@@ -347,7 +347,7 @@ if stripe_sk_val:
     stripe.api_key = stripe_sk_val
 
 def create_stripe_checkout_session(user_email, price_id):
-    fallback_url = "https://buy.stripe.com/00w0kecLSfbc8c13qA88"
+    fallback_url = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
     try:
         if not stripe.api_key or not price_id:
             return fallback_url
