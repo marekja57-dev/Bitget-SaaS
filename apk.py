@@ -1079,6 +1079,91 @@ if st.button("💾 ZAPISZ DOMYŚLNE NASTAWY STRATEGII MTF", use_container_width=
 st.divider()
 
 # ============================================================
+# MODUŁ: SKANER RYNKU Z WOLUMENEM I STANEM NEUTRALNYM
+# ============================================================
+st.divider()
+st.header("🔍 Skaner Rynku & Monitor Analizy (Live)")
+
+SCAN_PAIRS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+    "ADA/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT", "LINK/USDT"
+]
+
+col_scan1, col_scan2, col_scan3 = st.columns(3)
+
+with col_scan1:
+    st.metric(label="Skanowane Pary (USDT-M)", value=f"{len(SCAN_PAIRS)} par")
+with col_scan2:
+    st.metric(label="Status Skanera", value="🟢 Aktywny (Pętla MTF)")
+with col_scan3:
+    st.metric(label="Ostatni Skan", value=datetime.now().strftime("%H:%M:%S"))
+
+scanner_rows = []
+
+if exchange:
+    for symbol in SCAN_PAIRS:
+        try:
+            timeframe_scan = "1h"
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe_scan, limit=60)
+            
+            if ohlcv and len(ohlcv) >= 50:
+                df_scan = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                
+                last_price = df_scan['close'].iloc[-1]
+                last_vol = df_scan['volume'].iloc[-1]
+                
+                # Obliczenia EMA
+                ema_fast_val = df_scan['close'].ewm(span=20).mean().iloc[-1]
+                ema_slow_val = df_scan['close'].ewm(span=50).mean().iloc[-1]
+                
+                # Obliczenie RSI
+                delta = df_scan['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
+                
+                # Warunki sygnału: LONG / SHORT / NEUTRALNY
+                if ema_fast_val > ema_slow_val and rsi_val >= 50:
+                    signal_desc = "🟢 LONG (Sygnał Kupna)"
+                elif ema_fast_val < ema_slow_val and rsi_val <= 50:
+                    signal_desc = "🔴 SHORT (Sygnał Sprzedaży)"
+                else:
+                    signal_desc = "⚪ NEUTRALNY (Brak trendu / Konsolidacja)"
+                
+                # Czytelne formatowanie wolumenu
+                if last_vol >= 1_000_000:
+                    vol_str = f"{last_vol / 1_000_000:.2f}M"
+                elif last_vol >= 1_000:
+                    vol_str = f"{last_vol / 1_000:.1f}K"
+                else:
+                    vol_str = f"{last_vol:.0f}"
+                
+                scanner_rows.append({
+                    "Symbol": symbol,
+                    "Cena": f"${last_price:.4f}",
+                    "Wolumen (1h)": vol_str,
+                    "Układ EMA": "EMA20 > EMA50" if ema_fast_val > ema_slow_val else "EMA20 < EMA50",
+                    "RSI (14)": f"{rsi_val:.1f}",
+                    "Status / Sygnał": signal_desc
+                })
+        except Exception:
+            scanner_rows.append({
+                "Symbol": symbol,
+                "Cena": "Błąd",
+                "Wolumen (1h)": "---",
+                "Układ EMA": "---",
+                "RSI (14)": "---",
+                "Status / Sygnał": "⚠️ Błąd API"
+            })
+
+if scanner_rows:
+    df_scanner = pd.DataFrame(scanner_rows)
+    st.dataframe(df_scanner, use_container_width=True, hide_index=True)
+else:
+    st.info("Trwa pobieranie danych i analiza rynku...")
+
+# ============================================================
 # AKTYWNE POZYCJE I KILL SWITCH
 # ============================================================
 col_pos_head, col_kill = st.columns([3, 1])
