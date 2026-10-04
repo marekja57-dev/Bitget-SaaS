@@ -2409,9 +2409,12 @@ st.markdown(
 # Jeśli Streamlit utworzył nową sesję, odtwórz ustawienia z SQLite
 # zanim widgety MTF zostaną narysowane.
 if st.session_state.get("logged_in") and st.session_state.get("user_id"):
-    # Zawsze ładujemy ustawienia z bazy przy starcie/odświeżeniu, 
-    # żeby widgety miały aktualne wartości z SQLite
-    load_mtf_settings_for_user(st.session_state.user_id)
+    current_user_id = st.session_state.get("user_id")
+    
+    # Ładujemy z bazy TYLKO RAZ dla danego użytkownika (lub przy pierwszym wejściu)
+    if st.session_state.get("_mtf_loaded_user_id") != current_user_id:
+        load_mtf_settings_for_user(current_user_id)
+        st.session_state["_mtf_loaded_user_id"] = current_user_id
 
 st.markdown("---")
 st.subheader(
@@ -2422,113 +2425,57 @@ st.text(
     "Suwaki EMA / ADX / RSI działają na żywo. "
     "Zmiana wartości wpływa na uruchomione boty."
 )
+# ==========================================
+# PANEL STEROWANIA MTF W PANELU BOCZNYM
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎛️ Ustawienia Botów MTF (Wszystkie Interwały)")
 
-cols_tf = st.columns(
-    len(AVAILABLE_TIMEFRAMES)
-)
+for tf in AVAILABLE_TIMEFRAMES:
+    with st.sidebar.expander(f"Interwał: {tf}", expanded=False):
+        # Klucze do session_state
+        k_radio = f"radio_mode_{tf}"
+        k_ema_f = f"ema_f_{tf}"
+        k_ema_s = f"ema_s_{tf}"
+        k_adx = f"adx_{tf}"
+        k_rsi = f"min_rsi_{tf}"
+        k_max_rsi = f"max_rsi_{tf}"
+        k_cap = f"cap_mult_{tf}"
 
-for idx, tf in enumerate(
-    AVAILABLE_TIMEFRAMES
-):
-
-    with cols_tf[idx]:
-
-        st.markdown(
-            f"**📌 {tf}**"
-        )
-
-        # ----------------------------------------------------
-        # UWAGA:
-        # Widgety korzystają BEZPOŚREDNIO z kluczy session_state.
-        # Nie podajemy za każdym rerun wartości "value="
-        # z nowo obliczonych zmiennych.
-        # ----------------------------------------------------
-
+        # 1. Przełącznik trybu
         bot_mode = st.radio(
             f"Tryb ({tf})",
-            ["Automatyczny", "Ręczny"],
-            key=f"radio_mode_{tf}",
+            options=["Automatyczny", "Ręczny"],
+            key=k_radio,
         )
 
-        ema_f_val = st.number_input(
-            f"EMA Szybka ({tf})",
-            min_value=1,
-            max_value=200,
-            step=1,
-            key=f"ema_f_{tf}",
-        )
-
-        ema_s_val = st.number_input(
-            f"EMA Wolna ({tf})",
-            min_value=2,
-            max_value=300,
-            step=1,
-            key=f"ema_s_{tf}",
-        )
+        # 2. Suwaki EMA Szybka / Wolna
+        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, step=1, key=k_ema_f)
+        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, step=1, key=k_ema_s)
 
         if ema_f_val >= ema_s_val:
-            st.warning(
-                "⚠️ EMA szybka ≥ EMA wolna — "
-                "używam zamienionych wartości."
-            )
-
-            eff_ema_fast = int(
-                ema_s_val
-            )
-            eff_ema_slow = int(
-                ema_f_val
-            )
-
+            st.warning(f"⚠️ EMA szybka >= EMA wolna - {tf}")
+            eff_ema_fast = int(ema_s_val)
+            eff_ema_slow = int(ema_f_val)
         else:
-            eff_ema_fast = int(
-                ema_f_val
-            )
-            eff_ema_slow = int(
-                ema_s_val
-            )
+            eff_ema_fast = int(ema_f_val)
+            eff_ema_slow = int(ema_s_val)
 
-        adx_val = st.slider(
-            f"Min ADX ({tf})",
-            min_value=10.0,
-            max_value=50.0,
-            step=1.0,
-            key=f"adx_{tf}",
-        )
-
-        max_rsi_val = st.slider(
-            f"Max RSI Long ({tf})",
-            min_value=50.0,
-            max_value=95.0,
-            step=1.0,
-            key=f"max_rsi_{tf}",
-        )
-
-        min_rsi_val = st.slider(
-            f"Min RSI Short ({tf})",
-            min_value=5.0,
-            max_value=50.0,
-            step=1.0,
-            key=f"min_rsi_{tf}",
-        )
-
-        tf_cap_mult = st.number_input(
-            f"Mnożnik kwoty ({tf})",
-            min_value=0.1,
-            max_value=20.0,
-            step=0.5,
-            key=f"cap_mult_{tf}",
-        )
+        # 3. Pozostałe wskaźniki
+        adx_val = st.slider(f"Min ADX ({tf})", min_value=10.0, max_value=50.0, step=1.0, key=k_adx)
+        max_rsi_val = st.slider(f"Max RSI Long ({tf})", min_value=50.0, max_value=95.0, step=1.0, key=k_max_rsi)
+        min_rsi_val = st.slider(f"Min RSI short ({tf})", min_value=5.0, max_value=50.0, step=1.0, key=k_rsi)
+        tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, step=0.5, key=k_cap)
 
         if bot_mode == "Automatyczny":
-            st.info(
-                "⚡ Auto: suwaki są bazą, "
-                "a optymalizator dobiera parametry w locie."
-            )
+            st.caption("🤖 Auto: suwaki są bazą, optymalizator dobiera parametry.")
         else:
-            st.caption(
-                "🎛️ Ręczny: bot używa dokładnie "
-                "wartości z suwaków."
-            )
+            st.caption("📌 Ręczny: bot używa wartości z suwaków.")
+
+        # 4. Natychmiastowy zapis do bazy przy zmianie w sidebarze
+        if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+            save_mtf_settings_for_user(st.session_state.user_id)
+
 
         # ----------------------------------------------------
         # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
