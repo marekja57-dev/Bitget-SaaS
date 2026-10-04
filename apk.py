@@ -2409,9 +2409,12 @@ st.markdown(
 # Jeśli Streamlit utworzył nową sesję, odtwórz ustawienia z SQLite
 # zanim widgety MTF zostaną narysowane.
 if st.session_state.get("logged_in") and st.session_state.get("user_id"):
-    # Zawsze ładujemy ustawienia z bazy przy starcie/odświeżeniu, 
-    # żeby widgety miały aktualne wartości z SQLite
-    load_mtf_settings_for_user(st.session_state.user_id)
+    current_user_id = st.session_state.get("user_id")
+    
+    # Ładujemy z bazy TYLKO RAZ dla danego użytkownika (lub przy pierwszym wejściu)
+    if st.session_state.get("_mtf_loaded_user_id") != current_user_id:
+        load_mtf_settings_for_user(current_user_id)
+        st.session_state["_mtf_loaded_user_id"] = current_user_id
 
 st.markdown("---")
 st.subheader(
@@ -2529,6 +2532,12 @@ for idx, tf in enumerate(
                 "🎛️ Ręczny: bot używa dokładnie "
                 "wartości z suwaków."
             )
+        # ===============================================
+        # AUTOMATYCZNY ZAPIS DO SQLITE PO ZMIANIE WIDGETU
+        # ===============================================
+        if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+            # Zapisujemy ustawienia do bazy natychmiast po każdej zmianie wartości w suwakach lub radiu
+            save_mtf_settings_for_user(st.session_state.user_id)
 
         # ----------------------------------------------------
         # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
