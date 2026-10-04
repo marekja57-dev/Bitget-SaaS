@@ -2568,6 +2568,12 @@ for idx, tf in enumerate(
                 key=f"stop_tf_{tf}",
                 use_container_width=True,
             ):
+                # Zapisz ustawienia PRZED rerun(), aby kliknięcie przycisku
+                # nie mogło ominąć końcowego zapisu MTF.
+                if st.session_state.get("user_id"):
+                    save_mtf_settings_for_user(
+                        st.session_state.user_id
+                    )
                 del st.session_state.active_mtf_bots[
                     tf
                 ]
@@ -2610,6 +2616,13 @@ for idx, tf in enumerate(
                             tf_cap_mult
                         ),
                     }
+
+                    # Zapisz ustawienia PRZED rerun(), ponieważ kliknięcie
+                    # "Uruchom" inaczej mogłoby ominąć końcowy zapis MTF.
+                    if st.session_state.get("user_id"):
+                        save_mtf_settings_for_user(
+                            st.session_state.user_id
+                        )
 
                     st.success(
                         f"Uruchomiono bota na {tf}!"
