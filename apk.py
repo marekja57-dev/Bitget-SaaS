@@ -1079,89 +1079,116 @@ if st.button("💾 ZAPISZ DOMYŚLNE NASTAWY STRATEGII MTF", use_container_width=
 st.divider()
 
 # ============================================================
-# MODUŁ: SKANER RYNKU Z WOLUMENEM I STANEM NEUTRALNYM
+# MODUŁ: DYNAMICZNY SKANER Z SUWAKIEKM (1 - 100 PAR)
 # ============================================================
 st.divider()
-st.header("🔍 Skaner Rynku & Monitor Analizy (Live)")
-
-SCAN_PAIRS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    "ADA/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT", "LINK/USDT"
-]
-
-col_scan1, col_scan2, col_scan3 = st.columns(3)
-
-with col_scan1:
-    st.metric(label="Skanowane Pary (USDT-M)", value=f"{len(SCAN_PAIRS)} par")
-with col_scan2:
-    st.metric(label="Status Skanera", value="🟢 Aktywny (Pętla MTF)")
-with col_scan3:
-    st.metric(label="Ostatni Skan", value=datetime.now().strftime("%H:%M:%S"))
-
-scanner_rows = []
+st.header("🔍 Skaner Rynku Live (Pełna Analiza Giełdy)")
 
 if exchange:
-    for symbol in SCAN_PAIRS:
-        try:
-            timeframe_scan = "1h"
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe_scan, limit=60)
-            
-            if ohlcv and len(ohlcv) >= 50:
-                df_scan = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                
-                last_price = df_scan['close'].iloc[-1]
-                last_vol = df_scan['volume'].iloc[-1]
-                
-                # Obliczenia EMA
-                ema_fast_val = df_scan['close'].ewm(span=20).mean().iloc[-1]
-                ema_slow_val = df_scan['close'].ewm(span=50).mean().iloc[-1]
-                
-                # Obliczenie RSI
-                delta = df_scan['close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
-                rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
-                
-                # Warunki sygnału: LONG / SHORT / NEUTRALNY
-                if ema_fast_val > ema_slow_val and rsi_val >= 50:
-                    signal_desc = "🟢 LONG (Sygnał Kupna)"
-                elif ema_fast_val < ema_slow_val and rsi_val <= 50:
-                    signal_desc = "🔴 SHORT (Sygnał Sprzedaży)"
-                else:
-                    signal_desc = "⚪ NEUTRALNY (Brak trendu / Konsolidacja)"
-                
-                # Czytelne formatowanie wolumenu
-                if last_vol >= 1_000_000:
-                    vol_str = f"{last_vol / 1_000_000:.2f}M"
-                elif last_vol >= 1_000:
-                    vol_str = f"{last_vol / 1_000:.1f}K"
-                else:
-                    vol_str = f"{last_vol:.0f}"
-                
-                scanner_rows.append({
-                    "Symbol": symbol,
-                    "Cena": f"${last_price:.4f}",
-                    "Wolumen (1h)": vol_str,
-                    "Układ EMA": "EMA20 > EMA50" if ema_fast_val > ema_slow_val else "EMA20 < EMA50",
-                    "RSI (14)": f"{rsi_val:.1f}",
-                    "Status / Sygnał": signal_desc
-                })
-        except Exception:
-            scanner_rows.append({
-                "Symbol": symbol,
-                "Cena": "Błąd",
-                "Wolumen (1h)": "---",
-                "Układ EMA": "---",
-                "RSI (14)": "---",
-                "Status / Sygnał": "⚠️ Błąd API"
-            })
+    try:
+        # 1. Pobranie WSZYSTKICH aktywnych par Futures USDT-M z Bitget
+        markets = exchange.load_markets()
+        all_usdt_pairs = [
+            symbol for symbol, m in markets.items()
+            if m.get('swap', False) and m.get('settle') == 'USDT' and m.get('active', True)
+        ]
+        
+        # 2. Suwak wyboru liczby skanowanych par (od 1 do 100)
+        max_limit = min(100, len(all_usdt_pairs)) if all_usdt_pairs else 100
+        num_pairs = st.slider(
+            "Liczba skanowanych par rynkowych (od 1 do 100):",
+            min_value=1,
+            max_value=max_limit,
+            value=20,
+            step=1
+        )
+        
+        # Ograniczenie listy skanowania do liczby wybranej na suwaku
+        scan_list = all_usdt_pairs[:num_pairs]
 
-if scanner_rows:
-    df_scanner = pd.DataFrame(scanner_rows)
-    st.dataframe(df_scanner, use_container_width=True, hide_index=True)
-else:
-    st.info("Trwa pobieranie danych i analiza rynku...")
+        col_scan1, col_scan2, col_scan3 = st.columns(3)
+        with col_scan1:
+            st.metric(label="Wszystkie Pary USDT-M na Giełdzie", value=f"{len(all_usdt_pairs)} par")
+        with col_scan2:
+            st.metric(label="Wybranych do Skanowania", value=f"{len(scan_list)} par")
+        with col_scan3:
+            st.metric(label="Ostatni Skan", value=datetime.now().strftime("%H:%M:%S"))
+
+        scanner_rows = []
+
+        # Sprawdzenie limitu pozycji
+        active_positions_count = len(st.session_state.get('active_positions', []))
+        max_allowed_slots = st.session_state.get('max_slots', 3)
+        has_free_slots = active_positions_count < max_allowed_slots
+
+        for symbol in scan_list:
+            try:
+                timeframe_scan = "1h"
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe_scan, limit=60)
+                
+                if ohlcv and len(ohlcv) >= 50:
+                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    
+                    last_price = df['close'].iloc[-1]
+                    last_vol = df['volume'].iloc[-1]
+                    
+                    # Średnie EMA
+                    ema_fast = df['close'].ewm(span=20).mean().iloc[-1]
+                    ema_slow = df['close'].ewm(span=50).mean().iloc[-1]
+                    
+                    # Wskaźnik RSI
+                    delta = df['close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                    rs = gain / loss
+                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    
+                    # Wskaźnik ADX (siła trendu)
+                    high_low = df['high'] - df['low']
+                    adx_est = (high_low.rolling(14).mean() / df['close'].rolling(14).mean()).iloc[-1] * 1000
+                    
+                    # Parametry filtrowania bota
+                    min_adx_req = 25.0
+                    max_rsi_req = 75.0
+                    min_rsi_req = 27.0
+                    
+                    # Diagnoza algorytmu:
+                    if not has_free_slots:
+                        status_msg = "⏸️ BLOKADA: Limit slotów pozycji osiągnięty"
+                    elif rsi > max_rsi_req:
+                        status_msg = f"⚠️ ODRZUCONO: RSI za wysokie ({rsi:.1f} > {max_rsi_req})"
+                    elif rsi < min_rsi_req:
+                        status_msg = f"⚠️ ODRZUCONO: RSI za niskie ({rsi:.1f} < {min_rsi_req})"
+                    elif adx_est < min_adx_req:
+                        status_msg = f"⏳ BRAK TRENDU: ADX za niski ({adx_est:.1f} < {min_adx_req})"
+                    elif ema_fast > ema_slow:
+                        status_msg = "🟢 EGZEKUCJA: Warunki LONG spełnione!"
+                    elif ema_fast < ema_slow:
+                        status_msg = "🔴 EGZEKUCJA: Warunki SHORT spełnione!"
+                    else:
+                        status_msg = "⚪ NEUTRALNY: Rynek bez sygnału"
+
+                    vol_str = f"{last_vol/1_000_000:.2f}M" if last_vol >= 1_000_000 else f"{last_vol/1_000:.1f}K"
+
+                    scanner_rows.append({
+                        "Symbol": symbol,
+                        "Cena": f"${last_price:.4f}",
+                        "Wolumen": vol_str,
+                        "EMA 20/50": "Wzrostowy" if ema_fast > ema_slow else "Spadkowy",
+                        "RSI": f"{rsi:.1f}",
+                        "ADX": f"{adx_est:.1f}",
+                        "Decyzja Algorytmu": status_msg
+                    })
+            except Exception:
+                continue
+
+        if scanner_rows:
+            st.dataframe(pd.DataFrame(scanner_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("Trwa aktualizacja bazy par giełdowych...")
+
+    except Exception as e:
+        st.error(f"Błąd komunikacji z API giełdy: {e}")
 
 # ============================================================
 # AKTYWNE POZYCJE I KILL SWITCH
