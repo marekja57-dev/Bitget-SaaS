@@ -1127,6 +1127,74 @@ if st.session_state.trade_history:
     st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
     st.info(t("no_history"))
+# ============================================================
+# MODUŁ: INSTRUKCJA OBSŁUGI I REGULAMIN
+# ============================================================
+st.divider()
+
+tab_instrukcja, tab_regulamin = st.tabs(["📖 Instrukcja Obsługi", "📜 Regulamin Serwisu"])
+
+with tab_instrukcja:
+    st.header("📖 Instrukcja Obsługi Systemu Futures")
+    
+    st.markdown("""
+    ### 1. Podłączenie Giełdy (Klucze API)
+    1. Przejdź do paska bocznego (**Sidebar**) po lewej stronie.
+    2. Wybierz giełdę (np. **Bitget**) i wprowadź swoje klucze API (**API Key**, **Secret Key**, **Passphrase**).
+    3. Upewnij się, że Twoje klucze API na giełdzie mają włączone uprawnienia do **Handlu Futures (USDT-M / Swap)**.
+    4. Kliknij **`Zapisz klucze API`**.
+
+    ---
+
+    ### 2. Zarządzanie Kapitałem i Ryzykiem
+    * **Maksymalnie USDT na 1 pozycję:** Kwota marginu przeznaczana na pojedynczy trade.
+    * **Maks. aktywne pozycje Futures:** Limit jednocześnie otwartych pozycji (np. max 3).
+    * **Strażnik ROE (SL / TP):** Automatyczna ochrona kapitału. 
+      * **Stop-Loss ROE (%):** Procentowa maksymalna strata na pozycji (np. `-15%`).
+      * **Take-Profit ROE (%):** Docelowy procent zysku na pozycji (np. `+30%`).
+
+    ---
+
+    ### 3. Konfiguracja Strategii Multi-Timeframe (MTF)
+    * Każda zakładka (**1m, 5m, 15m, 30m, 1h, 4h, 1D**) odpowiada za osobny interwał analizy rynkowej.
+    * **Włączanie / Wyłączanie interwałów:** 
+      * Aby wyłączyć handel na wybranym interwale (np. `1m`–`30m`), przełącz tryb na **Ręczny**, ustaw **Mnożnik Kapitału na `0`** i kliknij **`💾 ZAPISZ DOMYŚLNE NASTAWY STRATEGII MTF`**.
+    * **Wskaźniki techniczne:**
+      * **EMA Fast / Slow:** Średnie kroczące wyznaczające kierunek trendu.
+      * **Min ADX:** Minimalna siła trendu wymagana do otwarcia pozycji.
+      * **Min / Max RSI:** Widełki wyprzedania/przegrzania rynku.
+
+    ---
+
+    ### 4. Awaryjne Zamknięcie Pozycji (Kill Switch)
+    * Przycisk **`ZAMKNIJ WSZYSTKO (KILL SWITCH)`** natychmiastowo zamyka wszystkie aktywne pozycje na giełdzie po cenie rynkowej (Market). Używaj go w sytuacjach gwałtownych zawirowań na rynku lub chęci natychmiastowego wyjścia z pozycji.
+    """)
+
+with tab_regulamin:
+    st.header("📜 Regulamin Serwisu i Wyłączenie Odpowiedzialności")
+    
+    st.markdown("""
+    ### §1. Postanowienia Ogólne
+    1. Niniejsze oprogramowanie stanowi autonomiczny interfejs analityczno-transakcyjny wspomagający zarządzanie pozycjami Futures na giełdach kryptowalut.
+    2. Użytkownik korzysta z systemu w sposób dobrowolny i na własną odpowiedzialność.
+
+    ### §2. Ostrzeżenie o Ryzyku Finansowym (Risk Disclaimer)
+    1. Handel kontraktami typu Futures oraz instrumentami pochodnymi z dźwignią finansową wiąże się z **bardzo wysokim ryzykiem utraty całości zainwestowanego kapitału**.
+    2. Wskaźniki analizy technicznej (EMA, ADX, RSI) oraz automatyczne reguły transakcyjne nie gwarantują osiągnięcia zysków ani nie zabezpieczają całkowicie przed stratami.
+    3. Wyniki historyczne oraz symulacje nie stanowią gwarancji przyszłych rezultatów transakcyjnych.
+
+    ### §3. Wyłączenie Odpowiedzialności
+    1. Twórcy oraz operatorzy oprogramowania **nie ponoszą żadnej odpowiedzialności** za:
+       * Straty finansowe poniesione w wyniku automatycznego lub ręcznego wykonywania zleceń.
+       * Błędy, opóźnienia lub przerwy w działaniu interfejsów API giełd kryptowalut.
+       * Poślizgi cenowe (slippage), brak płynności rynkowej lub błędną egzekucję zleceń po stronie giełdy.
+       * Błędy po stronie dostawców połączenia internetowego lub infrastruktury serwerowej.
+    2. Oprogramowanie nie stanowi doradztwa inwestycyjnego, prawnego ani podatkowego w rozumieniu obowiązujących przepisów prawa.
+
+    ### §4. Bezpieczeństwo Kluczy API
+    1. Użytkownik zobowiązany jest do zachowania w tajemnicy kluczy API oraz haseł do konta.
+    2. Zaleca się wyłączenie uprawnień wypłat (Withdrawal) na kluczach API wygenerowanych na giełdzie i pozostawienie wyłącznie uprawnień transakcyjnych (Futures Trading).
+    """)
 
 # ============================================================
 # PANEL ADMINISTRATORA (ADMIN PANEL)
