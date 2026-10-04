@@ -959,6 +959,71 @@ if exchange and is_user_paid():
                         "RSI": round(last_row["rsi"], 2),
                         "Sygnał": signal,
                     })
+                    # ==========================================================
+                    # BEZPOŚREDNIA EGZEKUCJA ZLECEŃ NA GIEŁDZIE (EXECUTION ENGINE)
+                    # ==========================================================
+                    if signal in ["LONG 🟢", "SHORT 🔴"]:
+                        # 1. Sprawdzenie limitu otwartych pozycji
+                        current_pos_count = len([p for p in exchange.fetch_positions() if float(p.get("contracts", 0) or p.get("size", 0) or 0) > 0])
+                        
+                        # 2. Sprawdzenie cooldownu (czy nie otworzyliśmy tej pary w ciągu ostatnich 5 minut)
+                        now_ts = time.time()
+                        last_trade_ts = st.session_state.symbol_cooldown.get(sym, 0)
+                        
+                        if current_pos_count < max_active_positions and (now_ts - last_trade_ts > 300):
+                            try:
+                                # Ustalenie kierunku i dźwigni
+                                side = "buy" if "LONG" in signal else "sell"
+                                target_leverage = manual_leverage if leverage_mode == "Ręczna / Stała" else get_smart_leverage(last_row["adx"], 15, max_allowed_leverage)
+                                
+                                # Ustawienie dźwigni na giełdzie dla danej pary
+                                try:
+                                    exchange.set_leverage(target_leverage, sym)
+                                except Exception:
+                                    pass # Niektóre giełdy wyrzucają błąd, jeśli dźwignia jest już ustawiona
+                                
+                                # Wyliczenie wielkości pozycji w monetach (z uwzględnieniem mnożnika interwału)
+                                tf_mult = params.get("capital_multiplier", 1.0)
+                                allocated_usdt = calculate_risk_based_allocation(
+                                    free_balance=free_usdt,
+                                    entry_price=last_row["close"],
+                                    stop_loss_price=last_row["close"] * (0.98 if side == "buy" else 1.02),
+                                    max_single_limit=max_usdt_per_pos,
+                                    tf_multiplier=tf_mult
+                                )
+                                
+                                # Obliczenie ilości kontraktów (amount)
+                                amount = (allocated_usdt * target_leverage) / last_row["close"]
+                                
+                                # Sformatowanie ilości zgodnie z precyzją giełdy
+                                amount_formatted = float(exchange.amount_to_precision(sym, amount))
+                                
+                                if amount_formatted > 0:
+                                    # ZŁOŻENIE ZLECENIA RYNKOWEGO (MARKET ORDER)
+                                    order = exchange.create_order(
+                                        symbol=sym,
+                                        type="market",
+                                        side=side,
+                                        amount=amount_formatted
+                                    )
+                                    
+                                    # Zapisanie czasu ostatniej transakcji dla cooldownu
+                                    st.session_state.symbol_cooldown[sym] = now_ts
+                                    
+                                    # Dodanie wpisu do historii transakcji w UI
+                                    st.session_state.trade_history.insert(0, {
+                                        "Czas": datetime.now().strftime("%H:%M:%S"),
+                                        "Symbol": sym,
+                                        "Interwał": tf,
+                                        "Typ": signal,
+                                        "Cena": last_row["close"],
+                                        "Ilość": amount_formatted,
+                                        "Wartość USDT": round(allocated_usdt * target_leverage, 2)
+                                    })
+                                    
+                                    st.toast(f"🚀 Otwarto pozycję {signal} na {sym} (Ilość: {amount_formatted})!")
+                            except Exception as exec_err:
+                                st.error(f"❌ Błąd składania zlecenia na {sym}: {exec_err}")
                 except Exception:
                     continue
     except Exception as e:
