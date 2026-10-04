@@ -2408,12 +2408,9 @@ st.markdown(
 
 # Jeśli Streamlit utworzył nową sesję, odtwórz ustawienia z SQLite
 # zanim widgety MTF zostaną narysowane.
-if (
-    st.session_state.get("logged_in")
-    and st.session_state.get("user_id")
-    and st.session_state.get("_mtf_loaded_user_id")
-    != st.session_state.get("user_id")
-):
+if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+    # Zawsze ładujemy ustawienia z bazy przy starcie/odświeżeniu, 
+    # żeby widgety miały aktualne wartości z SQLite
     load_mtf_settings_for_user(st.session_state.user_id)
 
 st.markdown("---")
