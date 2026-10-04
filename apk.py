@@ -2416,15 +2416,6 @@ if st.session_state.get("logged_in") and st.session_state.get("user_id"):
         load_mtf_settings_for_user(current_user_id)
         st.session_state["_mtf_loaded_user_id"] = current_user_id
 
-st.markdown("---")
-st.subheader(
-    f"🤖 {t('bot_control')}"
-)
-
-st.text(
-    "Suwaki EMA / ADX / RSI działają na żywo. "
-    "Zmiana wartości wpływa na uruchomione boty."
-)
 # ==========================================
 # PANEL STEROWANIA MTF W PANELU BOCZNYM
 # ==========================================
