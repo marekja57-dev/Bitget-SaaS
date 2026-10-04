@@ -342,15 +342,12 @@ def _mtf_default_settings():
         tf: dict(values)
         for tf, values in DEFAULT_TF_VALUES.items()
     }
-
-
 def load_mtf_settings_for_user(user_id):
-    """ Ładuje ustawienia MTF danego użytkownika z SQLite. Jeśli użytkownik nie ma jeszcze zapisu, używane są wartości domyślne. """
+    """Ładuje ustawienia MTF z SQLite i od razu wpisuje je do session_state."""
     if not user_id:
         return
-
+        
     settings = _mtf_default_settings()
-
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
         row = conn.execute(
@@ -366,23 +363,19 @@ def load_mtf_settings_for_user(user_id):
                     if isinstance(stored.get(tf), dict):
                         settings[tf].update(stored[tf])
     except Exception:
-        # Przy błędzie bazy aplikacja nadal działa na wartościach domyślnych.
         pass
 
+    # Przypisujemy bezpośrednio do sesji, żeby Streamlit nie resetował suwaków
     for tf in AVAILABLE_TIMEFRAMES:
         defaults = settings[tf]
-        st.session_state[f"radio_mode_{tf}"] = (
-            "Ręczny"
-            if defaults.get("mode") == "Ręczny"
-            else "Automatyczny"
-        )
-        st.session_state[f"ema_f_{tf}"] = int(defaults["ema_fast"])
-        st.session_state[f"ema_s_{tf}"] = int(defaults["ema_slow"])
-        st.session_state[f"adx_{tf}"] = float(defaults["adx"])
-        st.session_state[f"max_rsi_{tf}"] = float(defaults["max_rsi"])
-        st.session_state[f"min_rsi_{tf}"] = float(defaults["min_rsi"])
-        st.session_state[f"cap_mult_{tf}"] = float(defaults["cap_mult"])
-
+        st.session_state[f"radio_mode_{tf}"] = "Ręczny" if defaults.get("mode") == "Ręczny" else "Automatyczny"
+        st.session_state[f"ema_f_{tf}"] = int(defaults.get("ema_fast", 9))
+        st.session_state[f"ema_s_{tf}"] = int(defaults.get("ema_slow", 21))
+        st.session_state[f"adx_{tf}"] = float(defaults.get("adx", 20.0))
+        st.session_state[f"min_rsi_{tf}"] = float(defaults.get("min_rsi", 30.0))
+        st.session_state[f"max_rsi_{tf}"] = float(defaults.get("max_rsi", 70.0))
+        st.session_state[f"cap_mult_{tf}"] = float(defaults.get("cap_mult", 1.0))
+        
     st.session_state["_mtf_loaded_user_id"] = int(user_id)
 
 
@@ -2410,11 +2403,8 @@ st.markdown(
 # zanim widgety MTF zostaną narysowane.
 if st.session_state.get("logged_in") and st.session_state.get("user_id"):
     current_user_id = st.session_state.get("user_id")
-    
-    # Ładujemy z bazy TYLKO RAZ dla danego użytkownika (lub przy pierwszym wejściu)
-    if st.session_state.get("_mtf_loaded_user_id") != current_user_id:
-        load_mtf_settings_for_user(current_user_id)
-        st.session_state["_mtf_loaded_user_id"] = current_user_id
+    (current_user_id)
+    st.session_state["_mtf_loaded_user_id"] = current_user_id
 
 # ==========================================
 # PANEL STEROWANIA MTF W PANELU BOCZNYM
