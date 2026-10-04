@@ -1128,72 +1128,100 @@ if st.session_state.trade_history:
 else:
     st.info(t("no_history"))
 # ============================================================
-# MODUŁ: INSTRUKCJA OBSŁUGI I REGULAMIN
+# MODUŁ: INSTRUKCJA OBSŁUGI I REGULAMIN (ELEGANCKE KAFELKI)
 # ============================================================
 st.divider()
 
-tab_instrukcja, tab_regulamin = st.tabs(["📖 Instrukcja Obsługi", "📜 Regulamin Serwisu"])
+# Stylizacja dla zielono-złotych rozwijanych kafli
+st.markdown("""
+<style>
+/* Ciemnozielone kafelki ze złotym obramowaniem */
+div[data-testid="stExpander"] {
+    border: 2px solid #f3d57a !important;
+    border-radius: 10px !important;
+    background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
+    margin-bottom: 15px !important;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
 
-with tab_instrukcja:
-    st.header("📖 Instrukcja Obsługi Systemu Futures")
-    
+/* Styl nagłówka po rozwinęciu/zwinięciu */
+div[data-testid="stExpander"] summary {
+    color: #f3d57a !important;
+    font-weight: bold !important;
+    font-size: 1.05rem !important;
+    font-family: 'Cinzel', serif, sans-serif !important;
+    padding: 12px 18px !important;
+}
+
+div[data-testid="stExpander"] summary:hover {
+    color: #ffffff !important;
+}
+
+/* Wnętrze rozwiniętej kafelki */
+div[data-testid="stExpander"] div[role="region"] {
+    background-color: #0b1a0e !important;
+    color: #e0e0e0 !important;
+    padding: 20px !important;
+    border-top: 1px solid #f3d57a !important;
+    border-bottom-left-radius: 8px !important;
+    border-bottom-right-radius: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# 1. INSTRUKCJA OBSŁUGI (SCHOWANA)
+# ------------------------------------------------------------
+with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU"):
     st.markdown("""
-    ### 1. Podłączenie Giełdy (Klucze API)
-    1. Przejdź do paska bocznego (**Sidebar**) po lewej stronie.
-    2. Wybierz giełdę (np. **Bitget**) i wprowadź swoje klucze API (**API Key**, **Secret Key**, **Passphrase**).
-    3. Upewnij się, że Twoje klucze API na giełdzie mają włączone uprawnienia do **Handlu Futures (USDT-M / Swap)**.
-    4. Kliknij **`Zapisz klucze API`**.
+    #### 1. Autoryzacja i Połączenie z Giełdą
+    * **Klucze API:** W panelu bocznym po lewej stronie wybierz odpowiednią giełdę (np. Bitget) i wprowadź dane dostępowe (*API Key*, *Secret Key*, *Passphrase*).
+    * **Uprawnienia:** Upewnij się, że wygenerowany klucz API posiada aktywne uprawnienia do **Handlu Futures / Kontraktami Swap**. Ze względów bezpieczeństwa zachowaj wyłączoną opcję wypłat (*Withdrawal*).
 
     ---
 
-    ### 2. Zarządzanie Kapitałem i Ryzykiem
-    * **Maksymalnie USDT na 1 pozycję:** Kwota marginu przeznaczana na pojedynczy trade.
-    * **Maks. aktywne pozycje Futures:** Limit jednocześnie otwartych pozycji (np. max 3).
-    * **Strażnik ROE (SL / TP):** Automatyczna ochrona kapitału. 
-      * **Stop-Loss ROE (%):** Procentowa maksymalna strata na pozycji (np. `-15%`).
-      * **Take-Profit ROE (%):** Docelowy procent zysku na pozycji (np. `+30%`).
+    #### 2. Zarządzanie Kapitałem i Ochrona Portfela
+    * **Maksymalny Kapitał na Pozycję:** Wyznacz dokładną kwotę w USDT alokowaną do pojedynczego zlecenia.
+    * **Maksymalna Liczba Pozycji:** Ustal dopuszczalny limit jednocześnie otwartych transakcji w danej sesji.
+    * **Moduł Ochrony ROE (SL / TP):** Automatyczny strażnik kapitału zamyka pozycję po osiągnięciu zadanego progu zysku (*Take Profit ROE*) lub dopuszczalnej straty (*Stop Loss ROE*).
 
     ---
 
-    ### 3. Konfiguracja Strategii Multi-Timeframe (MTF)
-    * Każda zakładka (**1m, 5m, 15m, 30m, 1h, 4h, 1D**) odpowiada za osobny interwał analizy rynkowej.
-    * **Włączanie / Wyłączanie interwałów:** 
-      * Aby wyłączyć handel na wybranym interwale (np. `1m`–`30m`), przełącz tryb na **Ręczny**, ustaw **Mnożnik Kapitału na `0`** i kliknij **`💾 ZAPISZ DOMYŚLNE NASTAWY STRATEGII MTF`**.
-    * **Wskaźniki techniczne:**
-      * **EMA Fast / Slow:** Średnie kroczące wyznaczające kierunek trendu.
-      * **Min ADX:** Minimalna siła trendu wymagana do otwarcia pozycji.
-      * **Min / Max RSI:** Widełki wyprzedania/przegrzania rynku.
+    #### 3. Konfiguracja Strategii Multi-Timeframe (MTF)
+    * **Wybór Interwałów:** Każda zakładka (od `1m` do `1D`) odpowiada za osobny horyzont czasowy analizy.
+    * **Wyłączanie Handlu na Wybranych Interwałach:** Aby wykluczyć szum rynkowy (np. na niskich interwałach `1m`–`30m`), przełącz dany interwał w tryb **Ręczny**, ustaw **Mnożnik Kapitału na `0`** i kliknij **`💾 ZAPISZ DOMYŚLNE NASTAWY STRATEGII MTF`**.
+    * **Filtracja Wskaźnikowa:** Algorytm weryfikuje układy średnich kroczących (EMA), wskaźnik siły trendu (ADX) oraz poziomy wyprzedania/przegrzania (RSI) przed złożeniem zlecenia.
 
     ---
 
-    ### 4. Awaryjne Zamknięcie Pozycji (Kill Switch)
-    * Przycisk **`ZAMKNIJ WSZYSTKO (KILL SWITCH)`** natychmiastowo zamyka wszystkie aktywne pozycje na giełdzie po cenie rynkowej (Market). Używaj go w sytuacjach gwałtownych zawirowań na rynku lub chęci natychmiastowego wyjścia z pozycji.
+    #### 4. Awaryjne Zamknięcie Pozycji (Kill Switch)
+    * Przycisk **`ZAMKNIJ WSZYSTKO (KILL SWITCH)`** natychmiastowo likwiduje wszystkie aktywne pozycje Futures po aktualnej cenie rynkowej. Stosuj go w przypadku gwałtownych zawirowań rynkowych lub potrzeby szybkiego wyjścia z rynku.
     """)
 
-with tab_regulamin:
-    st.header("📜 Regulamin Serwisu i Wyłączenie Odpowiedzialności")
-    
+# ------------------------------------------------------------
+# 2. REGULAMIN SERWISU (SCHOWANY)
+# ------------------------------------------------------------
+with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA"):
     st.markdown("""
-    ### §1. Postanowienia Ogólne
-    1. Niniejsze oprogramowanie stanowi autonomiczny interfejs analityczno-transakcyjny wspomagający zarządzanie pozycjami Futures na giełdach kryptowalut.
-    2. Użytkownik korzysta z systemu w sposób dobrowolny i na własną odpowiedzialność.
+    #### § 1. Charakterystyka Systemu
+    1. Niniejsza aplikacja stanowi zaawansowany interfejs analityczno-transakcyjny przeznaczony do automatyzacji i wspomagania egzekucji strategii na rynku instrumentów pochodnych.
+    2. System działa w pełni autonomicznie na podstawie parametrów i reguł zdefiniowanych bezpośrednio przez Użytkownika.
 
-    ### §2. Ostrzeżenie o Ryzyku Finansowym (Risk Disclaimer)
-    1. Handel kontraktami typu Futures oraz instrumentami pochodnymi z dźwignią finansową wiąże się z **bardzo wysokim ryzykiem utraty całości zainwestowanego kapitału**.
-    2. Wskaźniki analizy technicznej (EMA, ADX, RSI) oraz automatyczne reguły transakcyjne nie gwarantują osiągnięcia zysków ani nie zabezpieczają całkowicie przed stratami.
-    3. Wyniki historyczne oraz symulacje nie stanowią gwarancji przyszłych rezultatów transakcyjnych.
+    ---
 
-    ### §3. Wyłączenie Odpowiedzialności
-    1. Twórcy oraz operatorzy oprogramowania **nie ponoszą żadnej odpowiedzialności** za:
-       * Straty finansowe poniesione w wyniku automatycznego lub ręcznego wykonywania zleceń.
-       * Błędy, opóźnienia lub przerwy w działaniu interfejsów API giełd kryptowalut.
-       * Poślizgi cenowe (slippage), brak płynności rynkowej lub błędną egzekucję zleceń po stronie giełdy.
-       * Błędy po stronie dostawców połączenia internetowego lub infrastruktury serwerowej.
-    2. Oprogramowanie nie stanowi doradztwa inwestycyjnego, prawnego ani podatkowego w rozumieniu obowiązujących przepisów prawa.
+    #### § 2. Ostrzeżenie o Ryzyku Inwestycyjnym
+    1. Handel kontraktami terminowymi Futures oraz korzystanie z dźwigni finansowej wiąże się z **wysokim poziomem ryzyka finansowego**, w tym z możliwością utraty całości zaangażowanego kapitału.
+    2. Wskaźniki analizy technicznej stanowią jedynie narzędzie wspomagające i nie gwarantują stałej skuteczności w zmiennych warunkach rynkowych.
+    3. Wyniki generowane przez system w ujęciu historycznym nie stanowią obietnicy ani gwarancji osiągnięcia analogicznych rezultatów w przyszłości.
 
-    ### §4. Bezpieczeństwo Kluczy API
-    1. Użytkownik zobowiązany jest do zachowania w tajemnicy kluczy API oraz haseł do konta.
-    2. Zaleca się wyłączenie uprawnień wypłat (Withdrawal) na kluczach API wygenerowanych na giełdzie i pozostawienie wyłącznie uprawnień transakcyjnych (Futures Trading).
+    ---
+
+    #### § 3. Wyłączenie Odpowiedzialności
+    1. Oprogramowanie dostarczane jest w stanie takim, w jakim się znajduje (*As-Is*). Dostawca nie ponosi odpowiedzialności za:
+       * Ewentualne straty finansowe wynikające z decyzji transakcyjnych podjętych przez algorytm.
+       * Przerwy w łączności API, poślizgi cenowe (*slippage*) oraz opóźnienia w egzekucji zleceń powstałe po stronie giełdy.
+       * Błędy wynikające z nieprawidłowego wprowadzenia kluczy autoryzacyjnych lub niewłaściwego ustawienia parametrów ryzyka.
+    2. Treści zawarte w aplikacji nie stanowią rekomendacji inwestycyjnej ani doradztwa finansowego.
     """)
 
 # ============================================================
