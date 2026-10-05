@@ -2760,4 +2760,751 @@ if exchange:
                         last["rsi"]
                     ) if pd.notna(
                         last["rsi"]
-                    ) else
+                    ) else 50.0
+
+
+                    adx = float(
+                        last["adx"]
+                    ) if pd.notna(
+                        last["adx"]
+                    ) else 0.0
+
+
+                    # ------------------------------------------------
+                    # NASTAWY DLA 1H
+                    # ------------------------------------------------
+
+                    min_adx_req = float(
+                        st.session_state.get(
+                            "adx_1h",
+                            DEFAULT_TF_VALUES[
+                                "1h"
+                            ]["adx"],
+                        )
+                    )
+
+
+                    min_rsi_req = float(
+                        st.session_state.get(
+                            "min_rsi_1h",
+                            DEFAULT_TF_VALUES[
+                                "1h"
+                            ]["min_rsi"],
+                        )
+                    )
+
+
+                    max_rsi_req = float(
+                        st.session_state.get(
+                            "max_rsi_1h",
+                            DEFAULT_TF_VALUES[
+                                "1h"
+                            ]["max_rsi"],
+                        )
+                    )
+
+
+                    # ------------------------------------------------
+                    # DECYZJA
+                    # ------------------------------------------------
+
+                    if (
+                        rsi
+                        > max_rsi_req
+                    ):
+
+                        decision = (
+                            f"⚠️ RSI za wysokie "
+                            f"({rsi:.1f})"
+                        )
+
+                    elif (
+                        rsi
+                        < min_rsi_req
+                    ):
+
+                        decision = (
+                            f"⚠️ RSI za niskie "
+                            f"({rsi:.1f})"
+                        )
+
+                    elif (
+                        adx
+                        < min_adx_req
+                    ):
+
+                        decision = (
+                            f"⏳ ADX za niski "
+                            f"({adx:.1f})"
+                        )
+
+                    elif (
+                        ema_fast
+                        > ema_slow
+                    ):
+
+                        decision = "🟢 LONG"
+
+                    elif (
+                        ema_fast
+                        < ema_slow
+                    ):
+
+                        decision = "🔴 SHORT"
+
+                    else:
+
+                        decision = "⚪ NEUTRALNY"
+
+
+                    scanner_rows.append(
+                        {
+
+                            "TOP": n,
+
+                            "Symbol": symbol,
+
+                            "Interwał": (
+                                timeframe_scan
+                            ),
+
+                            "Wolumen 24h": (
+                                fmt_volume(
+                                    quote_volume
+                                )
+                            ),
+
+                            "_volume_sort": (
+                                quote_volume
+                            ),
+
+                            "Cena": last_price,
+
+                            "EMA Fast": round(
+                                ema_fast,
+                                8,
+                            ),
+
+                            "EMA Slow": round(
+                                ema_slow,
+                                8,
+                            ),
+
+                            "RSI": round(
+                                rsi,
+                                1,
+                            ),
+
+                            "ADX": round(
+                                adx,
+                                1,
+                            ),
+
+                            "Decyzja": decision,
+                        }
+                    )
+
+
+                except Exception:
+
+                    continue
+
+
+                progress.progress(
+                    n
+                    / len(scan_list)
+                )
+
+
+            progress.empty()
+
+
+            # ------------------------------------------------
+            # TABELA ZAWSZE JESZCZE RAZ SORTOWANA
+            # ------------------------------------------------
+
+            if scanner_rows:
+
+                table = pd.DataFrame(
+                    scanner_rows
+                )
+
+
+                table = (
+                    table
+                    .sort_values(
+                        "_volume_sort",
+                        ascending=False,
+                    )
+                    .reset_index(
+                        drop=True
+                    )
+                )
+
+
+                table["TOP"] = (
+                    np.arange(
+                        1,
+                        len(table) + 1,
+                    )
+                )
+
+
+                table = table.drop(
+                    columns=[
+                        "_volume_sort"
+                    ]
+                )
+
+
+                st.dataframe(
+
+                    table,
+
+                    use_container_width=True,
+
+                    hide_index=True,
+
+                    column_config={
+
+                        "TOP":
+                            st.column_config.NumberColumn(
+                                "TOP",
+                                format="%d",
+                            ),
+
+                        "Cena":
+                            st.column_config.NumberColumn(
+                                "Cena",
+                                format="%.8f",
+                            ),
+
+                        "EMA Fast":
+                            st.column_config.NumberColumn(
+                                "EMA Fast",
+                                format="%.8f",
+                            ),
+
+                        "EMA Slow":
+                            st.column_config.NumberColumn(
+                                "EMA Slow",
+                                format="%.8f",
+                            ),
+
+                        "RSI":
+                            st.column_config.NumberColumn(
+                                "RSI",
+                                format="%.1f",
+                            ),
+
+                        "ADX":
+                            st.column_config.NumberColumn(
+                                "ADX",
+                                format="%.1f",
+                            ),
+                    },
+                )
+
+
+            else:
+
+                st.info(
+                    "Brak wyników analizy."
+                )
+
+
+    except Exception as e:
+
+        st.error(
+            f"Błąd skanera: {e}"
+        )
+
+
+else:
+
+    st.info(
+        "Podłącz klucze API giełdy "
+        "w panelu bocznym."
+    )
+
+
+# ============================================================
+# AKTYWNE POZYCJE / KILL SWITCH
+# ============================================================
+
+col_pos_head, col_kill = (
+    st.columns([3, 1])
+)
+
+
+with col_pos_head:
+
+    st.header(
+        t("active_positions")
+    )
+
+
+with col_kill:
+
+    if st.button(
+        t("kill_switch"),
+        use_container_width=True,
+    ):
+
+        if exchange and open_positions:
+
+            closed_count = 0
+
+
+            for pos in open_positions:
+
+                try:
+
+                    symbol = pos.get(
+                        "symbol"
+                    )
+
+                    side = pos.get(
+                        "side"
+                    )
+
+                    amount = float(
+                        pos.get(
+                            "contracts",
+                            0,
+                        )
+                        or pos.get(
+                            "size",
+                            0,
+                        )
+                    )
+
+
+                    close_side = (
+                        "sell"
+                        if side
+                        in [
+                            "long",
+                            "buy",
+                        ]
+                        else "buy"
+                    )
+
+
+                    exchange.create_order(
+
+                        symbol,
+
+                        "market",
+
+                        close_side,
+
+                        amount,
+
+                        params={
+                            "reduceOnly": True
+                        },
+                    )
+
+
+                    closed_count += 1
+
+
+                except Exception as ex:
+
+                    st.error(
+                        f"Błąd zamykania "
+                        f"pozycji "
+                        f"{pos.get('symbol')}: "
+                        f"{ex}"
+                    )
+
+
+            st.success(
+                f"Zamknięto "
+                f"{closed_count} pozycji!"
+            )
+
+            st.rerun()
+
+
+# ============================================================
+# TABELA POZYCJI
+# ============================================================
+
+if open_positions:
+
+    pos_data = []
+
+
+    for p in open_positions:
+
+        pos_data.append(
+            {
+
+                "Symbol": p.get(
+                    "symbol"
+                ),
+
+                "Strona": p.get(
+                    "side"
+                ),
+
+                "Wielkość": (
+                    p.get("contracts")
+                    or p.get("size")
+                ),
+
+                "Cena Wejścia": p.get(
+                    "entryPrice"
+                ),
+
+                "Cena Rynkowa": p.get(
+                    "markPrice"
+                ),
+
+                "Unrealized PnL": p.get(
+                    "unrealizedPnl"
+                ),
+
+                "Dźwignia": p.get(
+                    "leverage"
+                ),
+            }
+        )
+
+
+    st.dataframe(
+        pd.DataFrame(pos_data),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+else:
+
+    st.info(
+        t("no_positions")
+    )
+
+
+# ============================================================
+# HISTORIA
+# ============================================================
+
+st.divider()
+
+st.header(
+    t("trade_history")
+)
+
+
+if st.session_state.trade_history:
+
+    st.dataframe(
+        pd.DataFrame(
+            st.session_state.trade_history
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+else:
+
+    st.info(
+        t("no_history")
+    )
+
+
+# ============================================================
+# INSTRUKCJA
+# ============================================================
+
+st.divider()
+
+
+with st.expander(
+    "📖 INSTRUKCJA OBSŁUGI SYSTEMU"
+):
+
+    st.markdown(
+        """
+        ### 1. Połączenie z giełdą
+
+        W panelu bocznym wybierz giełdę
+        i wprowadź API Key, Secret Key
+        oraz Passphrase, jeśli dana giełda
+        jej wymaga.
+
+        Klucz API powinien mieć uprawnienia
+        do Futures/Swap. Wypłaty powinny
+        pozostać wyłączone.
+
+        ---
+
+        ### 2. Skaner rynku
+
+        Skaner najpierw pobiera aktywne
+        kontrakty USDT-M, następnie usuwa
+        stablecoiny i tokeny lewarowane.
+
+        Następnie pobiera wolumen 24h
+        i sortuje instrumenty:
+
+        **od najwyższego wolumenu
+        do najniższego.**
+
+        Dopiero z takiej listy wybierana
+        jest liczba instrumentów ustawiona
+        suwakiem.
+
+        ---
+
+        ### 3. MTF
+
+        Dostępne są:
+
+        `1m`, `5m`, `15m`, `30m`,
+        `1h`, `4h`, `1d`.
+
+        Nastawy są zapisywane w SQLite
+        dla konkretnego użytkownika.
+
+        Po odświeżeniu strony są ponownie
+        ładowane z bazy.
+
+        ---
+
+        ### 4. Ryzyko
+
+        Maksymalny kapitał na pozycję,
+        liczba aktywnych pozycji,
+        SL/TP ROE oraz dźwignia są
+        ustawiane niezależnie.
+
+        ---
+
+        ### 5. Kill Switch
+
+        Przycisk zamyka aktywne pozycje
+        poprzez zlecenia market z parametrem
+        `reduceOnly`.
+        """
+    )
+
+
+# ============================================================
+# REGULAMIN
+# ============================================================
+
+with st.expander(
+    "📜 REGULAMIN SERWISU I NOTA PRAWNA"
+):
+
+    st.markdown(
+        """
+        ### § 1. Charakterystyka Systemu
+
+        Aplikacja jest interfejsem
+        analityczno-transakcyjnym przeznaczonym
+        do automatyzacji i wspomagania
+        egzekucji strategii na rynku Futures.
+
+        ### § 2. Ryzyko
+
+        Handel kontraktami Futures oraz
+        wykorzystanie dźwigni finansowej
+        wiąże się z wysokim ryzykiem
+        finansowym.
+
+        Możliwa jest utrata części lub
+        całości zaangażowanego kapitału.
+
+        Wskaźniki techniczne nie gwarantują
+        zysków.
+
+        ### § 3. Odpowiedzialność
+
+        System dostarczany jest w stanie
+        takim, w jakim się znajduje.
+
+        Użytkownik odpowiada za swoje
+        ustawienia, klucze API oraz decyzje
+        związane z wykorzystaniem systemu.
+        """
+    )
+
+
+# ============================================================
+# PANEL ADMINISTRATORA
+# ============================================================
+
+if is_user_admin():
+
+    st.divider()
+
+    st.header(
+        t("admin_panel")
+    )
+
+
+    conn = sqlite3.connect(
+        DB_FILE,
+        timeout=30.0,
+    )
+
+
+    users_df = pd.read_sql_query(
+        """
+        SELECT
+            id,
+            email,
+            is_admin,
+            stripe_paid,
+            api_key
+        FROM users
+        """,
+        conn,
+    )
+
+
+    conn.close()
+
+
+    users_df["has_api"] = (
+        users_df["api_key"]
+        .apply(
+            lambda x:
+                "✅ Tak"
+                if x
+                else "❌ Brak"
+        )
+    )
+
+
+    st.dataframe(
+        users_df.drop(
+            columns=[
+                "api_key"
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+    st.subheader(
+        "🛠️ Zarządzanie Dostępem Użytkowników"
+    )
+
+
+    col_adm1, col_adm2, col_adm3 = (
+        st.columns(3)
+    )
+
+
+    with col_adm1:
+
+        target_user_id = st.number_input(
+            "ID Użytkownika",
+            min_value=1,
+            step=1,
+        )
+
+
+    with col_adm2:
+
+        action = st.selectbox(
+            "Akcja",
+            [
+                "Aktywuj Subskrypcję",
+                "Anuluj Subskrypcję",
+                "Nadaj Admina",
+                "Odbierz Admina",
+            ],
+        )
+
+
+    with col_adm3:
+
+        st.write("")
+        st.write("")
+
+
+        if st.button(
+            "Wykonaj Akcję"
+        ):
+
+            conn = sqlite3.connect(
+                DB_FILE,
+                timeout=30.0,
+            )
+
+
+            if action == "Aktywuj Subskrypcję":
+
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET stripe_paid = 1
+                    WHERE id = ?
+                    """,
+                    (
+                        target_user_id,
+                    ),
+                )
+
+
+            elif action == "Anuluj Subskrypcję":
+
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET stripe_paid = 0
+                    WHERE id = ?
+                    """,
+                    (
+                        target_user_id,
+                    ),
+                )
+
+
+            elif action == "Nadaj Admina":
+
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET is_admin = 1
+                    WHERE id = ?
+                    """,
+                    (
+                        target_user_id,
+                    ),
+                )
+
+
+            elif action == "Odbierz Admina":
+
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET is_admin = 0
+                    WHERE id = ?
+                    """,
+                    (
+                        target_user_id,
+                    ),
+                )
+
+
+            conn.commit()
+            conn.close()
+
+
+            st.success(
+                f"Pomyślnie zaktualizowano "
+                f"użytkownika ID "
+                f"{target_user_id}!"
+            )
+
+
+            st.rerun()
