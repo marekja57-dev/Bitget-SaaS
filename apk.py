@@ -324,18 +324,6 @@ with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
 
 
 # ============================================================
-# CZYSZCZENIE PAMIĘCI PYTHONA
-# ============================================================
-
-def cleanup_memory():
-    try:
-        collected = gc.collect()
-        return collected
-    except Exception:
-        return 0
-
-
-# ============================================================
 # SESSION STATE
 # ============================================================
 # KLUCZOWA ZMIANA:
