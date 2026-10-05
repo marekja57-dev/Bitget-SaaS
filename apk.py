@@ -180,6 +180,159 @@ TRANSLATIONS = {
 def t(key):
     lang = st.session_state.get("lang", "Polski")
     return TRANSLATIONS.get(lang, TRANSLATIONS["Polski"]).get(key, key)
+# ============================================================
+# INSTRUKCJA / REGULAMIN
+# ============================================================
+
+st.divider()
+
+st.markdown(
+    """
+    <style>
+    div[data-testid="stExpander"] {
+        background: linear-gradient(
+            135deg,
+            #1e4d2b 0%,
+            #0f2b17 100%
+        ) !important;
+        border: 3px solid #f3d57a !important;
+        border-radius: 14px !important;
+        margin-bottom: 16px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        overflow: hidden;
+    }
+
+    div[data-testid="stExpander"] summary {
+        background: linear-gradient(
+            135deg,
+            #245d34 0%,
+            #12351c 100%
+        ) !important;
+        border-radius: 11px !important;
+        padding: 18px 20px !important;
+    }
+
+    div[data-testid="stExpander"] summary p {
+        color: #f3d57a !important;
+        font-size: 1.15rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+    }
+
+    div[data-testid="stExpander"] > div {
+        background: #102516 !important;
+        border-top: 1px solid #f3d57a !important;
+    }
+
+    .manual-text {
+        color: #ffffff;
+        line-height: 1.65;
+        font-size: 0.98rem;
+    }
+
+    .manual-title {
+        color: #f3d57a;
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-top: 12px;
+        margin-bottom: 6px;
+    }
+
+    .manual-warning {
+        color: #ffe6a0;
+        font-weight: 600;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU", expanded=False):
+    st.markdown(
+        """
+        <div class="manual-text">
+        <div class="manual-title">1. Logowanie i konto</div>
+        Załóż konto lub zaloguj się przy użyciu adresu e-mail i hasła.
+        Po zalogowaniu system odczytuje zapisane ustawienia użytkownika.
+
+        <div class="manual-title">2. Połączenie z giełdą</div>
+        W panelu bocznym wybierz giełdę oraz wprowadź:
+        • API Key<br>
+        • Secret Key<br>
+        • Passphrase / API Password — jeżeli dana giełda tego wymaga.<br><br>
+        Następnie kliknij <b>ZAPISZ MOJE KLUCZE</b>.
+
+        <div class="manual-title">3. Kapitał i ryzyko</div>
+        Ustaw maksymalną kwotę przeznaczoną na pojedynczą pozycję
+        oraz maksymalną liczbę jednocześnie aktywnych pozycji Futures.
+
+        <div class="manual-title">4. Zarządzanie ROE</div>
+        Możesz włączyć strażnika SL/TP ROE i ustawić wartości
+        Stop-Loss oraz Take-Profit.
+
+        <div class="manual-title">5. Dźwignia</div>
+        System posiada tryb dynamicznej dźwigni zależnej od siły trendu
+        oraz tryb stałej dźwigni ustawianej ręcznie.
+
+        <div class="manual-title">6. Ustawienia MTF</div>
+        Każdy interwał posiada własne ustawienia:
+        • EMA Fast<br>
+        • EMA Slow<br>
+        • Min ADX<br>
+        • Min RSI<br>
+        • Max RSI<br>
+        • Mnożnik kapitału.<br><br>
+        Ustawienia MTF są zapisywane do bazy SQLite i odtwarzane po przeładowaniu.
+
+        <div class="manual-title">7. Skaner rynku</div>
+        Skaner analizuje dostępne kontrakty Futures rozliczane w USDT.
+
+        <div class="manual-title">8. Aktywne pozycje</div>
+        Sekcja pozycji pokazuje aktualnie otwarte pozycje Futures.
+
+        <div class="manual-title">9. KILL SWITCH</div>
+        Przycisk <b>ZAMKNIJ WSZYSTKO</b> służy do awaryjnego zamykania pozycji.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
+    st.markdown(
+        """
+        <div class="manual-text">
+        <div class="manual-title">1. Charakter systemu</div>
+        Aplikacja jest narzędziem analityczno-transakcyjnym.
+
+        <div class="manual-title">2. Ryzyko handlu</div>
+        <span class="manual-warning">
+        Handel kontraktami Futures oraz wykorzystanie dźwigni finansowej
+        wiążą się z wysokim ryzykiem utraty części lub całości kapitału.
+        </span>
+
+        <div class="manual-title">3. Odpowiedzialność użytkownika</div>
+        Użytkownik odpowiada za prawidłowe skonfigurowanie kluczy API.
+
+        <div class="manual-title">4. Stan oprogramowania</div>
+        Oprogramowanie dostarczane jest w stanie <b>As-Is</b>.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# CZYSZCZENIE PAMIĘCI PYTHONA
+# ============================================================
+
+def cleanup_memory():
+    try:
+        collected = gc.collect()
+        return collected
+    except Exception:
+        return 0
 
 
 # ============================================================
