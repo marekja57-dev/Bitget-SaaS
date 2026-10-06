@@ -1070,6 +1070,22 @@ if not st.session_state.logged_in:
         "</div></div>",
         unsafe_allow_html=True,
     )
+    # ============================================================
+    # ELEGANCKI, ZŁOTY REGULAMIN NA DOLE STRONY LOGOWANIA
+    # ============================================================
+
+    st.markdown("""
+    <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid rgba(212, 175, 55, 0.2); text-align: center;">
+        <p style="color: #D4AF37; font-size: 11px; margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">
+            📜 REGULAMIN SERWISU I OŚWIADCZENIE O RYZYKU
+        </p>
+        <p style="color: #c5a059; font-size: 10px; line-height: 1.4; max-width: 700px; margin: 0 auto; opacity: 0.85;">
+            Handel kontraktami Futures na kryptowaluty wiąże się z wysokim poziomem ryzyka finansowego i może prowadzić do utraty całego zainwestowanego kapitału. 
+            Oprogramowanie dostarczane jest w stanie takim, jakim jest ("As-Is"), bez jakichkolwiek gwarancji zysku. 
+            Logując się do systemu, akceptujesz warunki korzystania oraz potwierdzasz, że wykonujesz transakcje wyłącznie na własną odpowiedzialność.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.stop()
 
