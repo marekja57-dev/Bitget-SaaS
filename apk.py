@@ -1086,6 +1086,25 @@ if not st.session_state.logged_in:
         </p>
     </div>
     """, unsafe_allow_html=True)
+    # ============================================================
+    # INSTRUKCJA OBSŁUGI SYSTEMU
+    # ============================================================
+
+    with st.expander("📖 SZYBKA INSTRUKCJA OBSŁUGI SYSTEMU"):
+        st.markdown("""
+        **1. Logowanie i Połączenie z Giełdą**
+        * Zaloguj się na swoje konto.
+        * Wklej klucze API Bitget (API Key, Secret Key oraz Passphrase) z uprawnieniami do handlu Futures.
+        
+        **2. Konfiguracja Wskaźników i Interwałów (MTF)**
+        * W panelu bocznym ustaw docelowe wskaźniki: **EMA** (krótka/długa), **RSI** oraz **ADX**.
+        * Wybierz tryb wyliczania: **Ręczny** (sztywne progi) lub **Automatyczny** (dynamiczny wpływ zmienności rynku).
+        * Suwak wpływu w trybie Auto pozwala ustalić balans między automatyką a Twoimi sztywnymi zasadami.
+
+        **3. Skaner i Zarządzanie Pozycjami**
+        * System automatycznie skanuje wybrane pary USDT-Futures pod kątem spełnienia warunków wejścia.
+        * W zakładce pozycji masz podgląd na żywo oraz przycisk awaryjny **KILL SWITCH** do natychmiastowego zamknięcia pozycji.
+        """)
 
     st.stop()
 
