@@ -1074,54 +1074,32 @@ if not st.session_state.logged_in:
     # ELEGANCKI, ZŁOTY REGULAMIN NA DOLE STRONY LOGOWANIA
     # ============================================================
 
-    st.markdown("""
-    <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid rgba(212, 175, 55, 0.2); text-align: center;">
-        <p style="color: #D4AF37; font-size: 11px; margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">
-            📜 REGULAMIN SERWISU I OŚWIADCZENIE O RYZYKU
-        </p>
-        <p style="color: #c5a059; font-size: 10px; line-height: 1.4; max-width: 700px; margin: 0 auto; opacity: 0.85;">
-            Handel kontraktami Futures na kryptowaluty wiąże się z wysokim poziomem ryzyka finansowego i może prowadzić do utraty całego zainwestowanego kapitału. 
-            Oprogramowanie dostarczane jest w stanie takim, jakim jest ("As-Is"), bez jakichkolwiek gwarancji zysku. 
-            Logując się do systemu, akceptujesz warunki korzystania oraz potwierdzasz, że wykonujesz transakcje wyłącznie na własną odpowiedzialność.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    # ============================================================
-# INSTRUKCJA OBSŁUGI W ZŁOTYCH BARWACH
-# ============================================================
-
-st.markdown("""
-<style>
-/* Złote stylowanie dla kafelka instrukcji */
-div[data-testid="stExpander"] {
-    background: linear-gradient(135deg, #1e261d 0%, #0f140f 100%) !important;
-    border: 1px solid rgba(243, 213, 122, 0.4) !important;
-    border-radius: 8px !important;
-    margin-top: 20px !important;
-}
-div[data-testid="stExpander"] summary p {
-    color: #f3d57a !important;
-    font-weight: 600 !important;
-    font-size: 0.95rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 with st.expander("📖 SZYBKA INSTRUKCJA OBSŁUGI SYSTEMU"):
     st.markdown("""
-    <div style="color: #e2c97c; font-size: 0.88rem; line-height: 1.5;">
-        <p><strong style="color: #f3d57a;">1. Logowanie i Połączenie z Giełdą</strong><br>
-        Zaloguj się na konto i wprowadź klucze API Bitget (API Key, Secret Key oraz Passphrase) z uprawnieniami do handlu Futures.</p>
-        
-        <p><strong style="color: #f3d57a;">2. Konfiguracja Wskaźników i Interwałów (MTF)</strong><br>
-        Ustaw wskaźniki EMA, RSI oraz ADX. Wybierz tryb Ręczny lub Automatyczny. Suwak wpływu w trybie Auto ustala balans między algorytmem a Twoimi zasadami.</p>
+    **1. Logowanie i Połączenie z Giełdą**  
+    Zaloguj się na konto i wprowadź klucze API Bitget (API Key, Secret Key oraz Passphrase) z uprawnieniami do handlu Futures.
+    
+    **2. Konfiguracja Wskaźników i Interwałów (MTF)**  
+    Ustaw wskaźniki EMA, RSI oraz ADX. Wybierz tryb Ręczny lub Automatyczny. Suwak wpływu w trybie Auto ustala balans między algorytmem a Twoimi zasadami.
 
-        <p><strong style="color: #f3d57a;">3. Skaner i Zarządzanie Pozycjami</strong><br>
-        System skanuje pary USDT-Futures pod kątem warunków wejścia. W zakładce pozycji masz podgląd na żywo oraz przycisk <strong>KILL SWITCH</strong> do natychmiastowego zamknięcia pozycji.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    **3. Skaner i Zarządzanie Pozycjami**  
+    System skanuje pary USDT-Futures pod kątem warunków wejścia. W zakładce pozycji masz podgląd na żywo oraz przycisk **KILL SWITCH** do natychmiastowego zamknięcia pozycji.
+    """)
 
-    st.stop()
+st.markdown("""
+<div style="margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(212, 175, 55, 0.25); text-align: center;">
+    <p style="color: #D4AF37; font-size: 11px; margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">
+        📜 REGULAMIN SERWISU I OŚWIADCZENIE O RYZYKU
+    </p>
+    <p style="color: #c5a059; font-size: 10px; line-height: 1.4; max-width: 650px; margin: 0 auto; opacity: 0.85;">
+        Handel kontraktami Futures na kryptowaluty wiąże się z wysokim poziomem ryzyka finansowego i może prowadzić do utraty całego zainwestowanego kapitału. 
+        Oprogramowanie dostarczane jest w stanie takim, jakim jest ("As-Is"), bez jakichkolwiek gwarancji zysku. 
+        Logując się do systemu, akceptujesz warunki korzystania oraz potwierdzasz, że wykonujesz transakcje wyłącznie na własną odpowiedzialność.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+st.stop() 
 
 
 # ============================================================
