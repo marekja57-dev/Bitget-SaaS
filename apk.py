@@ -3040,22 +3040,6 @@ with st.expander(
         unsafe_allow_html=True,
     )
 
-
-# ============================================================
-# CZYSZCZENIE PAMIĘCI PYTHONA
-# ============================================================
-
-def cleanup_memory():
-    """
-    Usuwa nieużywane obiekty Pythona.
-    Nie restartuje aplikacji i nie zabija procesu Streamlit.
-    """
-    try:
-        collected = gc.collect()
-        return collected
-    except Exception:
-        return 0
-
 gc.collect()
 
 if auto_refresh_seconds > 0:
