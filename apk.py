@@ -210,6 +210,39 @@ SESSION_DEFAULTS = {
     "active_mtf_bots": {},
     "_mtf_loaded_user_id": None,
 }
+# --- WCZYTANIE ZAPISANYCH USTAWIEŃ Z BAZY DANYCH ---
+if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+    try:
+        import sqlite3, json
+        conn = sqlite3.connect("users.db")
+        c = conn.cursor()
+        c.execute("SELECT mtf_settings FROM users WHERE id = ?", (st.session_state["user_id"],))
+        row = c.fetchone()
+        conn.close()
+
+        if row and row[0]:
+            saved_cfg = json.loads(row[0])
+            for k, v in saved_cfg.items():
+                if v is not None:
+                    st.session_state[k] = v
+    except Exception:
+        pass
+    def save_user_settings_to_db():
+        if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+            try:
+                import sqlite3, json
+                settings_to_save = {}
+                for k, v in st.session_state.items():
+                    if any(p in k for p in ["ema_f_", "ema_s_", "adx_", "max_rsi_", "min_rsi_", "cap_mult_", "radio_mode_"]) or k == "active_mtf_bots":
+                        settings_to_save[k] = v
+
+                conn = sqlite3.connect("users.db")
+                c = conn.cursor()
+                c.execute("UPDATE users SET mtf_settings = ? WHERE id = ?", (json.dumps(settings_to_save), st.session_state["user_id"]))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
 for key, default_value in SESSION_DEFAULTS.items():
     if key not in st.session_state:
@@ -2465,12 +2498,7 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
         max_rsi_val = st.slider(f"Max RSI Long ({tf})", min_value=50.0, max_value=95.0, step=1.0, key=k_max_rsi)
         min_rsi_val = st.slider(f"Min RSI short ({tf})", min_value=5.0, max_value=50.0, step=1.0, key=k_rsi)
         tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, step=0.5, key=k_cap)
-
-        # 4. Natychmiastowy zapis do bazy przy każdej interakcji z widgetem w tej pętli
-        if st.session_state.get("logged_in") and st.session_state.get("user_id"):
-            # Tutaj przypisujesz pobrane wartości bezpośrednio do zmiennych konfiguracyjnych bota dla danego tf
-            # i od razu wywołujesz funkcję zapisu do SQLite:
-            save_mtf_settings_for_user(st.session_state.user_id)
+        save_user_settings_to_db()
         
         # ----------------------------------------------------
         # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
