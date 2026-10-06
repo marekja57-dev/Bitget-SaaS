@@ -1087,24 +1087,39 @@ if not st.session_state.logged_in:
     </div>
     """, unsafe_allow_html=True)
     # ============================================================
-    # INSTRUKCJA OBSŁUGI SYSTEMU
-    # ============================================================
+# INSTRUKCJA OBSŁUGI W ZŁOTYCH BARWACH
+# ============================================================
 
-    with st.expander("📖 SZYBKA INSTRUKCJA OBSŁUGI SYSTEMU"):
-        st.markdown("""
-        **1. Logowanie i Połączenie z Giełdą**
-        * Zaloguj się na swoje konto.
-        * Wklej klucze API Bitget (API Key, Secret Key oraz Passphrase) z uprawnieniami do handlu Futures.
+st.markdown("""
+<style>
+/* Złote stylowanie dla kafelka instrukcji */
+div[data-testid="stExpander"] {
+    background: linear-gradient(135deg, #1e261d 0%, #0f140f 100%) !important;
+    border: 1px solid rgba(243, 213, 122, 0.4) !important;
+    border-radius: 8px !important;
+    margin-top: 20px !important;
+}
+div[data-testid="stExpander"] summary p {
+    color: #f3d57a !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+with st.expander("📖 SZYBKA INSTRUKCJA OBSŁUGI SYSTEMU"):
+    st.markdown("""
+    <div style="color: #e2c97c; font-size: 0.88rem; line-height: 1.5;">
+        <p><strong style="color: #f3d57a;">1. Logowanie i Połączenie z Giełdą</strong><br>
+        Zaloguj się na konto i wprowadź klucze API Bitget (API Key, Secret Key oraz Passphrase) z uprawnieniami do handlu Futures.</p>
         
-        **2. Konfiguracja Wskaźników i Interwałów (MTF)**
-        * W panelu bocznym ustaw docelowe wskaźniki: **EMA** (krótka/długa), **RSI** oraz **ADX**.
-        * Wybierz tryb wyliczania: **Ręczny** (sztywne progi) lub **Automatyczny** (dynamiczny wpływ zmienności rynku).
-        * Suwak wpływu w trybie Auto pozwala ustalić balans między automatyką a Twoimi sztywnymi zasadami.
+        <p><strong style="color: #f3d57a;">2. Konfiguracja Wskaźników i Interwałów (MTF)</strong><br>
+        Ustaw wskaźniki EMA, RSI oraz ADX. Wybierz tryb Ręczny lub Automatyczny. Suwak wpływu w trybie Auto ustala balans między algorytmem a Twoimi zasadami.</p>
 
-        **3. Skaner i Zarządzanie Pozycjami**
-        * System automatycznie skanuje wybrane pary USDT-Futures pod kątem spełnienia warunków wejścia.
-        * W zakładce pozycji masz podgląd na żywo oraz przycisk awaryjny **KILL SWITCH** do natychmiastowego zamknięcia pozycji.
-        """)
+        <p><strong style="color: #f3d57a;">3. Skaner i Zarządzanie Pozycjami</strong><br>
+        System skanuje pary USDT-Futures pod kątem warunków wejścia. W zakładce pozycji masz podgląd na żywo oraz przycisk <strong>KILL SWITCH</strong> do natychmiastowego zamknięcia pozycji.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.stop()
 
