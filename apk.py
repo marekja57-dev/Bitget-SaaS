@@ -1036,7 +1036,7 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
 
-st.stop()
+    st.stop()
 
 # ============================================================
 # JĘZYK
