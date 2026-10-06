@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 import stripe
 
+
 # ============================================================
 # KONFIGURACJA
 # ============================================================
@@ -54,6 +55,7 @@ ADMIN_EMAILS = [
     "marekja57@wp.pl",
     "admin@bot-bitget.pl",
 ]
+
 
 # ============================================================
 # TŁUMACZENIA
@@ -1037,6 +1039,7 @@ if not st.session_state.logged_in:
     )
 
     st.stop()
+
 
 # ============================================================
 # JĘZYK
@@ -2823,7 +2826,6 @@ if is_user_admin():
 # zapisywane w SQLite per użytkownik. Dzięki temu przetrwają również
 # reconnect/odświeżenie sesji Streamlit i ponowne logowanie.
 # ============================================================
-
 
 gc.collect()
 
