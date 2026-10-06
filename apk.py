@@ -2845,24 +2845,8 @@ if is_user_admin():
     except Exception:
         pass
 
-
+    
 # ============================================================
-# AUTO REFRESH
-# ============================================================
-# Najważniejsze:
-# rerun() nie kasuje session_state, a ustawienia MTF są dodatkowo
-# zapisywane w SQLite per użytkownik. Dzięki temu przetrwają również
-# reconnect/odświeżenie sesji Streamlit i ponowne logowanie.
-# ============================================================
-
-gc.collect()
-
-if auto_refresh_seconds > 0:
-    time.sleep(
-        auto_refresh_seconds
-    )
-    st.rerun()
-    # ============================================================
 # INSTRUKCJA / REGULAMIN
 # ============================================================
 
@@ -3075,5 +3059,10 @@ with st.expander(
         """,
         unsafe_allow_html=True,
     )
+gc.collect()
 
-
+if auto_refresh_seconds > 0:
+    time.sleep(
+        auto_refresh_seconds
+    )
+    st.rerun()
