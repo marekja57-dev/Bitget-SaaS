@@ -2505,9 +2505,24 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
             key=k_radio,
         )
 
-        # 2. Suwaki EMA Szybka / Wolna
-        ema_f_val = st.number_input(f"EMA Szybka ({tf})", min_value=1, max_value=200, step=1, key=k_ema_f)
-        ema_s_val = st.number_input(f"EMA Wolna ({tf})", min_value=2, max_value=300, step=1, key=k_ema_s)
+      # 2. Suwaki EMA Szybka / Wolna
+        ema_f_val = st.number_input(
+            f"EMA Szybka ({tf})", 
+            min_value=1, 
+            max_value=200, 
+            value=int(st.session_state.get(k_ema_f, DEFAULT_TF_VALUES[tf]["ema_fast"])), 
+            step=1, 
+            key=k_ema_f
+        )
+
+        ema_s_val = st.number_input(
+            f"EMA Wolna ({tf})", 
+            min_value=2, 
+            max_value=300, 
+            value=int(st.session_state.get(k_ema_s, DEFAULT_TF_VALUES[tf]["ema_slow"])), 
+            step=1, 
+            key=k_ema_s
+        )
 
         if ema_f_val >= ema_s_val:
             st.warning(f"⚠️ EMA szybka >= EMA wolna - {tf}")
@@ -2518,42 +2533,48 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
             eff_ema_slow = int(ema_s_val)
 
         # 3. Pozostałe suwaki wskaźników
-        adx_val = st.slider(f"Min ADX ({tf})", min_value=10.0, max_value=50.0, step=1.0, key=k_adx)
-        max_rsi_val = st.slider(f"Max RSI Long ({tf})", min_value=50.0, max_value=95.0, step=1.0, key=k_max_rsi)
-        min_rsi_val = st.slider(f"Min RSI short ({tf})", min_value=5.0, max_value=50.0, step=1.0, key=k_rsi)
-        tf_cap_mult = st.number_input(f"Mnożnik kwoty ({tf})", min_value=0.1, max_value=20.0, step=0.5, key=k_cap)
-        save_user_settings_to_db()
-        
-        # ----------------------------------------------------
-        # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
-        # ----------------------------------------------------
-
-        if tf in st.session_state.active_mtf_bots:
-            st.session_state.active_mtf_bots[
-                tf
-            ].update(
-                {
-                    "mode": bot_mode,
-                    "ema_fast": eff_ema_fast,
-                    "ema_slow": eff_ema_slow,
-                    "min_adx": float(adx_val),
-                    "max_rsi": float(max_rsi_val),
-                    "min_rsi": float(min_rsi_val),
-                    "capital_multiplier": float(
-                        tf_cap_mult
-                    ),
-                }
-            )
-
-        is_active = (
-            tf
-            in st.session_state.active_mtf_bots
+        adx_val = st.slider(
+            f"Min ADX ({tf})", 
+            min_value=10.0, 
+            max_value=50.0, 
+            value=float(st.session_state.get(k_adx, DEFAULT_TF_VALUES[tf]["adx"])), 
+            step=1.0, 
+            key=k_adx
         )
+        max_rsi_val = st.slider(
+            f"Max RSI Long ({tf})", 
+            min_value=50.0, 
+            max_value=95.0, 
+            value=float(st.session_state.get(k_max_rsi, DEFAULT_TF_VALUES[tf]["max_rsi"])), 
+            step=1.0, 
+            key=k_max_rsi
+        )
+        min_rsi_val = st.slider(
+            f"Min RSI short ({tf})", 
+            min_value=5.0, 
+            max_value=50.0, 
+            value=float(st.session_state.get(k_rsi, DEFAULT_TF_VALUES[tf]["min_rsi"])), 
+            step=1.0, 
+            key=k_rsi
+        )
+ # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
+        if tf in st.session_state.active_mtf_bots:
+            st.session_state.active_mtf_bots[tf].update({
+                "mode": bot_mode,
+                "ema_fast": eff_ema_fast,
+                "ema_slow": eff_ema_slow,
+                "min_adx": float(adx_val),
+                "max_rsi": float(max_rsi_val),
+                "min_rsi": float(min_rsi_val),
+                "capital_multiplier": float(
+                    st.session_state.get(k_cap, DEFAULT_TF_VALUES[tf]["cap_mult"])
+                )
+            })
+
+        is_active = (tf in st.session_state.active_mtf_bots)
 
         if is_active:
-
             st.success("🟢 AKTYWNY")
-
             if st.button(
                 f"Zatrzymaj {tf}",
                 key=f"stop_tf_{tf}",
@@ -2562,13 +2583,7 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
                 # Zapisz ustawienia PRZED rerun(), aby kliknięcie przycisku
                 # nie mogło ominąć końcowego zapisu MTF.
                 if st.session_state.get("user_id"):
-                    save_mtf_settings_for_user(
-                        st.session_state.user_id
-                    )
-                del st.session_state.active_mtf_bots[
-                    tf
-                ]
-                st.rerun()
+                    save_mtf_settings_for_user(st.session_state["user_id"])
 
         else:
 
@@ -2604,7 +2619,7 @@ for idx, tf in enumerate(AVAILABLE_TIMEFRAMES):
                         "max_rsi": float(max_rsi_val),
                         "min_rsi": float(min_rsi_val),
                         "capital_multiplier": float(
-                            tf_cap_mult
+                          st.session_state.get(k_cap, DEFAULT_TF_VALUES[tf]["cap_mult"])
                         ),
                     }
 
