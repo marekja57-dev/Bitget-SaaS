@@ -225,6 +225,7 @@ if st.session_state.get("logged_in") and st.session_state.get("user_id"):
             for k, v in saved_cfg.items():
                 if v is not None:
                     st.session_state[k] = v
+                st.session_state["_mtf_loaded_user_id"] = st.session_state["user_id"]
     except Exception:
         pass
     def save_user_settings_to_db():
