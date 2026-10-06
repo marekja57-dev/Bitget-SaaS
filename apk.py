@@ -1036,8 +1036,6 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
 
-    st.stop()
-
 st.markdown("---")
 
 # Zwiń instrukcję i regulamin w złoto-zielonych stylach
@@ -1068,6 +1066,7 @@ with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
         """,
         unsafe_allow_html=True
     )
+    st.stop()
 
 # ============================================================
 # JĘZYK
