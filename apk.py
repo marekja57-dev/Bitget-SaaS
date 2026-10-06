@@ -12,23 +12,44 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import stripe
-import streamlit as st
 
 # ============================================================
-# BEZPIECZNE STYLE CSS (Należy umieścić jak najwyżej w pliku)
+# ZIELONO-ZŁOTE STYLE CSS (Wklej na samej górze pliku)
 # ============================================================
 
 st.markdown(
     """
     <style>
-    /* Dedykowane style dla wnętrza instrukcji i regulaminu */
-    .manual-box {
-        background-color: #102516;
-        border: 2px solid #f3d57a;
-        border-radius: 10px;
-        padding: 16px;
-        margin-top: 5px;
-        margin-bottom: 5px;
+    /* Stylowanie nagłówka i tła expandera w sposób bezpieczny dla stanu */
+    div[data-testid="stExpander"] {
+        background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%) !important;
+        border: 2px solid #f3d57a !important;
+        border-radius: 12px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+    }
+
+    /* Pasek nagłówka expandera */
+    div[data-testid="stExpander"] summary {
+        background: linear-gradient(135deg, #245d34 0%, #12351c 100%) !important;
+        border-radius: 10px !important;
+        padding: 12px 16px !important;
+    }
+
+    /* Tekst w nagłówku expandera */
+    div[data-testid="stExpander"] summary p {
+        color: #f3d57a !important;
+        font-size: 1.1rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+    }
+
+    /* Wnętrze po rozwinięciu */
+    div[data-testid="stExpander"] > div[role="region"] {
+        background: #102516 !important;
+        border-top: 1px solid #f3d57a !important;
+        padding: 15px !important;
     }
 
     .manual-text {
@@ -73,7 +94,7 @@ st.divider()
 with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU", expanded=False):
     st.markdown(
         """
-        <div class="manual-box manual-text">
+        <div class="manual-text">
 
         <div class="manual-title">1. Logowanie i konto</div>
         Załóż konto lub zaloguj się przy użyciu adresu e-mail i hasła.
@@ -134,7 +155,7 @@ with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU", expanded=False):
 with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
     st.markdown(
         """
-        <div class="manual-box manual-text">
+        <div class="manual-text">
 
         <div class="manual-title">1. Charakter systemu</div>
         Aplikacja jest narzędziem analityczno-transakcyjnym służącym
@@ -185,6 +206,7 @@ with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
         """,
         unsafe_allow_html=True,
     )
+
 
 # ============================================================
 # KONFIGURACJA
@@ -2997,6 +3019,7 @@ if is_user_admin():
 # zapisywane w SQLite per użytkownik. Dzięki temu przetrwają również
 # reconnect/odświeżenie sesji Streamlit i ponowne logowanie.
 # ============================================================
+
 
 gc.collect()
 
