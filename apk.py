@@ -1038,35 +1038,7 @@ if not st.session_state.logged_in:
 
 st.markdown("---")
 
-# Zwiń instrukcję i regulamin w złoto-zielonych stylach
-with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU", expanded=False):
-    st.markdown(
-        """
-        <div style="background-color: #064e3b; border: 1px solid #f0b90b; padding: 15px; border-radius: 8px; color: #ffffff;">
-            <h4 style="color: #f0b90b; margin-top: 0;">1. Pierwsze kroki</h4>
-            <p>Zarejestruj się lub zaloguj na swoje konto w serwisie.</p>
-            <h4 style="color: #f0b90b;">2. Konfiguracja API</h4>
-            <p>Wprowadź swoje klucze API Bitget w panelu bocznym aplikacji.</p>
-            <h4 style="color: #f0b90b;">3. Uruchomienie Botów MTF</h4>
-            <p>Dostosuj wskaźniki EMA, ADX i RSI dla wybranych interwałów i włącz automatyzację.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
-    st.markdown(
-        """
-        <div style="background-color: #064e3b; border: 1px solid #f0b90b; padding: 15px; border-radius: 8px; color: #ffffff;">
-            <h4 style="color: #f0b90b; margin-top: 0;">1. Charakter Systemu</h4>
-            <p>Aplikacja jest narzędziem analityczno-transakcyjnym wspomagającym handel.</p>
-            <h4 style="color: #f0b90b;">2. Ostrzeżenie o Ryzyku</h4>
-            <p>Handel na rynku kryptowalut oraz kontraktach Futures wiąże się z wysokim ryzykiem utraty kapitału. Użytkownik podejmuje wszelkie decyzje inwestycyjne na własną odpowiedzialność.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    st.stop()
+st.stop()
 
 # ============================================================
 # JĘZYK
