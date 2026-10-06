@@ -1074,8 +1074,17 @@ if not st.session_state.logged_in:
     # ELEGANCKI, ZŁOTY REGULAMIN NA DOLE STRONY LOGOWANIA
     # ============================================================
 
+   # Szybka instrukcja oraz regulamin - mały złoty tekst
     st.markdown("""
-    <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid rgba(212, 175, 55, 0.2); text-align: center;">
+    <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid rgba(212, 175, 55, 0.25); text-align: center;">
+        <p style="color: #D4AF37; font-size: 11px; margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">
+            📖 SZYBKA INSTRUKCJA OBSŁUGI SYSTEMU
+        </p>
+        <p style="color: #c5a059; font-size: 10px; line-height: 1.4; max-width: 700px; margin: 0 auto 15px auto; opacity: 0.85;">
+            <strong>1. Logowanie:</strong> Zaloguj się na konto i wprowadź klucze API Bitget (API Key, Secret Key, Passphrase).<br>
+            <strong>2. Konfiguracja MTF:</strong> W panelu bocznym ustaw wskaźniki EMA, RSI i ADX oraz wybierz tryb Ręczny lub Automatyczny.<br>
+            <strong>3. Skaner i Pozycje:</strong> System automatycznie skanuje rynek Futures. W zakładce pozycji masz podgląd na żywo oraz przycisk KILL SWITCH.
+        </p>
         <p style="color: #D4AF37; font-size: 11px; margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">
             📜 REGULAMIN SERWISU I OŚWIADCZENIE O RYZYKU
         </p>
@@ -1088,7 +1097,6 @@ if not st.session_state.logged_in:
     """, unsafe_allow_html=True)
 
     st.stop()
-
 
 # ============================================================
 # JĘZYK
