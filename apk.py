@@ -11,6 +11,8 @@ import ccxt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import logging
+logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(logging.ERROR)
 import stripe
 
 
