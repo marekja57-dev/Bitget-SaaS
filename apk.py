@@ -13,6 +13,179 @@ import pandas as pd
 import streamlit as st
 import stripe
 
+import streamlit as st
+
+# ============================================================
+# BEZPIECZNE STYLE CSS (Należy umieścić jak najwyżej w pliku)
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+    /* Dedykowane style dla wnętrza instrukcji i regulaminu */
+    .manual-box {
+        background-color: #102516;
+        border: 2px solid #f3d57a;
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 5px;
+        margin-bottom: 5px;
+    }
+
+    .manual-text {
+        color: #ffffff;
+        line-height: 1.65;
+        font-size: 0.98rem;
+    }
+
+    .manual-title {
+        color: #f3d57a;
+        font-size: 1.10rem;
+        font-weight: 700;
+        margin-top: 14px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid #1e4d2b;
+        padding-bottom: 4px;
+    }
+
+    .manual-title:first-child {
+        margin-top: 0px;
+    }
+
+    .manual-warning {
+        color: #ffe6a0;
+        font-weight: 600;
+        background-color: rgba(255, 230, 160, 0.1);
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ============================================================
+# SEKCJA: INSTRUKCJA / REGULAMIN
+# ============================================================
+
+st.divider()
+
+with st.expander("📖 INSTRUKCJA OBSŁUGI SYSTEMU", expanded=False):
+    st.markdown(
+        """
+        <div class="manual-box manual-text">
+
+        <div class="manual-title">1. Logowanie i konto</div>
+        Załóż konto lub zaloguj się przy użyciu adresu e-mail i hasła.
+        Po zalogowaniu system odczytuje zapisane ustawienia użytkownika.
+
+        <div class="manual-title">2. Połączenie z giełdą</div>
+        W panelu bocznym wybierz giełdę oraz wprowadź:
+        <br>• API Key
+        <br>• Secret Key
+        <br>• Passphrase / API Password — jeżeli dana giełda tego wymaga.
+        <br><br>
+        Następnie kliknij <b>ZAPISZ MOJE KLUCZE</b>.
+
+        <div class="manual-title">3. Kapitał i ryzyko</div>
+        Ustaw maksymalną kwotę przeznaczoną na pojedynczą pozycję
+        oraz maksymalną liczbę jednocześnie aktywnych pozycji Futures.
+
+        <div class="manual-title">4. Zarządzanie ROE</div>
+        Możesz włączyć strażnika SL/TP ROE i ustawić wartości
+        Stop-Loss oraz Take-Profit.
+
+        <div class="manual-title">5. Dźwignia</div>
+        System posiada tryb dynamicznej dźwigni zależnej od siły trendu
+        oraz tryb stałej dźwigni ustawianej ręcznie.
+
+        <div class="manual-title">6. Ustawienia MTF</div>
+        Każdy interwał posiada własne ustawienia:
+        <br>• EMA Fast
+        <br>• EMA Slow
+        <br>• Min ADX
+        <br>• Min RSI
+        <br>• Max RSI
+        <br>• Mnożnik kapitału.
+        <br><br>
+        Ustawienia MTF są zapisywane do bazy SQLite i powinny zostać
+        odtworzone po ponownym załadowaniu aplikacji.
+
+        <div class="manual-title">7. Skaner rynku</div>
+        Skaner analizuje dostępne kontrakty Futures rozliczane w USDT
+        i prezentuje aktualne parametry rynku, między innymi EMA, RSI,
+        ADX oraz wolumen.
+
+        <div class="manual-title">8. Aktywne pozycje</div>
+        Sekcja pozycji pokazuje aktualnie otwarte pozycje Futures,
+        ich kierunek, wielkość, cenę wejścia, cenę rynkową, PnL
+        oraz dźwignię.
+
+        <div class="manual-title">9. KILL SWITCH</div>
+        Przycisk <b>ZAMKNIJ WSZYSTKO</b> służy do awaryjnego zamykania
+        wykrytych aktywnych pozycji z użyciem parametru reduceOnly.
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+with st.expander("📜 REGULAMIN SERWISU I NOTA PRAWNA", expanded=False):
+    st.markdown(
+        """
+        <div class="manual-box manual-text">
+
+        <div class="manual-title">1. Charakter systemu</div>
+        Aplikacja jest narzędziem analityczno-transakcyjnym służącym
+        do analizy rynków Futures oraz obsługi operacji wykonywanych
+        za pośrednictwem podłączonej giełdy.
+
+        <div class="manual-title">2. Ryzyko handlu</div>
+        <span class="manual-warning">
+        Handel kontraktami Futures oraz wykorzystanie dźwigni finansowej
+        wiążą się z wysokim ryzykiem utraty części lub całości kapitału.
+        </span>
+        <br><br>
+        Wyniki historyczne, wskaźniki techniczne oraz sygnały systemu
+        nie gwarantują osiągnięcia zysku w przyszłości.
+
+        <div class="manual-title">3. Odpowiedzialność użytkownika</div>
+        Użytkownik samodzielnie decyduje o podłączeniu rachunku giełdowego,
+        wysokości kapitału, dźwigni oraz parametrach strategii.
+        <br><br>
+        Użytkownik odpowiada za prawidłowe skonfigurowanie kluczy API
+        i uprawnień nadanych tym kluczom.
+
+        <div class="manual-title">4. Klucze API</div>
+        Zaleca się korzystanie z kluczy API posiadających wyłącznie
+        niezbędne uprawnienia. Nie należy udostępniać kluczy API osobom trzecim.
+
+        <div class="manual-title">5. Automatyczne transakcje</div>
+        Jeżeli użytkownik uruchomi funkcje wykonujące transakcje,
+        system może wysyłać zlecenia do podłączonej giełdy zgodnie
+        z aktualną konfiguracją aplikacji.
+
+        <div class="manual-title">6. Awaria połączenia</div>
+        W przypadku problemów z API giełdy, połączeniem internetowym,
+        serwerem lub samą giełdą działanie systemu może zostać
+        ograniczone lub przerwane.
+
+        <div class="manual-title">7. Stan oprogramowania</div>
+        Oprogramowanie dostarczane jest w stanie <b>As-Is</b>.
+        Użytkownik powinien kontrolować swoje pozycje i rachunek
+        giełdowy również poza aplikacją.
+
+        <div class="manual-title">8. Postanowienie końcowe</div>
+        Korzystanie z systemu oznacza akceptację ryzyka związanego
+        z rynkiem kryptowalut, kontraktami Futures oraz dźwignią
+        finansową.
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # KONFIGURACJA
