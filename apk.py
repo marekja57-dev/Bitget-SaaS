@@ -739,9 +739,28 @@ class UserWorker:
             return False
 
     def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
-        ranked = rank_usdt_linear_symbols(self.exchange, max_pairs)
-        log.info("User %s scan universe: %s liquid USDT perpetuals", self.user_id, len(ranked))
-        return ranked
+        # Zamiast zepsutej funkcji filtrującej, bierzemy bezpośrednio wszystkie aktywne swapy USDT z giełdy
+        symbols = []
+        try:
+            if not self.markets_loaded:
+                self.load_markets_safe()
+            
+            for symbol, market in self.exchange.markets.items():
+                # Sprawdzamy czy to kontrakt typu swap (futures) rozliczany w USDT
+                if market.get("linear") and market.get("quote") == "USDT" and market.get("active"):
+                    # Dodajemy symbol z domyślnym priorytetem/wolumenem np. 1.0
+                    symbols.append((symbol, 1.0))
+            
+            # Jeśli znaleźliśmy symbole, ograniczamy do max_pairs
+            if symbols:
+                log.info("User %s forced scan universe: %s liquid USDT perpetuals", self.user_id, len(symbols[:max_pairs]))
+                return symbols[:max_pairs]
+                
+        except Exception as e:
+            log.error("Error forcing market symbols for user %s: %s", self.user_id, e)
+            
+        log.warning("User %s scan universe fallback to empty", self.user_id)
+        return []
 
     def run_once(self) -> None:
         self.refresh_credentials()
