@@ -123,7 +123,7 @@ TRANSLATIONS = {
         "bot_control": "🤖 Panel Sterowania Botami MTF",
         "max_pairs": "Liczba par Futures do skanowania",
         "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
-        "wallet_futures": "🔵 Portfel Futures",
+        "wallet_futures": "🔵 Portfel Futures", 
         "free_balance": "Wolne",
         "session_results": "📊 Wyniki Sesji (PnL %)",
         "pnl_usdt": "PnL USDT",
@@ -1253,7 +1253,7 @@ def run_streamlit_app() -> None:
     balance = 0.0; free = 0.0
     if ex:
         try:
-            bal = ex.fetch_balance({"type":"swap"}); u = bal.get("USDT",{}) or {}; balance = safe_float(u.get("total")); free = safe_float(u.get("free"))
+            bal = ex.fetch_balance({"type":"swap"}); u = bal.get("USDT",{}) or {}; balance = safe_float(u.get("free",0)); free = safe_float(u.get("free"))
         except Exception: pass
     if not st.session_state.session_baseline_locked and balance > 0:
         st.session_state.session_start_balance = balance; st.session_state.session_baseline_locked = True
