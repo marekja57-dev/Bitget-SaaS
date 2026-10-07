@@ -737,7 +737,7 @@ class UserWorker:
             self.markets_loaded = False
             log.warning("load_markets failed user=%s: %s", self.user_id, exc)
             return False
-
+        
     def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
         symbols_with_volume = []
         try:
@@ -745,35 +745,52 @@ class UserWorker:
                 self.load_markets_safe()
             
             for symbol, market in self.exchange.markets.items():
-                if market.get("linear") and market.get("quote") == "USDT" and market.get("active"):
+                if market.get("swap") and market.get("quote") == "USDT" and market.get("active"):
                     base = market.get("base", "")
+                    
+                    # Odrzucamy wszystko, co nie jest czystą kryptowalutą lub jest podejrzane
                     if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
                         continue
                     
-                    # Wyciągamy czysty symbol bez dopiska :USDT, żeby API giełdy nie wypluwało błędu
-                    clean_symbol = market.get("symbol", "")
-                    if ":" in clean_symbol:
-                        clean_symbol = clean_symbol.split(":")[0]
-                    if not clean_symbol:
+                    clean_symbol = symbol.split(":")[0] if ":" in symbol else symbol
+                    if not "/" in clean_symbol and base:
                         clean_symbol = f"{base}/USDT"
                         
+                    # Wyciąganie i konwersja wolumenu na float, żeby sortowanie działało poprawnie
                     info = market.get("info", {})
-                    vol = float(info.get("usdtVolume", 0) or info.get("quoteVolume", 0) or 0)
+                    raw_vol = (
+                        info.get("usdtVolume") or 
+                        info.get("quoteVolume") or 
+                        market.get("quoteVolume") or 
+                        info.get("baseVolume") or 
+                        0
+                    )
+                    try:
+                        vol = float(raw_vol)
+                    except (ValueError, TypeError):
+                        vol = 0.0
+                        
                     symbols_with_volume.append((clean_symbol, vol))
             
-            # Usuwamy ewentualne duplikaty i sortujemy po wolumenie
-            unique_symbols = {s[0]: s[1] for s in symbols_with_volume}
-            sorted_symbols = sorted(unique_symbols.items(), key=lambda x: x[1], reverse=True)
+            # Usuwamy duplikaty (zostawiając najwyższy wolumen dla danej pary)
+            unique_dict = {}
+            for sym, vol in symbols_with_volume:
+                if sym not in unique_dict or vol > unique_dict[sym]:
+                    unique_dict[sym] = vol
+                    
+            # Sortujemy malejąco: od największego wolumenu do najmniejszego
+            sorted_symbols = sorted(unique_dict.items(), key=lambda x: x[1], reverse=True)
             
             top_symbols = sorted_symbols[:max_pairs]
             if top_symbols:
-                log.info("User %s ranked %s clean crypto USDT perpetuals", self.user_id, len(top_symbols))
+                log.info("User %s ranked %s crypto USDT perpetuals by volume", self.user_id, len(top_symbols))
                 return top_symbols
                 
         except Exception as e:
             log.error("Error ranking crypto symbols for user %s: %s", self.user_id, e)
             
         return []
+
 
 
     def run_once(self) -> None:
