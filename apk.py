@@ -627,39 +627,49 @@ def create_protection_order(exchange, symbol: str, side: str, amount: float, tri
         log.warning("Native %s protection failed for %s: %s", kind, symbol, exc)
         return None
 
-
-def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[float]]:
+def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float):
     side = "buy" if signal == "LONG" else "sell"
     try:
         order = exchange.create_market_order(symbol, side, amount)
     except Exception as exc:
         log.error("ENTRY failed %s %s: %s", symbol, signal, exc)
         return None, None, None
+
     entry = safe_float(order.get("average")) or safe_float(order.get("price"))
     if entry <= 0:
         try:
-            p = find_position(fetch_positions_safe(exchange), symbol)
-            entry = safe_float(p.get("entryPrice")) if p else 0
+            ticker = exchange.fetch_ticker(symbol)
+            entry = safe_float(ticker.get("last")) or safe_float(ticker.get("close")) or 0
         except Exception:
-            entry = 0
+            try:
+                p = find_position(fetch_positions_safe(exchange), symbol)
+                entry = safe_float(p.get("entryPrice")) if p else 0
+            except Exception:
+                entry = 0
+
     if entry <= 0:
         log.error("Could not determine real entry price for %s", symbol)
-        return order, None, None
-    long = signal == "LONG"
-    stop_price = roe_to_price(entry, stop_roe, leverage, long)
-    take_price = roe_to_price(entry, take_roe, leverage, not long)
-    close_side = "sell" if long else "buy"
+        return None, None, None
+
+    long_pos = signal == "LONG"
+    stop_price = roe_to_price(entry, stop_roe, leverage, long_pos)
+    take_price = roe_to_price(entry, take_roe, leverage, not long_pos)
+    close_side = "sell" if long_pos else "buy"
+    
     try:
         amount_prec = float(exchange.amount_to_precision(symbol, amount))
     except Exception:
         amount_prec = amount
+        
     if amount_prec > 0:
         sl_order = create_protection_order(exchange, symbol, close_side, amount_prec, stop_price, "stop")
         tp_order = create_protection_order(exchange, symbol, close_side, amount_prec, take_price, "take")
     else:
         sl_order = tp_order = None
-    log.info("Entry %s %s avg=%s SL=%s TP=%s native_sl=%s native_tp=%s", symbol, signal, entry, stop_price, take_price, bool(sl_order), bool(tp_order))
+        
+    log.info("Entry %s %s avg=%s SL=%s TP=%s", symbol, signal, entry, stop_price, take_price)
     return order, stop_price, take_price
+
 
 # ============================================================
 # USER CONFIG / WORKER
