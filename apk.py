@@ -631,7 +631,7 @@ def create_protection_order(exchange, symbol: str, side: str, amount: float, tri
 def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[float]]:
     side = "buy" if signal == "LONG" else "sell"
     try:
-        order = exchange.create_order(symbol, "market", side, amount)
+        order = exchange.create_market_order(symbol, side, amount)
     except Exception as exc:
         log.error("ENTRY failed %s %s: %s", symbol, signal, exc)
         return None, None, None
@@ -745,32 +745,36 @@ class UserWorker:
                 self.load_markets_safe()
             
             for symbol, market in self.exchange.markets.items():
-                # Sprawdzamy czy to swap USDT, ale odrzucamy akcje/wynalazki (np. GOOGL, MSFT, DELL, złoto itp.)
                 if market.get("linear") and market.get("quote") == "USDT" and market.get("active"):
                     base = market.get("base", "")
-                    # Lista wykluczeń – akcje i indeksy tradycyjne na Bitget
                     if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
                         continue
                     
-                    # Pobieramy 24h wolumen do sortowania (jeśli brak, dajemy 0)
+                    # Wyciągamy czysty symbol bez dopiska :USDT, żeby API giełdy nie wypluwało błędu
+                    clean_symbol = market.get("symbol", "")
+                    if ":" in clean_symbol:
+                        clean_symbol = clean_symbol.split(":")[0]
+                    if not clean_symbol:
+                        clean_symbol = f"{base}/USDT"
+                        
                     info = market.get("info", {})
-                    # Bitget zwykle podaje wolumen w 'usdtVolume' lub 'baseVolume'
                     vol = float(info.get("usdtVolume", 0) or info.get("quoteVolume", 0) or 0)
-                    symbols_with_volume.append((symbol, vol))
+                    symbols_with_volume.append((clean_symbol, vol))
             
-            # Sortujemy od największego wolumenu do najmniejszego
-            symbols_with_volume.sort(key=lambda x: x[1], reverse=True)
+            # Usuwamy ewentualne duplikaty i sortujemy po wolumenie
+            unique_symbols = {s[0]: s[1] for s in symbols_with_volume}
+            sorted_symbols = sorted(unique_symbols.items(), key=lambda x: x[1], reverse=True)
             
-            # Ograniczamy do max_pairs
-            top_symbols = symbols_with_volume[:max_pairs]
+            top_symbols = sorted_symbols[:max_pairs]
             if top_symbols:
-                log.info("User %s ranked %s crypto USDT perpetuals by volume", self.user_id, len(top_symbols))
+                log.info("User %s ranked %s clean crypto USDT perpetuals", self.user_id, len(top_symbols))
                 return top_symbols
                 
         except Exception as e:
             log.error("Error ranking crypto symbols for user %s: %s", self.user_id, e)
             
         return []
+
 
     def run_once(self) -> None:
         self.refresh_credentials()
