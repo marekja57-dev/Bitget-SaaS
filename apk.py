@@ -60,6 +60,7 @@ DEFAULT_MAX_SCAN_PAIRS = 30
 MIN_QUOTE_VOLUME = 1_000_000.0
 WORKER_POLL_SECONDS = max(2, int(os.getenv("BOT_POLL_SECONDS", "5")))
 POSITION_GUARD_SECONDS = max(1, int(os.getenv("POSITION_GUARD_SECONDS", "3")))
+TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -97,6 +98,55 @@ def is_valid_usdt_linear_market(market: Dict[str, Any]) -> bool:
         and str(market.get("quote", "")).upper() == "USDT"
         and market.get("contract") is True
     )
+
+
+def fetch_tickers_safe(exchange, symbols: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    """Fetch tickers with bulk->per-symbol fallback. Never silently return an empty scan."""
+    if exchange is None:
+        return {}
+    try:
+        data = exchange.fetch_tickers(symbols) if symbols else exchange.fetch_tickers()
+        if isinstance(data, dict) and data:
+            return data
+    except Exception as exc:
+        log.warning("fetch_tickers failed (bulk): %s", exc)
+    result: Dict[str, Dict[str, Any]] = {}
+    if symbols is None:
+        try:
+            symbols = list(exchange.markets.keys())
+        except Exception:
+            symbols = []
+    for symbol in symbols:
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+            if ticker:
+                result[symbol] = ticker
+        except Exception as exc:
+            log.debug("fetch_ticker failed %s: %s", symbol, exc)
+    return result
+
+
+def rank_usdt_linear_symbols(exchange, max_pairs: int) -> List[Tuple[str, float]]:
+    """Return liquid USDT perpetuals ordered strictly by 24h quote volume."""
+    if exchange is None:
+        return []
+    try:
+        markets = exchange.load_markets()
+    except Exception as exc:
+        log.warning("load_markets failed during ranking: %s", exc)
+        return []
+    candidates = [symbol for symbol, market in markets.items() if is_valid_usdt_linear_market(market)]
+    if not candidates:
+        return []
+    tickers = fetch_tickers_safe(exchange, candidates)
+    ranked: List[Tuple[str, float]] = []
+    for symbol in candidates:
+        ticker = tickers.get(symbol) or {}
+        qv = safe_float(ticker.get("quoteVolume"))
+        if qv >= MIN_QUOTE_VOLUME:
+            ranked.append((symbol, qv))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked[:max(1, int(max_pairs))]
 
 # ============================================================
 # TRANSLATIONS
@@ -495,28 +545,56 @@ def blend_params(base: Dict[str, Any], opt: Dict[str, Any], base_weight: float =
 def signal_from_closed_candle(df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = .5) -> Tuple[str, Dict[str, float]]:
     fast, slow = int(cfg.get("ema_fast", 9)), int(cfg.get("ema_slow", 21))
     if fast >= slow:
-        fast, slow = min(fast, slow-1), max(slow, fast+1)
-    params = {"ema_fast": fast, "ema_slow": slow, "min_adx": float(cfg.get("min_adx", cfg.get("adx", 28))),
-              "max_rsi": float(cfg.get("max_rsi", 75)), "min_rsi": float(cfg.get("min_rsi", 25)),
-              "capital_multiplier": float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0)))}
+        fast = max(1, slow - 1)
+    params = {
+        "ema_fast": fast,
+        "ema_slow": slow,
+        "min_adx": float(cfg.get("min_adx", cfg.get("adx", 28))),
+        "max_rsi": float(cfg.get("max_rsi", 75)),
+        "min_rsi": float(cfg.get("min_rsi", 25)),
+        "capital_multiplier": float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))),
+    }
     if cfg.get("mode") == "Automatyczny":
         params = blend_params(params, get_dynamic_parameters(df, cfg.get("tf", "15m")), auto_base_influence)
     if params["ema_fast"] >= params["ema_slow"]:
-        params["ema_fast"], params["ema_slow"] = params["ema_slow"] - 1, params["ema_slow"]
+        params["ema_fast"] = max(1, params["ema_slow"] - 1)
+
     ind = calculate_indicators(df, int(params["ema_fast"]), int(params["ema_slow"]), 14)
     if len(ind) < max(60, int(params["ema_slow"]) + 20):
         return "NEUTRALNY", {}
-    prev, last = ind.iloc[-3], ind.iloc[-2]
-    values = {"price": safe_float(last["close"]), "adx": safe_float(last["adx"]), "rsi": safe_float(last["rsi"], 50),
-              "plus_di": safe_float(last["plus_di"]), "minus_di": safe_float(last["minus_di"]),
-              "ema_fast": safe_float(last["ema_fast"]), "ema_slow": safe_float(last["ema_slow"]), "macd_hist": safe_float(last["macd_hist"])}
-    long_cross = safe_float(prev["close"]) <= safe_float(prev["ema_fast"]) and safe_float(last["close"]) > safe_float(last["ema_fast"])
-    short_cross = safe_float(prev["close"]) >= safe_float(prev["ema_fast"]) and safe_float(last["close"]) < safe_float(last["ema_fast"])
-    long_trend = values["ema_fast"] > values["ema_slow"] and values["plus_di"] > values["minus_di"] and values["macd_hist"] > 0
-    short_trend = values["ema_fast"] < values["ema_slow"] and values["minus_di"] > values["plus_di"] and values["macd_hist"] < 0
-    long_ok = long_cross and long_trend and values["adx"] >= params["min_adx"] and values["rsi"] < params["max_rsi"]
-    short_ok = short_cross and short_trend and values["adx"] >= params["min_adx"] and values["rsi"] > params["min_rsi"]
-    return ("LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY"), {**values, **params}
+
+    # Always evaluate the last CLOSED candle. Trading is trend-following rather than
+    # waiting for a single EMA crossover, which previously made entries extremely rare.
+    last = ind.iloc[-2]
+    prev = ind.iloc[-3]
+    values = {
+        "price": safe_float(last["close"]),
+        "adx": safe_float(last["adx"]),
+        "rsi": safe_float(last["rsi"], 50),
+        "plus_di": safe_float(last["plus_di"]),
+        "minus_di": safe_float(last["minus_di"]),
+        "ema_fast": safe_float(last["ema_fast"]),
+        "ema_slow": safe_float(last["ema_slow"]),
+        "macd_hist": safe_float(last["macd_hist"]),
+        "prev_ema_fast": safe_float(prev["ema_fast"]),
+        "prev_ema_slow": safe_float(prev["ema_slow"]),
+    }
+    long_trend = (
+        values["ema_fast"] > values["ema_slow"]
+        and values["plus_di"] > values["minus_di"]
+        and values["macd_hist"] > 0
+        and values["adx"] >= params["min_adx"]
+        and values["rsi"] < params["max_rsi"]
+    )
+    short_trend = (
+        values["ema_fast"] < values["ema_slow"]
+        and values["minus_di"] > values["plus_di"]
+        and values["macd_hist"] < 0
+        and values["adx"] >= params["min_adx"]
+        and values["rsi"] > params["min_rsi"]
+    )
+    signal = "LONG" if long_trend else "SHORT" if short_trend else "NEUTRALNY"
+    return signal, {**values, **params}
 
 # ============================================================
 # ORDERS / RISK
@@ -635,6 +713,7 @@ class UserWorker:
         self.last_protection_check = 0.0
         self.markets_loaded = False
         self.markets: Dict[str, Any] = {}
+        self.last_candle_by_symbol_tf: Dict[Tuple[str, str], int] = {}
 
     def refresh_credentials(self) -> None:
         users = [u for u in get_all_trading_users() if u["id"] == self.user_id]
@@ -660,36 +739,9 @@ class UserWorker:
             return False
 
     def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
-        if not self.load_markets_safe():
-            return []
-        valid: List[Tuple[str, float]] = []
-        try:
-            tickers = self.exchange.fetch_tickers()
-        except Exception as exc:
-            log.warning("Bulk fetch_tickers failed user=%s; using per-symbol fallback: %s", self.user_id, exc)
-            tickers = {}
-            # Some exchanges/accounts reject the bulk endpoint. Fall back to
-            # liquid USDT perpetuals one by one instead of silently stopping trading.
-            candidates = [s for s, m in self.markets.items() if is_valid_usdt_linear_market(m)]
-            for symbol in candidates[:max(100, int(max_pairs) * 5)]:
-                try:
-                    t = self.exchange.fetch_ticker(symbol)
-                    qv = safe_float(t.get("quoteVolume"))
-                    if qv >= MIN_QUOTE_VOLUME:
-                        valid.append((symbol, qv))
-                except Exception:
-                    continue
-            valid.sort(key=lambda x: x[1], reverse=True)
-            return valid[:max(1, int(max_pairs))]
-        for symbol, ticker in tickers.items():
-            market = self.markets.get(symbol) or {}
-            if not is_valid_usdt_linear_market(market):
-                continue
-            qv = safe_float(ticker.get("quoteVolume"))
-            if qv >= MIN_QUOTE_VOLUME:
-                valid.append((symbol, qv))
-        valid.sort(key=lambda x: x[1], reverse=True)
-        return valid[:max(1, int(max_pairs))]
+        ranked = rank_usdt_linear_symbols(self.exchange, max_pairs)
+        log.info("User %s scan universe: %s liquid USDT perpetuals", self.user_id, len(ranked))
+        return ranked
 
     def run_once(self) -> None:
         self.refresh_credentials()
@@ -697,6 +749,7 @@ class UserWorker:
             return
         bots = load_active_bots(self.user_id)
         if not bots:
+            log.info("User %s: no active MTF bots", self.user_id)
             return
         risk = get_user_risk_settings(self.user_id)
         self.protect_open_positions(risk)
@@ -708,17 +761,14 @@ class UserWorker:
         balance = fetch_usdt_balance(self.exchange)
         free_balance = balance["free"]
         ranked = self.get_ranked_symbols(int(risk["max_scan_pairs"]))
-        if not ranked or free_balance <= 0:
+        if not ranked:
+            log.warning("User %s: scanner returned 0 liquid symbols", self.user_id)
             return
-        try:
-            tickers = self.exchange.fetch_tickers([s for s, _ in ranked])
-        except Exception:
-            tickers = {}
-            for sym, _ in ranked:
-                try:
-                    tickers[sym] = self.exchange.fetch_ticker(sym)
-                except Exception:
-                    pass
+        tickers = fetch_tickers_safe(self.exchange, [s for s, _ in ranked])
+        log.info("User %s: scanning %s symbols across %s timeframe bots; free balance=%.4f",
+                 self.user_id, len(ranked), list(bots.keys()), free_balance)
+        if free_balance <= 0:
+            log.warning("User %s: free USDT balance is %.4f; scanning continues but orders are disabled", self.user_id, free_balance)
         for tf, raw_cfg in list(bots.items()):
             if active_count >= int(risk["max_positions"]):
                 break
@@ -738,6 +788,10 @@ class UserWorker:
                     if len(ohlcv) < 3:
                         continue
                     closed_candle_ts = int(ohlcv[-2][0])
+                    candle_key = (tf, symbol)
+                    if self.last_candle_by_symbol_tf.get(candle_key) == closed_candle_ts:
+                        continue
+                    self.last_candle_by_symbol_tf[candle_key] = closed_candle_ts
                     if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
                         continue
                     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -1006,7 +1060,7 @@ def run_streamlit_app() -> None:
         ui_login(); st.stop()
     apply_mtf_to_session(st.session_state.user_id)
 
-    st.sidebar.selectbox("🌐 Język / Language", ["Polski", "English"], index=0 if st.session_state.lang == "Polski" else 1, key="lang_selector")
+    st.sidebar.selectbox("🌐 Language / Język", ["Polski", "English"], index=0 if st.session_state.lang == "Polski" else 1, key="lang_selector")
     st.session_state.lang = st.session_state.lang_selector
     st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
     st.sidebar.markdown(f"**{t('sidebar_role_admin') if is_user_admin() else t('sidebar_role_client')}**")
@@ -1044,15 +1098,14 @@ def run_streamlit_app() -> None:
     enable_roe = st.sidebar.checkbox(t("enable_roe"), bool(saved["enable_roe"]), key="enable_roe_guard")
     stop_roe = st.sidebar.slider(t("sl_roe"), .5, 50., float(saved["stop_roe"]), .5, key="custom_stop_loss_roe") if enable_roe else 999.
     take_roe = st.sidebar.slider(t("tp_roe"), 1., 100., float(saved["take_roe"]), .5, key="custom_take_profit_roe") if enable_roe else 999.
-    cooldown = st.sidebar.slider("Czas oddechu po SL/TP (minuty)", 1, 120, int(saved["cooldown_minutes"]), key="sb_cooldown_sl_tp")
+    cooldown = st.sidebar.slider("Cooldown after SL/TP (minutes)", 1, 120, int(saved["cooldown_minutes"]), key="sb_cooldown_sl_tp")
     st.sidebar.markdown("---"); st.sidebar.markdown(f"### {t('leverage_mgmt')}")
     lev_mode = st.sidebar.radio(t("lev_mode"), ["Autonomiczny (płynny w granicach limitu)","Ręczny"], index=0 if saved["leverage_mode"] != "Ręczny" else 1, key="sb_leverage_mode")
     max_lev = st.sidebar.slider(t("max_allowed_lev"),1,50,int(saved["max_leverage"]),key="sb_max_allowed_leverage")
     manual_lev = st.sidebar.slider(t("manual_lev"),1,50,int(saved["manual_leverage"]),key="sb_manual_leverage")
     st.sidebar.markdown("---")
     max_scan = st.sidebar.slider(t("max_pairs"),1,100,int(saved["max_scan_pairs"]),key="sb_max_fut_pairs")
-    auto_influence = st.sidebar.slider("🎚️ Wpływ suwaków bazowych w trybie Auto (%)",0,100,int(saved["auto_base_influence"]),5,key="sb_auto_base_influence")
-    refresh = st.sidebar.slider("Częstotliwość odświeżania widoku (sekundy)",5,60,15,key="sb_auto_refresh")
+    auto_influence = st.sidebar.slider("🎚️ Base slider influence in Auto mode (%)",0,100,int(saved["auto_base_influence"]),5,key="sb_auto_base_influence")
     risk_now={"max_single":max_single,"max_positions":max_pos,"enable_roe":enable_roe,"stop_roe":stop_roe,"take_roe":take_roe,"max_leverage":max_lev,"manual_leverage":manual_lev,"leverage_mode":lev_mode,"max_scan_pairs":max_scan,"auto_base_influence":auto_influence,"cooldown_minutes":cooldown}
     if risk_now != saved: save_user_risk_settings(st.session_state.user_id,risk_now)
 
@@ -1067,16 +1120,16 @@ def run_streamlit_app() -> None:
             f=st.number_input(f"EMA Szybka ({tf})",1,200,key=k_f); s=st.number_input(f"EMA Wolna ({tf})",2,300,key=k_s)
             adx=st.slider(f"Min ADX ({tf})",10.,50.,key=k_adx); maxr=st.slider(f"Max RSI Long ({tf})",50.,95.,key=k_max); minr=st.slider(f"Min RSI Short ({tf})",5.,50.,key=k_min)
             cap=st.number_input(f"CAP x ({tf})",.1,10.,float(st.session_state.get(k_cap,DEFAULT_TF_VALUES[tf]["cap_mult"])),.1,key=k_cap)
-            if f>=s: st.warning("EMA szybka musi być mniejsza od wolnej")
+            if f>=s: st.warning("Fast EMA must be lower than slow EMA")
             cfg={"mode":mode,"ema_fast":min(int(f),int(s)-1),"ema_slow":max(int(s),int(f)+1),"min_adx":float(adx),"max_rsi":float(maxr),"min_rsi":float(minr),"capital_multiplier":float(cap),"tf":tf}
             if active_tf:
-                st.success("🟢 AKTYWNY")
-                if st.button(f"Zatrzymaj {tf}",key=f"stop_{tf}",use_container_width=True):
+                st.success("🟢 ACTIVE")
+                if st.button(f"Stop {tf}",key=f"stop_{tf}",use_container_width=True):
                     st.session_state.active_mtf_bots.pop(tf,None); save_active_bots(st.session_state.user_id,st.session_state.active_mtf_bots); MANAGER.reconcile(); st.rerun()
             else:
-                if st.button(f"Uruchom {tf}",key=f"start_{tf}",use_container_width=True):
-                    if not st.session_state.api_key or not st.session_state.secret_key: st.error("Najpierw zapisz klucze API w panelu bocznym.")
-                    elif not is_user_paid(): st.error("Wymagana aktywna subskrypcja.")
+                if st.button(f"Start {tf}",key=f"start_{tf}",use_container_width=True):
+                    if not st.session_state.api_key or not st.session_state.secret_key: st.error("Save your API keys in the sidebar first.")
+                    elif not is_user_paid(): st.error("An active subscription is required.")
                     else:
                         st.session_state.active_mtf_bots[tf]=cfg; save_active_bots(st.session_state.user_id,st.session_state.active_mtf_bots); save_mtf_settings(st.session_state.user_id,current_mtf_payload()); MANAGER.reconcile(); st.rerun()
             st.markdown("</div>",unsafe_allow_html=True)
@@ -1087,7 +1140,7 @@ def run_streamlit_app() -> None:
         ex=get_exchange(st.session_state.api_key,st.session_state.secret_key,st.session_state.passphrase,st.session_state.selected_exchange)
         if ex:
             for p in fetch_positions_safe(ex): close_position(ex,p,"KILL SWITCH")
-        st.session_state.active_mtf_bots={}; save_active_bots(st.session_state.user_id,{}); MANAGER.reconcile(); st.success("🔴 KILL SWITCH WYKONANY."); st.rerun()
+        st.session_state.active_mtf_bots={}; save_active_bots(st.session_state.user_id,{}); MANAGER.reconcile(); st.success("🔴 KILL SWITCH EXECUTED."); st.rerun()
 
     st.markdown(f"<div class='gold-panel'><b style='color:#f3d57a'>💠 FUTURES CONTROL CENTER</b> <span style='float:right'>👤 {st.session_state.user_email} · {st.session_state.selected_exchange}</span></div>",unsafe_allow_html=True)
     ex=get_exchange(st.session_state.api_key,st.session_state.secret_key,st.session_state.passphrase,st.session_state.selected_exchange)
@@ -1113,32 +1166,49 @@ def run_streamlit_app() -> None:
     else: st.info(t("no_history"))
     st.markdown("</div>",unsafe_allow_html=True)
 
-    # Scanner: deliberately limited by selected max_scan, but it never changes the worker's scan universe.
+    # Scanner: show every selected liquid pair. If an exchange rejects bulk ticker
+    # requests, the fallback fetches individual tickers instead of producing a blank table.
     st.markdown(f"<div class='section-card'><div class='section-title'>{t('market_scanner_results')}</div>",unsafe_allow_html=True)
+    scan_now = st.button("🔎 RUN SCAN NOW / URUCHOM SKANOWANIE", use_container_width=True, key="run_scan_now")
     scanner=[]
+    ranked=[]
     if ex and st.session_state.active_mtf_bots:
         try:
-            ex.load_markets(); markets=ex.markets; tickers=ex.fetch_tickers()
-            ranked=sorted([(sym,safe_float(t.get("quoteVolume"))) for sym,t in tickers.items() if is_valid_usdt_linear_market(markets.get(sym,{})) and safe_float(t.get("quoteVolume"))>=MIN_QUOTE_VOLUME],key=lambda x:x[1],reverse=True)[:max_scan]
-            for tf,cfg in st.session_state.active_mtf_bots.items():
-                for sym,qv in ranked:
-                    try:
-                        data=ex.fetch_ohlcv(sym,tf,limit=min(180,max(100,int(cfg.get("ema_slow",21))+50)))
-                        if len(data)<3: continue
-                        df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
-                        sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100)
-                        scanner.append({"Interwał":tf,"Para":sym,"Cena":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Sygnał":sig,"Wolumen 24h":qv})
-                    except Exception as exc: log.debug("scanner %s %s: %s",tf,sym,exc)
-        except Exception as exc: log.warning("Scanner failed: %s",exc)
-    if scanner: st.dataframe(pd.DataFrame(scanner),use_container_width=True)
-    else: st.info(t("no_scanner"))
+            ranked = rank_usdt_linear_symbols(ex, max_scan)
+            if not ranked:
+                st.warning("Scanner found no liquid USDT perpetuals. Check exchange API permissions and market type.")
+            else:
+                for tf,cfg in st.session_state.active_mtf_bots.items():
+                    for sym,qv in ranked:
+                        try:
+                            data=ex.fetch_ohlcv(sym,tf,limit=min(180,max(100,int(cfg.get("ema_slow",21))+50)))
+                            if len(data)<3:
+                                scanner.append({"Timeframe":tf,"Pair":sym,"Price":None,"ADX":None,"RSI":None,"Signal":"NO DATA","24h Volume":qv,"Status":"Too little OHLCV data"})
+                                continue
+                            df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
+                            sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100)
+                            scanner.append({"Timeframe":tf,"Pair":sym,"Price":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Signal":sig,"24h Volume":qv,"Status":"OK"})
+                        except Exception as exc:
+                            scanner.append({"Timeframe":tf,"Pair":sym,"Price":None,"ADX":None,"RSI":None,"Signal":"ERROR","24h Volume":qv,"Status":str(exc)[:160]})
+                            log.warning("Scanner %s %s failed: %s",tf,sym,exc)
+        except Exception as exc:
+            log.exception("Scanner failed: %s",exc)
+            st.error(f"Scanner error: {exc}")
+    else:
+        st.info("Start at least one MTF bot to activate the scanner.")
+    if scanner:
+        st.dataframe(pd.DataFrame(scanner),use_container_width=True,hide_index=True)
+        ok_count=sum(1 for r in scanner if r.get("Status")=="OK")
+        long_count=sum(1 for r in scanner if r.get("Signal")=="LONG")
+        short_count=sum(1 for r in scanner if r.get("Signal")=="SHORT")
+        st.caption(f"Scanned rows: {len(scanner)} · OK: {ok_count} · LONG: {long_count} · SHORT: {short_count} · selected pairs: {len(ranked) if ex and st.session_state.active_mtf_bots else 0}")
     st.markdown("</div>",unsafe_allow_html=True)
 
     # IMPORTANT: do not use HTML meta-refresh here. A full browser reload can create
     # a new Streamlit session and make a logged-in user appear logged out.
     # The autonomous trading worker runs independently, so the UI does not need
     # to force-refresh the whole page. Use the sidebar refresh button instead.
-    if st.sidebar.button("🔄 Odśwież widok / Refresh view", use_container_width=True):
+    if st.sidebar.button("🔄 Refresh view / Odśwież widok", use_container_width=True):
         st.rerun()
 
 
