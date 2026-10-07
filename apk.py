@@ -862,9 +862,11 @@ class UserWorker:
                         active_count += 1
                         # Refresh the position map immediately to prevent another TF from entering same symbol.
                         fresh = find_position(fetch_positions_safe(self.exchange), symbol)
+                        self.cooldowns[symbol] = time.time() + 300
+                        pos_map[symbol] = True
                         if fresh:
-                            pos_map[symbol] = fresh
-                        self.cooldowns[symbol] = time.time() + 60
+                                pos_map[symbol] = fresh
+
                         log_trade(self.user_id, symbol, tf, "ENTRY", signal, entry_hint, amount,
                                   str(order.get("id", "")), f"SL={sl_price};TP={tp_price}")
                 except Exception as exc:
