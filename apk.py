@@ -746,50 +746,48 @@ class UserWorker:
                 self.markets_loaded = True
             
             for symbol, market in self.exchange.markets.items():
-                # Tylko aktywne kontrakty perpetual swap rozliczane w USDT
-                if market.get("swap") and market.get("quote") == "USDT" and market.get("active"):
-                    base = market.get("base", "")
+                if not market.get("active", True):
+                    continue
                     
-                    # Bezwzględne odrzucenie tradycyjnych aktywów, akcji i forexu
-                    if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
-                        continue
+                sym_str = market.get("symbol", symbol)
+                if "USDT" not in sym_str:
+                    continue
                     
-                    # Pobieramy poprawny, wspierany przez CCXT symbol
-                    clean_symbol = market.get("symbol")
-                    if not clean_symbol:
-                        clean_symbol = f"{base}/USDT"
-                        
-                    # Bezpieczne wyciągnięcie wolumenu obrotu w USDT
-                    info = market.get("info", {})
-                    raw_vol = (
-                        info.get("usdtVolume") or 
-                        info.get("quoteVolume") or 
-                        market.get("quoteVolume") or 
-                        0
-                    )
-                    try:
-                        vol = float(raw_vol)
-                    except (ValueError, TypeError):
-                        vol = 0.0
-                        
-                    symbols_with_volume.append((clean_symbol, vol))
+                base = market.get("base", "")
+                if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
+                    continue
+                
+                # Zabezpieczenie przed podwójnym sufiksem powodującym błąd API
+                clean_symbol = symbol.split(":")[0] if ":" in symbol else symbol
+                if "/" not in clean_symbol and base:
+                    clean_symbol = f"{base}/USDT"
+                    
+                info = market.get("info", {})
+                raw_val = (
+                    info.get("usdtVolume") or 
+                    info.get("quoteVolume") or 
+                    market.get("quoteVolume") or 
+                    0
+                )
+                try:
+                    vol = float(raw_val)
+                except (ValueError, TypeError):
+                    vol = 0.0
+                    
+                symbols_with_volume.append((clean_symbol, vol))
             
-            # Usuwamy duplikaty, zostawiając najwyższy wolumen
             unique_dict = {}
             for sym, vol in symbols_with_volume:
                 if sym not in unique_dict or vol > unique_dict[sym]:
                     unique_dict[sym] = vol
                     
-            # Sortowanie malejące: bezwzględnie od największego wolumenu do najmniejszego
             sorted_symbols = sorted(unique_dict.items(), key=lambda x: x[1], reverse=True)
-            
             top_symbols = sorted_symbols[:max_pairs]
+            
             if top_symbols:
-                log.info("Zeskanowano i posortowano %s par kryptowalutowych", len(top_symbols))
                 return top_symbols
-                
         except Exception as e:
-            log.error("Błąd podczas skanowania rynku: %s", e)
+            log.error("Error: %s", e)
             
         return []
 
