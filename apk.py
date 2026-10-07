@@ -894,7 +894,9 @@ class UserWorker:
                 self.run_once()
             except Exception:
                 log.exception("Worker top-level error for user %s", self.user_id)
-            stop_event.wait(WORKER_POLL_SECONDS)
+                risk_settings = get_user_risk_settings(self.user_id)
+            interval = float(risk_settings.get("scan_interval", 30))
+            stop_event.wait(interval)
         log.info("Worker stopped for user %s", self.user_id)
 
 
@@ -1105,6 +1107,7 @@ def run_streamlit_app() -> None:
     manual_lev = st.sidebar.slider(t("manual_lev"),1,50,int(saved["manual_leverage"]),key="sb_manual_leverage")
     st.sidebar.markdown("---")
     max_scan = st.sidebar.slider(t("max_pairs"),1,100,int(saved["max_scan_pairs"]),key="sb_max_fut_pairs")
+    scan_interval = st.sidebar.slider("Interwał skanowania (sekundy)", 5, 300, int(saved.get("scan_interval", 30)), 5, key="sb_scan_interval")
     auto_influence = st.sidebar.slider("🎚️ Base slider influence in Auto mode (%)",0,100,int(saved["auto_base_influence"]),5,key="sb_auto_base_influence")
     risk_now={"max_single":max_single,"max_positions":max_pos,"enable_roe":enable_roe,"stop_roe":stop_roe,"take_roe":take_roe,"max_leverage":max_lev,"manual_leverage":manual_lev,"leverage_mode":lev_mode,"max_scan_pairs":max_scan,"auto_base_influence":auto_influence,"cooldown_minutes":cooldown}
     if risk_now != saved: save_user_risk_settings(st.session_state.user_id,risk_now)
