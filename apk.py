@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -123,7 +124,7 @@ TRANSLATIONS = {
         "bot_control": "🤖 Panel Sterowania Botami MTF",
         "max_pairs": "Liczba par Futures do skanowania",
         "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
-        "wallet_futures": "🔵 Portfel Futures", 
+        "wallet_futures": "🔵 Portfel Futures",
         "free_balance": "Wolne",
         "session_results": "📊 Wyniki Sesji (PnL %)",
         "pnl_usdt": "PnL USDT",
@@ -228,6 +229,9 @@ def init_db() -> None:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS trade_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, created_at TEXT NOT NULL, symbol TEXT, timeframe TEXT, action TEXT, side TEXT, price REAL, amount REAL, order_id TEXT, message TEXT, FOREIGN KEY(user_id) REFERENCES users(id) )"""
         )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS entry_guard ( user_id INTEGER NOT NULL, symbol TEXT NOT NULL, locked_until REAL NOT NULL DEFAULT 0, last_candle INTEGER NOT NULL DEFAULT 0, last_side TEXT DEFAULT '', updated_at TEXT NOT NULL, PRIMARY KEY(user_id, symbol), FOREIGN KEY(user_id) REFERENCES users(id) )"""
+        )
         # Safe migration for databases from the user's previous version.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         for name, typ in [
@@ -331,6 +335,46 @@ def save_active_bots(user_id: int, bots: Dict[str, Dict[str, Any]]) -> None:
         conn.close()
 
 
+def get_entry_guard(user_id: int, symbol: str) -> Dict[str, Any]:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT locked_until,last_candle,last_side FROM entry_guard WHERE user_id=? AND symbol=?",
+            (int(user_id), symbol),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {"locked_until": 0.0, "last_candle": 0, "last_side": ""}
+    return {
+        "locked_until": safe_float(row[0]),
+        "last_candle": int(row[1] or 0),
+        "last_side": str(row[2] or ""),
+    }
+
+
+def set_entry_guard(user_id: int, symbol: str, locked_until: float, last_candle: int = 0, last_side: str = "") -> None:
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO entry_guard(user_id,symbol,locked_until,last_candle,last_side,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET locked_until=excluded.locked_until, last_candle=excluded.last_candle, last_side=excluded.last_side, updated_at=excluded.updated_at""",
+            (int(user_id), symbol, float(locked_until), int(last_candle or 0), str(last_side or ""), utc_now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def entry_guard_blocks(user_id: int, symbol: str, candle_ts: int = 0) -> bool:
+    guard = get_entry_guard(user_id, symbol)
+    now = time.time()
+    if guard["locked_until"] > now:
+        return True
+    if candle_ts and guard["last_candle"] == int(candle_ts):
+        return True
+    return False
+
+
 def log_trade(user_id: int, symbol: str, tf: str, action: str, side: str, price: float = 0.0, amount: float = 0.0, order_id: str = "", message: str = "") -> None:
     conn = db_connect()
     try:
@@ -379,6 +423,41 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def fetch_usdt_balance(exchange) -> Dict[str, float]:
+    """Return separate total/equity, used and free USDT values. CCXT exchanges do not all expose the same nested balance shape, so use both the currency object and the top-level free/used/total maps. Free balance is used for new-position sizing; total is displayed as the wallet balance. """
+    result = {"total": 0.0, "used": 0.0, "free": 0.0}
+    try:
+        bal = exchange.fetch_balance({"type": "swap"})
+        u = bal.get("USDT", {}) or {}
+
+        def nested(name: str) -> float:
+            value = safe_float(u.get(name))
+            if value > 0:
+                return value
+            top = bal.get(name, {}) or {}
+            if isinstance(top, dict):
+                return safe_float(top.get("USDT"))
+            return 0.0
+
+        total = nested("total")
+        free = nested("free")
+        used = nested("used")
+
+        # Some exchanges omit one of the three values. Derive it only when the
+        # other two are reliable, while keeping total/free visibly distinct.
+        if total <= 0 and free > 0 and used >= 0:
+            total = free + used
+        if used <= 0 and total > 0 and free >= 0 and total >= free:
+            used = max(0.0, total - free)
+        if free <= 0 and total > 0 and used >= 0 and total >= used:
+            free = max(0.0, total - used)
+
+        result.update({"total": max(0.0, total), "used": max(0.0, used), "free": max(0.0, free)})
+    except Exception as exc:
+        log.warning("USDT balance fetch failed: %s", exc)
+    return result
 
 
 def position_contracts(p: Dict[str, Any]) -> float:
@@ -755,6 +834,7 @@ class UserWorker:
         self.user_id = int(user["id"])
         self.exchange = get_exchange(user["api_key"], user["secret_key"], user["passphrase"], user["exchange"])
         self.cooldowns: Dict[str, float] = {}
+        self.entry_locks: Dict[str, float] = {}
         self.last_protection_check = 0.0
         self.last_scan = 0.0
         self.last_seen_bots: Dict[str, Any] = {}
@@ -787,7 +867,8 @@ class UserWorker:
         positions = fetch_positions_safe(self.exchange)
         pos_map = {p.get("symbol"): p for p in positions if p.get("symbol") and position_contracts(p) > 0}
         active_count = len(pos_map)
-        free_balance = self.fetch_free_balance()
+        balance_snapshot = fetch_usdt_balance(self.exchange)
+        free_balance = balance_snapshot["free"]
 
         valid = []
         for symbol, ticker in tickers.items():
@@ -809,16 +890,29 @@ class UserWorker:
             for symbol in symbols:
                 if active_count >= int(risk["max_positions"]):
                     break
-                if time.time() < self.cooldowns.get(symbol, 0):
+                now = time.time()
+                if now < self.cooldowns.get(symbol, 0):
+                    continue
+                if now < self.entry_locks.get(symbol, 0):
                     continue
                 if symbol in pos_map:
                     continue
+                if entry_guard_blocks(self.user_id, symbol):
+                    continue
                 try:
+                    # Re-check persistent guard before doing the relatively expensive OHLCV call.
+                    if entry_guard_blocks(self.user_id, symbol):
+                        continue
                     limit = min(300, max(100, int(cfg.get("ema_slow", 21)) + 50))
                     ohlcv = self.exchange.fetch_ohlcv(symbol, tf, limit=limit)
                     if not ohlcv:
                         continue
                     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    # The last candle may still be forming. The signal is generated from -2,
+                    # and this timestamp becomes the durable idempotency key for the entry.
+                    closed_candle_ts = int(ohlcv[-2][0]) if len(ohlcv) >= 2 else int(ohlcv[-1][0])
+                    if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
+                        continue
                     signal, vals = signal_from_closed_candle(df, cfg, float(risk["auto_base_influence"]) / 100.0)
                     if signal == "NEUTRALNY":
                         continue
@@ -854,6 +948,25 @@ class UserWorker:
                     if amount <= 0:
                         continue
 
+                    # Final exchange-side position check closes the race where the
+                    # previous run has placed an order but position visibility lagged.
+                    latest_positions = fetch_positions_safe(self.exchange)
+                    latest_position = find_position(latest_positions, symbol)
+                    if latest_position:
+                        pos_map[symbol] = latest_position
+                        continue
+                    if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
+                        continue
+
+                    # Lock BEFORE sending the order. This survives worker restarts and
+                    # prevents another timeframe/run from sending the same entry.
+                    lock_seconds = max(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0)
+                    self.entry_locks[symbol] = time.time() + lock_seconds
+                    set_entry_guard(
+                        self.user_id, symbol, time.time() + lock_seconds,
+                        closed_candle_ts, signal,
+                    )
+
                     order, sl_price, tp_price = place_entry_with_protection(
                         self.exchange, symbol, signal, amount, lev,
                         float(risk["stop_roe"]), float(risk["take_roe"]),
@@ -862,28 +975,37 @@ class UserWorker:
                         active_count += 1
                         # Refresh the position map immediately to prevent another TF from entering same symbol.
                         fresh = find_position(fetch_positions_safe(self.exchange), symbol)
-                        self.cooldowns[symbol] = time.time() + 300
-                        pos_map[symbol] = True
                         if fresh:
-                                pos_map[symbol] = fresh
-
+                            pos_map[symbol] = fresh
+                        # Keep the durable guard even when position reporting is delayed.
+                        self.cooldowns[symbol] = time.time() + lock_seconds
+                        set_entry_guard(
+                            self.user_id, symbol, time.time() + lock_seconds,
+                            closed_candle_ts, signal,
+                        )
                         log_trade(self.user_id, symbol, tf, "ENTRY", signal, entry_hint, amount,
                                   str(order.get("id", "")), f"SL={sl_price};TP={tp_price}")
+                    else:
+                        # Never immediately retry a failed/ambiguous request. The exchange
+                        # may have accepted the order while the API response was lost.
+                        retry_lock = max(30.0, float(risk.get("cooldown_minutes", 15)) * 60.0)
+                        self.cooldowns[symbol] = time.time() + retry_lock
+                        self.entry_locks[symbol] = time.time() + retry_lock
+                        set_entry_guard(
+                            self.user_id, symbol, time.time() + retry_lock,
+                            closed_candle_ts, signal,
+                        )
                 except Exception as exc:
+                    # Keep a short durable lock after unexpected errors so a transient
+                    # exception cannot turn into an order-spam loop.
+                    fail_lock = 30.0
+                    self.cooldowns[symbol] = time.time() + fail_lock
+                    self.entry_locks[symbol] = time.time() + fail_lock
+                    set_entry_guard(self.user_id, symbol, time.time() + fail_lock, closed_candle_ts if 'closed_candle_ts' in locals() else 0, signal if 'signal' in locals() else "",)
                     log.exception("Signal/order cycle failed user=%s tf=%s symbol=%s: %s", self.user_id, tf, symbol, exc)
 
     def fetch_free_balance(self) -> float:
-        try:
-            bal = self.exchange.fetch_balance({"type": "swap"})
-            usdt = bal.get("USDT", {}) or {}
-            free = safe_float(usdt.get("free"))
-            if free > 0:
-                return free
-            total = safe_float(usdt.get("total"))
-            used = safe_float(usdt.get("used"))
-            return max(0.0, total - used)
-        except Exception:
-            return 0.0
+        return fetch_usdt_balance(self.exchange)["free"]
 
     def protect_open_positions(self, bots: Dict[str, Any], risk: Dict[str, Any]) -> None:
         if not bool(risk["enable_roe"]):
@@ -907,12 +1029,20 @@ class UserWorker:
             roe = raw_move * max(1.0, lev)
             if roe <= -float(risk["stop_roe"]):
                 if close_position(self.exchange, p, f"ROE SL {roe:.2f}%"):
-                    self.cooldowns[p.get("symbol", "")] = time.time() + float(risk["cooldown_minutes"]) * 60
-                    log_trade(self.user_id, p.get("symbol", ""), "guard", "SL", position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
+                    symbol = p.get("symbol", "")
+                    guard_until = time.time() + float(risk["cooldown_minutes"]) * 60
+                    self.cooldowns[symbol] = guard_until
+                    self.entry_locks[symbol] = guard_until
+                    set_entry_guard(self.user_id, symbol, guard_until, 0, "SL")
+                    log_trade(self.user_id, symbol, "guard", "SL", position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
             elif roe >= float(risk["take_roe"]):
                 if close_position(self.exchange, p, f"ROE TP {roe:.2f}%"):
-                    self.cooldowns[p.get("symbol", "")] = time.time() + float(risk["cooldown_minutes"]) * 60
-                    log_trade(self.user_id, p.get("symbol", ""), "guard", "TP", position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
+                    symbol = p.get("symbol", "")
+                    guard_until = time.time() + float(risk["cooldown_minutes"]) * 60
+                    self.cooldowns[symbol] = guard_until
+                    self.entry_locks[symbol] = guard_until
+                    set_entry_guard(self.user_id, symbol, guard_until, 0, "TP")
+                    log_trade(self.user_id, symbol, "guard", "TP", position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
 
     def loop(self, stop_event: threading.Event) -> None:
         log.info("Worker started for user %s (%s)", self.user_id, self.user.get("email"))
@@ -1250,18 +1380,17 @@ def run_streamlit_app() -> None:
     positions = fetch_positions_safe(ex) if ex else []
     positions = [p for p in positions if position_contracts(p) > 0]
     total_unreal = sum(safe_float(p.get("unrealizedPnl")) for p in positions)
-    balance = 0.0; free = 0.0
-    if ex:
-        try:
-            bal = ex.fetch_balance({"type":"swap"}); u = bal.get("USDT",{}) or {}; balance = safe_float(u.get("free",0)); free = safe_float(u.get("free"))
-        except Exception: pass
+    balance_snapshot = fetch_usdt_balance(ex) if ex else {"total": 0.0, "used": 0.0, "free": 0.0}
+    balance = balance_snapshot["total"]
+    used = balance_snapshot["used"]
+    free = balance_snapshot["free"]
     if not st.session_state.session_baseline_locked and balance > 0:
         st.session_state.session_start_balance = balance; st.session_state.session_baseline_locked = True
     pnl_pct = ((balance - st.session_state.session_start_balance) / st.session_state.session_start_balance * 100) if st.session_state.session_start_balance > 0 else 0.0
     elapsed = max(0, int((datetime.now() - st.session_state.session_start_time).total_seconds())); h, rem = divmod(elapsed,3600); m,sx = divmod(rem,60)
     pnl_cls = "green" if pnl_pct >= 0 else "red"
     active_cls = "green" if st.session_state.active_mtf_bots else ""
-    st.markdown(f"""<div class='metric-grid'> <div class='metric-card'><div class='metric-label'>💰 {t('wallet_futures')}</div><div class='metric-value'>{balance:.2f} USDT</div><div class='metric-sub'>{t('free_balance')}: <b>{free:.2f} USDT</b></div></div> <div class='metric-card {pnl_cls}'><div class='metric-label'>📈 {t('session_results')}</div><div class='metric-value'>{pnl_pct:+.2f}%</div><div class='metric-sub'>{t('pnl_usdt')}: <b>{total_unreal:+.2f} USDT</b></div></div> <div class='metric-card'><div class='metric-label'>🎯 {t('slots_futures')}</div><div class='metric-value'>{len(positions)} / {max_pos}</div><div class='metric-sub'>Wolne sloty: <b>{max(0,max_pos-len(positions))}</b></div></div> <div class='metric-card {active_cls}'><div class='metric-label'>⚡ {t('session_time')}</div><div class='metric-value'>{h:02d}:{m:02d}:{sx:02d}</div><div class='metric-sub'>Aktywne boty: <b>{len(st.session_state.active_mtf_bots)}</b></div></div> </div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class='metric-grid'> <div class='metric-card'><div class='metric-label'>💰 {t('wallet_futures')}</div><div class='metric-value'>Saldo: {balance:.2f} USDT</div><div class='metric-sub'>Zajęte: <b>{used:.2f}</b> USDT · {t('free_balance')}: <b>{free:.2f}</b> USDT</div></div> <div class='metric-card {pnl_cls}'><div class='metric-label'>📈 {t('session_results')}</div><div class='metric-value'>{pnl_pct:+.2f}%</div><div class='metric-sub'>{t('pnl_usdt')}: <b>{total_unreal:+.2f} USDT</b></div></div> <div class='metric-card'><div class='metric-label'>🎯 {t('slots_futures')}</div><div class='metric-value'>{len(positions)} / {max_pos}</div><div class='metric-sub'>Wolne sloty: <b>{max(0,max_pos-len(positions))}</b></div></div> <div class='metric-card {active_cls}'><div class='metric-label'>⚡ {t('session_time')}</div><div class='metric-value'>{h:02d}:{m:02d}:{sx:02d}</div><div class='metric-sub'>Aktywne boty: <b>{len(st.session_state.active_mtf_bots)}</b></div></div> </div>""", unsafe_allow_html=True)
 
     st.markdown(f"<div class='section-card'><div class='section-title'>📊 {t('active_positions')}</div>", unsafe_allow_html=True)
     if positions: st.dataframe(pd.DataFrame(positions), use_container_width=True)
@@ -1285,103 +1414,24 @@ def run_streamlit_app() -> None:
     if ex and st.session_state.active_mtf_bots:
         try:
             ex.load_markets(); tickers = ex.fetch_tickers()
-            # IMPORTANT: max_scan is the user's requested scan universe.
-            # Never truncate the visible scanner to 20 pairs.
-            ranked = sorted(
-                [
-                    (sym, safe_float(t.get("quoteVolume")))
-                    for sym, t in tickers.items()
-                    if sym in ex.markets
-                    and ex.markets[sym].get("linear")
-                    and ex.markets[sym].get("quote") == "USDT"
-                    and ex.markets[sym].get("active", True)
-                    and safe_float(t.get("quoteVolume")) >= MIN_QUOTE_VOLUME
-                ],
-                key=lambda x: x[1],
-                reverse=True,
-            )[:max_scan]
-
-            for tf, cfg in st.session_state.active_mtf_bots.items():
-                for sym, qv in ranked:
-                    row = {
-                        "Interwał": tf,
-                        "Para": sym,
-                        "Wolumen 24h": qv,
-                        "Cena": None,
-                        "EMA Trend": "—",
-                        "DI Trend": "—",
-                        "ADX": None,
-                        "RSI": None,
-                        "Sygnał": "SKANOWANIE",
-                        "Decyzja": "OCZEKUJE",
-                    }
+            ranked = sorted([(sym,safe_float(t.get("quoteVolume"))) for sym,t in tickers.items()
+                             if sym in ex.markets and ex.markets[sym].get("linear") and ex.markets[sym].get("quote")=="USDT" and safe_float(t.get("quoteVolume"))>=MIN_QUOTE_VOLUME], key=lambda x:x[1], reverse=True)[:max_scan]
+            for tf,cfg in st.session_state.active_mtf_bots.items():
+                for sym,qv in ranked[:max_scan]:
                     try:
-                        data = ex.fetch_ohlcv(
-                            sym,
-                            tf,
-                            limit=min(200, max(100, int(cfg.get("ema_slow", 21)) + 50)),
-                        )
-                        if not data:
-                            row["Sygnał"] = "BRAK DANYCH"
-                            row["Decyzja"] = "POMINIĘTO"
-                            scanner.append(row)
-                            continue
-
-                        df = pd.DataFrame(
-                            data,
-                            columns=["timestamp", "open", "high", "low", "close", "volume"],
-                        )
-                        sig, vals = signal_from_closed_candle(
-                            df,
-                            {**cfg, "tf": tf},
-                            auto_influence / 100.0,
-                        )
-
-                        ema_fast = safe_float(vals.get("ema_fast"))
-                        ema_slow = safe_float(vals.get("ema_slow"))
-                        plus_di = safe_float(vals.get("plus_di"))
-                        minus_di = safe_float(vals.get("minus_di"))
-
-                        if ema_fast > ema_slow:
-                            ema_trend = "🟢 WZROSTOWY"
-                        elif ema_fast < ema_slow:
-                            ema_trend = "🔴 SPADKOWY"
-                        else:
-                            ema_trend = "⚪ BOCZNY"
-
-                        if plus_di > minus_di:
-                            di_trend = "🟢 LONG"
-                        elif minus_di > plus_di:
-                            di_trend = "🔴 SHORT"
-                        else:
-                            di_trend = "⚪ NEUTRALNY"
-
-                        row.update({
-                            "Cena": vals.get("price"),
-                            "EMA Trend": ema_trend,
-                            "DI Trend": di_trend,
-                            "ADX": round(safe_float(vals.get("adx")), 2),
-                            "RSI": round(safe_float(vals.get("rsi")), 2),
-                            "Sygnał": sig,
-                            "Decyzja": (
-                                "🟢 WEJŚCIE LONG"
-                                if sig == "LONG"
-                                else "🔴 WEJŚCIE SHORT"
-                                if sig == "SHORT"
-                                else "⚪ BRAK WEJŚCIA"
-                            ),
-                        })
-                    except Exception as exc:
-                        row["Sygnał"] = "BŁĄD"
-                        row["Decyzja"] = f"⚠️ {type(exc).__name__}"
-                    scanner.append(row)
+                        data=ex.fetch_ohlcv(sym,tf,limit=min(200,max(100,int(cfg.get("ema_slow",21))+50)))
+                        if data:
+                            df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
+                            sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100.0)
+                            scanner.append({"Interwał":tf,"Para":sym,"Cena":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Sygnał":sig,"Wolumen 24h":qv})
+                    except Exception: continue
         except Exception: pass
     if scanner: st.dataframe(pd.DataFrame(scanner), use_container_width=True)
     else: st.info(t("no_scanner"))
     st.markdown("</div>", unsafe_allow_html=True)
 
     gc.collect()
-    time.sleep(30)
+    time.sleep(refresh)
     st.rerun()
 
 
