@@ -737,32 +737,34 @@ class UserWorker:
             self.markets_loaded = False
             log.warning("load_markets failed user=%s: %s", self.user_id, exc)
             return False
-        
+
     def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
         symbols_with_volume = []
         try:
-            if not self.markets_loaded:
-                self.load_markets_safe()
+            if not self.markets_loaded or not self.exchange.markets:
+                self.exchange.load_markets()
+                self.markets_loaded = True
             
             for symbol, market in self.exchange.markets.items():
+                # Tylko aktywne kontrakty perpetual swap rozliczane w USDT
                 if market.get("swap") and market.get("quote") == "USDT" and market.get("active"):
                     base = market.get("base", "")
                     
-                    # Odrzucamy wszystko, co nie jest czystą kryptowalutą lub jest podejrzane
+                    # Bezwzględne odrzucenie tradycyjnych aktywów, akcji i forexu
                     if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
                         continue
                     
-                    clean_symbol = symbol.split(":")[0] if ":" in symbol else symbol
-                    if not "/" in clean_symbol and base:
+                    # Pobieramy poprawny, wspierany przez CCXT symbol
+                    clean_symbol = market.get("symbol")
+                    if not clean_symbol:
                         clean_symbol = f"{base}/USDT"
                         
-                    # Wyciąganie i konwersja wolumenu na float, żeby sortowanie działało poprawnie
+                    # Bezpieczne wyciągnięcie wolumenu obrotu w USDT
                     info = market.get("info", {})
                     raw_vol = (
                         info.get("usdtVolume") or 
                         info.get("quoteVolume") or 
                         market.get("quoteVolume") or 
-                        info.get("baseVolume") or 
                         0
                     )
                     try:
@@ -772,25 +774,24 @@ class UserWorker:
                         
                     symbols_with_volume.append((clean_symbol, vol))
             
-            # Usuwamy duplikaty (zostawiając najwyższy wolumen dla danej pary)
+            # Usuwamy duplikaty, zostawiając najwyższy wolumen
             unique_dict = {}
             for sym, vol in symbols_with_volume:
                 if sym not in unique_dict or vol > unique_dict[sym]:
                     unique_dict[sym] = vol
                     
-            # Sortujemy malejąco: od największego wolumenu do najmniejszego
+            # Sortowanie malejące: bezwzględnie od największego wolumenu do najmniejszego
             sorted_symbols = sorted(unique_dict.items(), key=lambda x: x[1], reverse=True)
             
             top_symbols = sorted_symbols[:max_pairs]
             if top_symbols:
-                log.info("User %s ranked %s crypto USDT perpetuals by volume", self.user_id, len(top_symbols))
+                log.info("Zeskanowano i posortowano %s par kryptowalutowych", len(top_symbols))
                 return top_symbols
                 
         except Exception as e:
-            log.error("Error ranking crypto symbols for user %s: %s", self.user_id, e)
+            log.error("Błąd podczas skanowania rynku: %s", e)
             
         return []
-
 
 
     def run_once(self) -> None:
