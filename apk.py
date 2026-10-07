@@ -1109,7 +1109,7 @@ def run_streamlit_app() -> None:
         if k not in st.session_state:
             st.session_state[k] = v
 
-    st.markdown("""<style> .stApp{background-color:#0d0b0a} section[data-testid='stSidebar']{background-color:#141110;border-right:2px solid #3d2f1f} .metric-card{border:2px solid #f3d57a;border-radius:10px;padding:12px;background:#141110}.metric-value{font-size:1.4rem;font-weight:bold;color:white}.metric-label{color:#f3d57a;font-weight:700} </style>""", unsafe_allow_html=True)
+    st.markdown("""<style> :root{--bg:#080706;--panel:#11100e;--panel2:#171411;--gold:#d9ad4a;--gold2:#f3d57a;--gold3:#8d6a27;--green:#1fc56b;--green2:#0c6b3a;--red:#e05252;--muted:#9d9487;--text:#f5f0e6} .stApp{background:radial-gradient(circle at 50% -10%,#292015 0%,#0b0908 35%,#070605 100%);color:var(--text)} [data-testid="stHeader"]{background:rgba(0,0,0,0)} section[data-testid='stSidebar']{background:linear-gradient(180deg,#15120f,#0b0908);border-right:2px solid var(--gold3)} section[data-testid='stSidebar'] .stMarkdown,section[data-testid='stSidebar'] label{color:#eee5d5} .block-container{padding-top:1.2rem;max-width:1600px} h1,h2,h3{color:var(--gold2)!important;letter-spacing:.4px} .premium-shell{background:linear-gradient(145deg,rgba(30,25,19,.96),rgba(10,9,8,.98));border:1px solid var(--gold3);box-shadow:0 0 0 1px rgba(243,213,122,.10) inset,0 12px 40px rgba(0,0,0,.45);border-radius:18px;padding:18px;margin-bottom:18px} .hero-wrapper{padding:4px;margin-bottom:18px} .retro-ornate-frame{position:relative;text-align:center;padding:28px 24px;border:2px solid var(--gold);border-radius:18px;background:linear-gradient(135deg,#17120c,#090807 55%,#18120b);box-shadow:0 0 0 5px #0b0907,0 0 0 7px var(--gold3),0 16px 45px rgba(0,0,0,.55)} .retro-ornate-frame:before,.retro-ornate-frame:after{content:'◆';position:absolute;color:var(--gold2);font-size:18px;top:8px}.retro-ornate-frame:before{left:14px}.retro-ornate-frame:after{right:14px} .retro-vintage-title{font-size:clamp(26px,4vw,48px);font-weight:900;letter-spacing:4px;color:var(--gold2);text-shadow:0 2px 16px rgba(243,213,122,.18);text-transform:uppercase} .retro-subtitle{margin-top:7px;color:#d4c5aa;font-size:13px;letter-spacing:2px;text-transform:uppercase} .dashboard-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(90deg,#15110c,#21190e,#15110c);border:1px solid var(--gold3);border-radius:14px;padding:11px 16px;margin:0 0 14px} .dashboard-banner .brand{color:var(--gold2);font-weight:900;letter-spacing:1.5px}.dashboard-banner .user{color:#cfc4b0;font-size:13px} .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:8px 0 20px} .metric-card{min-height:118px;border:1px solid var(--gold);border-radius:14px;padding:15px 17px;background:linear-gradient(145deg,#1a1510,#0e0c0a);box-shadow:0 5px 18px rgba(0,0,0,.35),0 0 0 1px rgba(243,213,122,.08) inset} .metric-card.green{border-color:#27b968;background:linear-gradient(145deg,#10251a,#0a110d)} .metric-card.red{border-color:#b84b4b;background:linear-gradient(145deg,#261313,#100b0b)} .metric-label{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--gold2);font-weight:800}.metric-card.green .metric-label{color:#6ee49b}.metric-card.red .metric-label{color:#f08a8a} .metric-value{font-size:25px;line-height:1.15;font-weight:900;color:#fff;margin-top:8px}.metric-sub{font-size:12px;color:#a9a092;margin-top:8px} .section-card{border:1px solid #765b2c;border-radius:15px;padding:14px 16px;background:linear-gradient(145deg,rgba(22,18,13,.96),rgba(10,9,8,.96));margin:12px 0;box-shadow:0 7px 24px rgba(0,0,0,.28)} .section-title{display:flex;align-items:center;gap:8px;color:var(--gold2);font-weight:900;font-size:16px;letter-spacing:.8px;margin-bottom:10px} .status-pill{display:inline-block;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:900;letter-spacing:.6px}.status-pill.on{background:rgba(31,197,107,.14);border:1px solid #22ad60;color:#58e893}.status-pill.off{background:rgba(224,82,82,.10);border:1px solid #913e3e;color:#f07d7d} .stButton>button{border:1px solid var(--gold3)!important;background:linear-gradient(180deg,#21190e,#100d09)!important;color:#f5e7c6!important;border-radius:9px!important;font-weight:800!important}.stButton>button:hover{border-color:var(--gold2)!important;box-shadow:0 0 14px rgba(243,213,122,.15)!important} .stDataFrame{border:1px solid #5e4926;border-radius:10px;overflow:hidden} .mtf-card{border:1px solid var(--gold3);border-radius:13px;background:linear-gradient(180deg,#17120d,#0d0b09);padding:10px;box-shadow:0 4px 15px rgba(0,0,0,.35);min-height:100%} .mtf-card.active{border-color:#25ba68;box-shadow:0 0 0 1px rgba(37,186,104,.18) inset,0 5px 18px rgba(0,0,0,.4)} .mtf-head{display:flex;justify-content:space-between;align-items:center;color:var(--gold2);font-weight:900;margin-bottom:8px} @media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}} @media(max-width:650px){.metric-grid{grid-template-columns:1fr}.retro-vintage-title{letter-spacing:2px}.dashboard-banner{flex-direction:column;align-items:flex-start}} </style>""", unsafe_allow_html=True)
 
     if not st.session_state.logged_in:
         ui_login()
@@ -1185,10 +1185,12 @@ def run_streamlit_app() -> None:
         save_user_risk_settings(st.session_state.user_id, risk_now)
 
     # MTF UI
-    st.subheader(f"🤖 {t('bot_control')}")
+    st.markdown("<div class='section-card'><div class='section-title'>🤖 MTF — KONTROLA AUTONOMICZNYCH BOTÓW</div><div style='color:#9d9487;font-size:12px'>Każdy interwał działa niezależnie, a ustawienia są zapisywane w bazie użytkownika.</div></div>", unsafe_allow_html=True)
     cols = st.columns(len(AVAILABLE_TIMEFRAMES))
     for i, tf in enumerate(AVAILABLE_TIMEFRAMES):
         with cols[i]:
+            active_tf = tf in st.session_state.active_mtf_bots
+            st.markdown(f"<div class='mtf-card {'active' if active_tf else ''}'><div class='mtf-head'><span>⏱ {tf}</span><span class='status-pill {'on' if active_tf else 'off'}'>{'● AKTYWNY' if active_tf else '○ GOTOWY'}</span></div>", unsafe_allow_html=True)
             k_mode, k_f, k_s, k_adx, k_max, k_min, k_cap = [f"{p}_{tf}" for p in ["radio_mode","ema_f","ema_s","adx","max_rsi","min_rsi","cap_mult"]]
             mode = st.radio(f"Tryb ({tf})", ["Automatyczny","Ręczny"], key=k_mode)
             f = st.number_input(f"EMA Szybka ({tf})", 1, 200, key=k_f)
@@ -1218,6 +1220,7 @@ def run_streamlit_app() -> None:
                         save_mtf_settings(st.session_state.user_id, current_mtf_payload())
                         MANAGER.reconcile()
                         st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # Always persist the MTF sliders after widget values are resolved.
     save_mtf_settings(st.session_state.user_id, current_mtf_payload())
@@ -1240,6 +1243,7 @@ def run_streamlit_app() -> None:
         st.rerun()
 
     # Live dashboard
+    st.markdown("<div class='dashboard-banner'><span class='brand'>💠 FUTURES CONTROL CENTER</span><span class='user'>👤 " + str(st.session_state.user_email) + " · " + str(st.session_state.selected_exchange) + "</span></div>", unsafe_allow_html=True)
     ex = get_exchange(st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase, st.session_state.selected_exchange)
     positions = fetch_positions_safe(ex) if ex else []
     positions = [p for p in positions if position_contracts(p) > 0]
@@ -1253,17 +1257,16 @@ def run_streamlit_app() -> None:
         st.session_state.session_start_balance = balance; st.session_state.session_baseline_locked = True
     pnl_pct = ((balance - st.session_state.session_start_balance) / st.session_state.session_start_balance * 100) if st.session_state.session_start_balance > 0 else 0.0
     elapsed = max(0, int((datetime.now() - st.session_state.session_start_time).total_seconds())); h, rem = divmod(elapsed,3600); m,sx = divmod(rem,60)
-    cards = st.columns(4)
-    cards[0].markdown(f"**{t('wallet_futures')}**\n\n### {balance:.2f} USDT\n{t('free_balance')}: {free:.2f}")
-    cards[1].markdown(f"**{t('session_results')}**\n\n### {pnl_pct:+.2f}%\n{t('pnl_usdt')}: {total_unreal:+.2f}")
-    cards[2].markdown(f"**{t('slots_futures')}**\n\n### {len(positions)} / {max_pos}")
-    cards[3].markdown(f"**{t('session_time')}**\n\n### {h:02d}:{m:02d}:{sx:02d}\nAktywne boty: {len(st.session_state.active_mtf_bots)}")
+    pnl_cls = "green" if pnl_pct >= 0 else "red"
+    active_cls = "green" if st.session_state.active_mtf_bots else ""
+    st.markdown(f"""<div class='metric-grid'> <div class='metric-card'><div class='metric-label'>💰 {t('wallet_futures')}</div><div class='metric-value'>{balance:.2f} USDT</div><div class='metric-sub'>{t('free_balance')}: <b>{free:.2f} USDT</b></div></div> <div class='metric-card {pnl_cls}'><div class='metric-label'>📈 {t('session_results')}</div><div class='metric-value'>{pnl_pct:+.2f}%</div><div class='metric-sub'>{t('pnl_usdt')}: <b>{total_unreal:+.2f} USDT</b></div></div> <div class='metric-card'><div class='metric-label'>🎯 {t('slots_futures')}</div><div class='metric-value'>{len(positions)} / {max_pos}</div><div class='metric-sub'>Wolne sloty: <b>{max(0,max_pos-len(positions))}</b></div></div> <div class='metric-card {active_cls}'><div class='metric-label'>⚡ {t('session_time')}</div><div class='metric-value'>{h:02d}:{m:02d}:{sx:02d}</div><div class='metric-sub'>Aktywne boty: <b>{len(st.session_state.active_mtf_bots)}</b></div></div> </div>""", unsafe_allow_html=True)
 
-    st.markdown("---"); st.subheader(t("active_positions"))
+    st.markdown(f"<div class='section-card'><div class='section-title'>📊 {t('active_positions')}</div>", unsafe_allow_html=True)
     if positions: st.dataframe(pd.DataFrame(positions), use_container_width=True)
     else: st.info(t("no_positions"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("---"); st.subheader(t("trade_history"))
+    st.markdown(f"<div class='section-card'><div class='section-title'>📜 {t('trade_history')}</div>", unsafe_allow_html=True)
     conn = db_connect()
     try:
         hist = pd.read_sql_query("SELECT created_at,symbol,timeframe,action,side,price,amount,order_id,message FROM trade_log WHERE user_id=? ORDER BY id DESC LIMIT 100", conn, params=(st.session_state.user_id,))
@@ -1273,26 +1276,107 @@ def run_streamlit_app() -> None:
         conn.close()
     if not hist.empty: st.dataframe(hist, use_container_width=True)
     else: st.info(t("no_history"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("---"); st.subheader(t("market_scanner_results"))
+    st.markdown(f"<div class='section-card'><div class='section-title'>🔎 {t('market_scanner_results')}</div>", unsafe_allow_html=True)
     scanner = []
     if ex and st.session_state.active_mtf_bots:
         try:
             ex.load_markets(); tickers = ex.fetch_tickers()
-            ranked = sorted([(sym,safe_float(t.get("quoteVolume"))) for sym,t in tickers.items()
-                             if sym in ex.markets and ex.markets[sym].get("linear") and ex.markets[sym].get("quote")=="USDT" and safe_float(t.get("quoteVolume"))>=MIN_QUOTE_VOLUME], key=lambda x:x[1], reverse=True)[:max_scan]
-            for tf,cfg in st.session_state.active_mtf_bots.items():
-                for sym,qv in ranked[:min(20,max_scan)]:
+            # IMPORTANT: max_scan is the user's requested scan universe.
+            # Never truncate the visible scanner to 20 pairs.
+            ranked = sorted(
+                [
+                    (sym, safe_float(t.get("quoteVolume")))
+                    for sym, t in tickers.items()
+                    if sym in ex.markets
+                    and ex.markets[sym].get("linear")
+                    and ex.markets[sym].get("quote") == "USDT"
+                    and ex.markets[sym].get("active", True)
+                    and safe_float(t.get("quoteVolume")) >= MIN_QUOTE_VOLUME
+                ],
+                key=lambda x: x[1],
+                reverse=True,
+            )[:max_scan]
+
+            for tf, cfg in st.session_state.active_mtf_bots.items():
+                for sym, qv in ranked:
+                    row = {
+                        "Interwał": tf,
+                        "Para": sym,
+                        "Wolumen 24h": qv,
+                        "Cena": None,
+                        "EMA Trend": "—",
+                        "DI Trend": "—",
+                        "ADX": None,
+                        "RSI": None,
+                        "Sygnał": "SKANOWANIE",
+                        "Decyzja": "OCZEKUJE",
+                    }
                     try:
-                        data=ex.fetch_ohlcv(sym,tf,limit=min(200,max(100,int(cfg.get("ema_slow",21))+50)))
-                        if data:
-                            df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
-                            sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100.0)
-                            scanner.append({"Interwał":tf,"Para":sym,"Cena":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Sygnał":sig,"Wolumen":qv})
-                    except Exception: continue
+                        data = ex.fetch_ohlcv(
+                            sym,
+                            tf,
+                            limit=min(200, max(100, int(cfg.get("ema_slow", 21)) + 50)),
+                        )
+                        if not data:
+                            row["Sygnał"] = "BRAK DANYCH"
+                            row["Decyzja"] = "POMINIĘTO"
+                            scanner.append(row)
+                            continue
+
+                        df = pd.DataFrame(
+                            data,
+                            columns=["timestamp", "open", "high", "low", "close", "volume"],
+                        )
+                        sig, vals = signal_from_closed_candle(
+                            df,
+                            {**cfg, "tf": tf},
+                            auto_influence / 100.0,
+                        )
+
+                        ema_fast = safe_float(vals.get("ema_fast"))
+                        ema_slow = safe_float(vals.get("ema_slow"))
+                        plus_di = safe_float(vals.get("plus_di"))
+                        minus_di = safe_float(vals.get("minus_di"))
+
+                        if ema_fast > ema_slow:
+                            ema_trend = "🟢 WZROSTOWY"
+                        elif ema_fast < ema_slow:
+                            ema_trend = "🔴 SPADKOWY"
+                        else:
+                            ema_trend = "⚪ BOCZNY"
+
+                        if plus_di > minus_di:
+                            di_trend = "🟢 LONG"
+                        elif minus_di > plus_di:
+                            di_trend = "🔴 SHORT"
+                        else:
+                            di_trend = "⚪ NEUTRALNY"
+
+                        row.update({
+                            "Cena": vals.get("price"),
+                            "EMA Trend": ema_trend,
+                            "DI Trend": di_trend,
+                            "ADX": round(safe_float(vals.get("adx")), 2),
+                            "RSI": round(safe_float(vals.get("rsi")), 2),
+                            "Sygnał": sig,
+                            "Decyzja": (
+                                "🟢 WEJŚCIE LONG"
+                                if sig == "LONG"
+                                else "🔴 WEJŚCIE SHORT"
+                                if sig == "SHORT"
+                                else "⚪ BRAK WEJŚCIA"
+                            ),
+                        })
+                    except Exception as exc:
+                        row["Sygnał"] = "BŁĄD"
+                        row["Decyzja"] = f"⚠️ {type(exc).__name__}"
+                    scanner.append(row)
         except Exception: pass
     if scanner: st.dataframe(pd.DataFrame(scanner), use_container_width=True)
     else: st.info(t("no_scanner"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
     gc.collect()
     time.sleep(refresh)
