@@ -739,27 +739,37 @@ class UserWorker:
             return False
 
     def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
-        # Zamiast zepsutej funkcji filtrującej, bierzemy bezpośrednio wszystkie aktywne swapy USDT z giełdy
-        symbols = []
+        symbols_with_volume = []
         try:
             if not self.markets_loaded:
                 self.load_markets_safe()
             
             for symbol, market in self.exchange.markets.items():
-                # Sprawdzamy czy to kontrakt typu swap (futures) rozliczany w USDT
+                # Sprawdzamy czy to swap USDT, ale odrzucamy akcje/wynalazki (np. GOOGL, MSFT, DELL, złoto itp.)
                 if market.get("linear") and market.get("quote") == "USDT" and market.get("active"):
-                    # Dodajemy symbol z domyślnym priorytetem/wolumenem np. 1.0
-                    symbols.append((symbol, 1.0))
+                    base = market.get("base", "")
+                    # Lista wykluczeń – akcje i indeksy tradycyjne na Bitget
+                    if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
+                        continue
+                    
+                    # Pobieramy 24h wolumen do sortowania (jeśli brak, dajemy 0)
+                    info = market.get("info", {})
+                    # Bitget zwykle podaje wolumen w 'usdtVolume' lub 'baseVolume'
+                    vol = float(info.get("usdtVolume", 0) or info.get("quoteVolume", 0) or 0)
+                    symbols_with_volume.append((symbol, vol))
             
-            # Jeśli znaleźliśmy symbole, ograniczamy do max_pairs
-            if symbols:
-                log.info("User %s forced scan universe: %s liquid USDT perpetuals", self.user_id, len(symbols[:max_pairs]))
-                return symbols[:max_pairs]
+            # Sortujemy od największego wolumenu do najmniejszego
+            symbols_with_volume.sort(key=lambda x: x[1], reverse=True)
+            
+            # Ograniczamy do max_pairs
+            top_symbols = symbols_with_volume[:max_pairs]
+            if top_symbols:
+                log.info("User %s ranked %s crypto USDT perpetuals by volume", self.user_id, len(top_symbols))
+                return top_symbols
                 
         except Exception as e:
-            log.error("Error forcing market symbols for user %s: %s", self.user_id, e)
+            log.error("Error ranking crypto symbols for user %s: %s", self.user_id, e)
             
-        log.warning("User %s scan universe fallback to empty", self.user_id)
         return []
 
     def run_once(self) -> None:
