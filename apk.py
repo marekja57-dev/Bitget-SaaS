@@ -1283,96 +1283,17 @@ def run_streamlit_app() -> None:
     if ex and st.session_state.active_mtf_bots:
         try:
             ex.load_markets(); tickers = ex.fetch_tickers()
-            # IMPORTANT: max_scan is the user's requested scan universe.
-            # Never truncate the visible scanner to 20 pairs.
-            ranked = sorted(
-                [
-                    (sym, safe_float(t.get("quoteVolume")))
-                    for sym, t in tickers.items()
-                    if sym in ex.markets
-                    and ex.markets[sym].get("linear")
-                    and ex.markets[sym].get("quote") == "USDT"
-                    and ex.markets[sym].get("active", True)
-                    and safe_float(t.get("quoteVolume")) >= MIN_QUOTE_VOLUME
-                ],
-                key=lambda x: x[1],
-                reverse=True,
-            )[:max_scan]
-
-            for tf, cfg in st.session_state.active_mtf_bots.items():
-                for sym, qv in ranked:
-                    row = {
-                        "Interwał": tf,
-                        "Para": sym,
-                        "Wolumen 24h": qv,
-                        "Cena": None,
-                        "EMA Trend": "—",
-                        "DI Trend": "—",
-                        "ADX": None,
-                        "RSI": None,
-                        "Sygnał": "SKANOWANIE",
-                        "Decyzja": "OCZEKUJE",
-                    }
+            ranked = sorted([(sym,safe_float(t.get("quoteVolume"))) for sym,t in tickers.items()
+                             if sym in ex.markets and ex.markets[sym].get("linear") and ex.markets[sym].get("quote")=="USDT" and safe_float(t.get("quoteVolume"))>=MIN_QUOTE_VOLUME], key=lambda x:x[1], reverse=True)[:max_scan]
+            for tf,cfg in st.session_state.active_mtf_bots.items():
+                for sym,qv in ranked[:min(20,max_scan)]:
                     try:
-                        data = ex.fetch_ohlcv(
-                            sym,
-                            tf,
-                            limit=min(200, max(100, int(cfg.get("ema_slow", 21)) + 50)),
-                        )
-                        if not data:
-                            row["Sygnał"] = "BRAK DANYCH"
-                            row["Decyzja"] = "POMINIĘTO"
-                            scanner.append(row)
-                            continue
-
-                        df = pd.DataFrame(
-                            data,
-                            columns=["timestamp", "open", "high", "low", "close", "volume"],
-                        )
-                        sig, vals = signal_from_closed_candle(
-                            df,
-                            {**cfg, "tf": tf},
-                            auto_influence / 100.0,
-                        )
-
-                        ema_fast = safe_float(vals.get("ema_fast"))
-                        ema_slow = safe_float(vals.get("ema_slow"))
-                        plus_di = safe_float(vals.get("plus_di"))
-                        minus_di = safe_float(vals.get("minus_di"))
-
-                        if ema_fast > ema_slow:
-                            ema_trend = "🟢 WZROSTOWY"
-                        elif ema_fast < ema_slow:
-                            ema_trend = "🔴 SPADKOWY"
-                        else:
-                            ema_trend = "⚪ BOCZNY"
-
-                        if plus_di > minus_di:
-                            di_trend = "🟢 LONG"
-                        elif minus_di > plus_di:
-                            di_trend = "🔴 SHORT"
-                        else:
-                            di_trend = "⚪ NEUTRALNY"
-
-                        row.update({
-                            "Cena": vals.get("price"),
-                            "EMA Trend": ema_trend,
-                            "DI Trend": di_trend,
-                            "ADX": round(safe_float(vals.get("adx")), 2),
-                            "RSI": round(safe_float(vals.get("rsi")), 2),
-                            "Sygnał": sig,
-                            "Decyzja": (
-                                "🟢 WEJŚCIE LONG"
-                                if sig == "LONG"
-                                else "🔴 WEJŚCIE SHORT"
-                                if sig == "SHORT"
-                                else "⚪ BRAK WEJŚCIA"
-                            ),
-                        })
-                    except Exception as exc:
-                        row["Sygnał"] = "BŁĄD"
-                        row["Decyzja"] = f"⚠️ {type(exc).__name__}"
-                    scanner.append(row)
+                        data=ex.fetch_ohlcv(sym,tf,limit=min(200,max(100,int(cfg.get("ema_slow",21))+50)))
+                        if data:
+                            df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
+                            sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100.0)
+                            scanner.append({"Interwał":tf,"Para":sym,"Cena":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Sygnał":sig,"Wolumen":qv})
+                    except Exception: continue
         except Exception: pass
     if scanner: st.dataframe(pd.DataFrame(scanner), use_container_width=True)
     else: st.info(t("no_scanner"))
