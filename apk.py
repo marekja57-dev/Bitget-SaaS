@@ -1379,7 +1379,7 @@ def run_streamlit_app() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
     gc.collect()
-    time.sleep(refresh)
+    time.sleep(30)
     st.rerun()
 
 
