@@ -713,76 +713,75 @@ def fetch_ohlcv_safe(exchange, symbol: str, timeframe: str, limit: int = 200) ->
 # ============================================================
 
 def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_period: int = 14, ) -> pd.DataFrame:
-    df = df.copy()
-
+    """Calculate real indicators from the supplied OHLCV candles only."""
+    out = df.copy()
     for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce")
 
-    df["ema_fast"] = df["close"].ewm(
-        span=max(1, int(ema_fast)), adjust=False
+    fast = max(1, int(ema_fast))
+    slow = max(fast + 1, int(ema_slow))
+    period = max(2, int(adx_period))
+
+    # EMA is ALWAYS calculated from the actual close series.
+    out["ema_fast"] = out["close"].ewm(
+        span=fast, adjust=False, min_periods=fast
     ).mean()
-    df["ema_slow"] = df["close"].ewm(
-        span=max(2, int(ema_slow)), adjust=False
+    out["ema_slow"] = out["close"].ewm(
+        span=slow, adjust=False, min_periods=slow
     ).mean()
 
-    exp1 = df["close"].ewm(span=12, adjust=False).mean()
-    exp2 = df["close"].ewm(span=26, adjust=False).mean()
-    df["macd"] = exp1 - exp2
-    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    df["macd_hist"] = df["macd"] - df["macd_signal"]
+    e12 = out["close"].ewm(span=12, adjust=False, min_periods=12).mean()
+    e26 = out["close"].ewm(span=26, adjust=False, min_periods=26).mean()
+    out["macd"] = e12 - e26
+    out["macd_signal"] = out["macd"].ewm(span=9, adjust=False, min_periods=9).mean()
+    out["macd_hist"] = out["macd"] - out["macd_signal"]
 
-    prev_close = df["close"].shift(1)
+    prev_close = out["close"].shift(1)
     tr = pd.concat([
-        (df["high"] - df["low"]).abs(),
-        (df["high"] - prev_close).abs(),
-        (df["low"] - prev_close).abs(),
+        out["high"] - out["low"],
+        (out["high"] - prev_close).abs(),
+        (out["low"] - prev_close).abs(),
     ], axis=1).max(axis=1)
 
-    up = df["high"].diff()
-    down = -df["low"].diff()
-    plus_dm = pd.Series(
-        np.where((up > down) & (up > 0), up, 0.0),
-        index=df.index,
+    up = out["high"].diff()
+    down = -out["low"].diff()
+    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=out.index)
+    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=out.index)
+
+    alpha = 1.0 / period
+    tr_s = tr.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    plus_s = plus_dm.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    minus_s = minus_dm.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+
+    tr_safe = tr_s.where(tr_s > 0)
+    out["plus_di"] = (100.0 * plus_s / tr_safe).clip(0.0, 100.0)
+    out["minus_di"] = (100.0 * minus_s / tr_safe).clip(0.0, 100.0)
+
+    di_sum = (out["plus_di"] + out["minus_di"]).where(
+        (out["plus_di"] + out["minus_di"]) > 0
     )
-    minus_dm = pd.Series(
-        np.where((down > up) & (down > 0), down, 0.0),
-        index=df.index,
-    )
+    out["dx"] = (
+        100.0 * (out["plus_di"] - out["minus_di"]).abs() / di_sum
+    ).clip(0.0, 100.0)
+    out["adx"] = out["dx"].ewm(
+        alpha=alpha, adjust=False, min_periods=period
+    ).mean().clip(0.0, 100.0)
 
-    alpha = 1.0 / max(2, int(adx_period))
-    tr_s = tr.ewm(alpha=alpha, adjust=False).mean().replace(0, np.nan)
-    plus_s = plus_dm.ewm(alpha=alpha, adjust=False).mean()
-    minus_s = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+    # Wilder RSI. No arbitrary 50 is inserted into valid market data.
+    delta = out["close"].diff()
+    gain = delta.clip(lower=0.0)
+    loss = -delta.clip(upper=0.0)
+    avg_gain = gain.ewm(alpha=1.0 / 14.0, adjust=False, min_periods=14).mean()
+    avg_loss = loss.ewm(alpha=1.0 / 14.0, adjust=False, min_periods=14).mean()
+    rs = avg_gain / avg_loss.where(avg_loss > 0)
+    out["rsi"] = (100.0 - 100.0 / (1.0 + rs))
+    out.loc[(avg_loss <= 0) & (avg_gain > 0), "rsi"] = 100.0
+    out.loc[(avg_gain <= 0) & (avg_loss > 0), "rsi"] = 0.0
+    out["rsi"] = out["rsi"].clip(0.0, 100.0)
 
-    df["plus_di"] = 100 * plus_s / tr_s
-    df["minus_di"] = 100 * minus_s / tr_s
-    di_sum = (df["plus_di"] + df["minus_di"]).replace(0, np.nan)
-    df["dx"] = (
-        100
-        * (df["plus_di"] - df["minus_di"]).abs()
-        / di_sum
-    )
-    df["adx"] = df["dx"].ewm(alpha=alpha, adjust=False).mean()
-
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0).ewm(alpha=1.0 / 14.0, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / 14.0, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - 100 / (1 + rs)
-    # A permanently rising series has loss=0 and therefore RSI=100; a
-    # permanently falling series has gain=0 and RSI=0. The old code turned
-    # both cases into NaN, which later became 0 in the scanner.
-    rsi = rsi.where(loss > 0, 100.0)
-    rsi = rsi.where(~((gain <= 0) & (loss > 0)), 0.0)
-    rsi = rsi.where((gain > 0) | (loss > 0), 50.0)
-    df["rsi"] = rsi.clip(0.0, 100.0)
-
-    # Keep the indicator columns numeric. Only the warm-up area is allowed
-    # to be NaN; the closed candle used by the signal must be finite.
-    for col in ["plus_di", "minus_di", "adx", "macd_hist", "rsi"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    return df
+    return out
 
 
 def get_dynamic_parameters(df: pd.DataFrame, tf: str) -> Dict[str, float]:
@@ -861,49 +860,47 @@ def blend_params( base: Dict[str, Any], opt: Dict[str, Any], base_weight: float 
 
 
 def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = 0.5, ) -> Tuple[str, Dict[str, float]]:
-    """Return a signal from the last fully closed candle. The 1D problem in the previous version came from two things: too little daily history and NaN RSI values being converted to zero. This function therefore validates the actual indicator row instead of silently turning missing values into a fake numeric signal. """
-    if df is None or len(df) < 70:
+    """Return signal + real indicator values from the last closed candle."""
+    if df is None or len(df) < 80:
         return "NEUTRALNY", {}
 
+    # These are the actual configured periods for THIS timeframe.
     fast = max(1, int(cfg.get("ema_fast", 9)))
-    slow = max(2, int(cfg.get("ema_slow", 21)))
-    if fast >= slow:
-        fast, slow = slow, fast
+    slow = max(fast + 1, int(cfg.get("ema_slow", 21)))
 
-    params = {
-        "ema_fast": fast,
-        "ema_slow": slow,
-        "min_adx": float(cfg.get("min_adx", cfg.get("adx", 28.0))),
-        "max_rsi": float(cfg.get("max_rsi", 75.0)),
-        "min_rsi": float(cfg.get("min_rsi", 25.0)),
-        "capital_multiplier": float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))),
-    }
+    min_adx = float(cfg.get("min_adx", cfg.get("adx", 28.0)))
+    max_rsi = float(cfg.get("max_rsi", 75.0))
+    min_rsi = float(cfg.get("min_rsi", 25.0))
+    cap_mult = float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0)))
 
+    # Automatic mode only adjusts thresholds/risk. It is NOT allowed to
+    # replace the EMA periods, otherwise the table can show indicators from
+    # parameters different from those configured for the timeframe.
     if cfg.get("mode") == "Automatyczny":
-        params = blend_params(
-            params,
-            get_dynamic_parameters(df, cfg.get("tf", "15m")),
-            auto_base_influence,
-        )
-        if params["ema_fast"] >= params["ema_slow"]:
-            params["ema_fast"], params["ema_slow"] = params["ema_slow"], params["ema_fast"]
+        auto = get_dynamic_parameters(df, cfg.get("tf", "15m"))
+        w = max(0.0, min(1.0, float(auto_base_influence)))
+        min_adx = min_adx * w + float(auto["min_adx"]) * (1.0 - w)
+        max_rsi = max_rsi * w + float(auto["max_rsi"]) * (1.0 - w)
+        min_rsi = min_rsi * w + float(auto["min_rsi"]) * (1.0 - w)
+        cap_mult = cap_mult * w + float(auto["capital_multiplier"]) * (1.0 - w)
 
-    ind = calculate_indicators(df, int(params["ema_fast"]), int(params["ema_slow"]), 14)
-    if len(ind) < max(70, int(params["ema_slow"]) + 20):
+    ind = calculate_indicators(df, fast, slow, 14)
+    if len(ind) < max(80, slow + 30):
         return "NEUTRALNY", {}
 
-    # -1 is the currently forming candle. Use only closed candles.
+    # -2 is the last completely closed candle.
     last = ind.iloc[-2]
     prev = ind.iloc[-3]
-    older = ind.iloc[-4]
 
     required = [
-        last["close"], last["adx"], last["rsi"], last["plus_di"],
-        last["minus_di"], last["ema_fast"], last["ema_slow"],
-        last["macd_hist"], prev["ema_fast"], prev["ema_slow"],
-        prev["plus_di"], prev["minus_di"], prev["macd_hist"],
+        "close", "adx", "rsi", "plus_di", "minus_di",
+        "ema_fast", "ema_slow", "macd_hist",
     ]
-    if not all(np.isfinite(safe_float(x, np.nan)) for x in required):
+    if any(not np.isfinite(safe_float(last[c], np.nan)) for c in required):
+        return "NEUTRALNY", {}
+    if any(not np.isfinite(safe_float(prev[c], np.nan)) for c in [
+        "ema_fast", "ema_slow", "plus_di", "minus_di", "macd_hist"
+    ]):
         return "NEUTRALNY", {}
 
     values = {
@@ -917,46 +914,50 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
         "macd_hist": float(last["macd_hist"]),
         "prev_ema_fast": float(prev["ema_fast"]),
         "prev_ema_slow": float(prev["ema_slow"]),
+        "capital_multiplier": cap_mult,
     }
 
-    long_alignment = (
+    # Hard sanity checks. Values outside the mathematical range are never
+    # allowed into SQLite or into the order decision.
+    if not (0.0 <= values["adx"] <= 100.0 and 0.0 <= values["rsi"] <= 100.0):
+        return "NEUTRALNY", {}
+    if not (0.0 <= values["plus_di"] <= 100.0 and 0.0 <= values["minus_di"] <= 100.0):
+        return "NEUTRALNY", {}
+    if values["price"] <= 0 or values["ema_fast"] <= 0 or values["ema_slow"] <= 0:
+        return "NEUTRALNY", {}
+
+    long_ok = (
         last["ema_fast"] > last["ema_slow"]
         and prev["ema_fast"] > prev["ema_slow"]
         and last["plus_di"] > last["minus_di"]
         and prev["plus_di"] >= prev["minus_di"]
         and last["macd_hist"] > 0
         and prev["macd_hist"] >= 0
+        and last["close"] > last["ema_fast"]
+        and values["adx"] >= min_adx
+        and 50.0 < values["rsi"] < max_rsi
     )
-    short_alignment = (
+    short_ok = (
         last["ema_fast"] < last["ema_slow"]
         and prev["ema_fast"] < prev["ema_slow"]
         and last["minus_di"] > last["plus_di"]
         and prev["minus_di"] >= prev["plus_di"]
         and last["macd_hist"] < 0
         and prev["macd_hist"] <= 0
-    )
-
-    long_ok = (
-        long_alignment
-        and last["close"] > last["ema_fast"]
-        and values["adx"] >= params["min_adx"]
-        and 50.0 < values["rsi"] < params["max_rsi"]
-    )
-    short_ok = (
-        short_alignment
         and last["close"] < last["ema_fast"]
-        and values["adx"] >= params["min_adx"]
-        and params["min_rsi"] < values["rsi"] < 50.0
+        and values["adx"] >= min_adx
+        and min_rsi < values["rsi"] < 50.0
     )
-
-    # Keep these calculations for diagnostics without making a fresh crossover
-    # mandatory. A trend can remain valid for many candles.
-    _fresh_long = older["ema_fast"] <= older["ema_slow"] and prev["ema_fast"] > prev["ema_slow"]
-    _fresh_short = older["ema_fast"] >= older["ema_slow"] and prev["ema_fast"] < prev["ema_slow"]
-    _ = (_fresh_long, _fresh_short)
 
     signal = "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY"
-    return signal, {**values, **params}
+    values.update({
+        "ema_fast": float(last["ema_fast"]),
+        "ema_slow": float(last["ema_slow"]),
+        "min_adx": min_adx,
+        "max_rsi": max_rsi,
+        "min_rsi": min_rsi,
+    })
+    return signal, values
 
 
 # ============================================================
@@ -1449,10 +1450,11 @@ class UserWorker:
         if cursor >= len(ranked):
             cursor = 0
 
-        # Start a fresh generation for this timeframe. Old symbols are removed
-        # before new rows are written, so the table cannot contain stale data.
+        # A scanner table is a live snapshot, not an archive. At the start of
+        # every full timeframe generation, remove ALL previous timeframe rows.
+        # Therefore 1h can never remain visible when the engine has moved to 4h.
         if cursor == 0:
-            clear_scanner_rows(self.user_id, tf)
+            clear_scanner_rows(self.user_id)
 
         batch = ranked[cursor:cursor + SCAN_BATCH_SIZE]
         if not batch:
@@ -1512,12 +1514,41 @@ class UserWorker:
                     not np.isfinite(safe_float(vals.get(k), np.nan))
                     for k in required
                 ):
-                    # Never turn missing indicator data into fake values.
-                    # The old fallbacks produced exactly the screenshot pattern:
-                    # ADX=0, RSI=50 and EMA values equal to price.
                     log.warning(
                         "Skipping invalid scanner row user=%s tf=%s symbol=%s vals=%s",
                         self.user_id, tf, symbol, vals,
+                    )
+                    continue
+
+                # Cross-check the returned indicators against the same OHLCV
+                # frame. This catches accidental price/fallback substitution.
+                closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+                if len(closes) < 30:
+                    continue
+                last_close = float(closes.iloc[-2])
+                local_min = float(closes.tail(30).min())
+                local_max = float(closes.tail(30).max())
+                ema_fast_val = float(vals["ema_fast"])
+                ema_slow_val = float(vals["ema_slow"])
+                if not (local_min <= ema_fast_val <= local_max and local_min <= ema_slow_val <= local_max):
+                    log.warning(
+                        "EMA sanity reject user=%s tf=%s symbol=%s close=%s ema_fast=%s ema_slow=%s range=%s..%s",
+                        self.user_id, tf, symbol, last_close, ema_fast_val, ema_slow_val, local_min, local_max,
+                    )
+                    continue
+
+                # EMA values must not be silently replaced with the current
+                # price. Exact equality is allowed mathematically, but for a
+                # normal EMA it is suspicious; reject it when both EMAs are
+                # exactly the close and the recent close range is non-flat.
+                if (
+                    abs(ema_fast_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
+                    and abs(ema_slow_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
+                    and local_max - local_min > max(1e-12, abs(last_close) * 1e-6)
+                ):
+                    log.warning(
+                        "Rejecting suspicious EMA=price row user=%s tf=%s symbol=%s",
+                        self.user_id, tf, symbol,
                     )
                     continue
 
@@ -2559,6 +2590,16 @@ def render_scanner_live(user_id: int, max_scan: int, active_count: int) -> None:
         max(100, max_scan * max(1, active_count)),
         active_tfs,
     )
+    # DB is deliberately a live snapshot. If a legacy row from an older
+    # generation survives, show only the timeframe with the newest update.
+    if not scanner_df.empty and "Aktualizacja" in scanner_df.columns:
+        latest_tf = (
+            scanner_df.groupby("Interwał")["Aktualizacja"]
+            .max()
+            .sort_values()
+            .index[-1]
+        )
+        scanner_df = scanner_df[scanner_df["Interwał"] == latest_tf].copy()
     if not scanner_df.empty:
         scanner_df["Wolumen_24h"] = pd.to_numeric(scanner_df["Wolumen_24h"], errors="coerce").fillna(0.0)
         scanner_df["ADX"] = pd.to_numeric(scanner_df["ADX"], errors="coerce").round(2)
@@ -3338,7 +3379,7 @@ def run_streamlit_app() -> None:
     # versions simply render the same persistent SQLite data once per app
     # rerun, so the trading worker is never dependent on fragment support.
     if callable(getattr(st, "fragment", None)):
-        @st.fragment(run_every=f"{refresh}s")
+        st.fragment(run_every=f"{refresh}s")
         def _live_scanner():
             render_scanner_live(
                 st.session_state.user_id,
