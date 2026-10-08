@@ -1493,20 +1493,6 @@ auto_base_influence = st.sidebar.slider(
 
 
 # ============================================================
-# INSTRUKCJA OBSŁUGI I REGULAMIN
-# ============================================================
-
-st.markdown("---")
-doc_col1, doc_col2 = st.columns(2)
-with doc_col1:
-    with st.expander(t("manual_title"), expanded=False):
-        st.markdown(t("manual_body"))
-with doc_col2:
-    with st.expander(t("terms_title"), expanded=False):
-        st.markdown(t("terms_body"))
-
-
-# ============================================================
 # AUTO REFRESH
 # ============================================================
 
@@ -2137,13 +2123,25 @@ if futures_ex:
                         continue
 
                     # ====================================================
-                    # EMA DO TABELI — RZECZYWISTE WARTOŚCI WSKAŹNIKA
+                    # EMA DO TABELI — ZAWSZE LICZONE W TYM MIEJSCU
                     # ====================================================
-                    # Obie wartości są pobierane bezpośrednio z kolumn EMA
-                    # wyliczonych z `close` tego samego df_sym, tej samej
-                    # pary i tego samego interwału. Nie używamy ticker.price.
-                    ema_fast_value = float(display_r["ema_fast"])
-                    ema_slow_value = float(display_r["ema_slow"])
+                    # e_fast/e_slow są WYŁĄCZNIE okresami (np. 15 i 34).
+                    # Do tabeli nigdy nie wolno przekazać tych dwóch liczb.
+                    # Wartość EMA jest liczona bezpośrednio z zamknięć tej
+                    # samej pary i tego samego interwału. Każda para ma
+                    # więc własną, aktualną wartość EMA.
+                    close_series = pd.to_numeric(
+                        df_sym["close"], errors="coerce"
+                    ).astype(float)
+                    ema_fast_series = close_series.ewm(
+                        span=int(e_fast), adjust=False, min_periods=int(e_fast)
+                    ).mean()
+                    ema_slow_series = close_series.ewm(
+                        span=int(e_slow), adjust=False, min_periods=int(e_slow)
+                    ).mean()
+
+                    ema_fast_value = float(ema_fast_series.iloc[-2])
+                    ema_slow_value = float(ema_slow_series.iloc[-2])
                     current_adx = float(display_r["adx"])
                     current_rsi = float(display_r["rsi"])
 
@@ -2210,11 +2208,12 @@ if futures_ex:
                             "Interwał": tf,
                             "Para": symbol,
                             "Cena": market_price,
-                            # W TABELI pokazujemy OKRESY EMA ustawione dla danego MTF.
-                            # Same wartości EMA (poziomy cenowe) nadal są liczone powyżej
-                            # i używane przez logikę sygnałów, ale nie są wyświetlane jako MA.
-                            "EMA Szybka": int(e_fast),
-                            "EMA Wolna": int(e_slow),
+                            # W TABELI pokazujemy RZECZYWISTE, DYNAMICZNIE
+                            # OBLICZONE wartości EMA z zamkniętej świecy.
+                            # e_fast/e_slow są tylko okresami (np. 9/21);
+                            # nie wolno ich wyświetlać zamiast wartości wskaźnika.
+                            "EMA Szybka": round(ema_fast_value, 8),
+                            "EMA Wolna": round(ema_slow_value, 8),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -2774,8 +2773,10 @@ st.subheader(
 )
 
 if scan_results:
-    # Jedna tabela skanera. EMA Szybka/Wolna pokazują OKRESY MA/EMA,
-    # np. 9 i 21 — nigdy ceny instrumentu.
+    # Jedna tabela skanera. EMA Szybka/Wolna pokazują RZECZYWISTE
+    # wartości EMA z zamkniętej świecy dla konkretnej pary i interwału.
+    # Okresy (np. 9/21 albo 15/34) są tylko parametrami obliczenia i
+    # NIGDY nie są wpisywane do kolumn EMA.
     scanner_columns = [
         "Interwał",
         "Para",
@@ -2796,8 +2797,8 @@ if scan_results:
         hide_index=True,
         column_config={
             "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
-            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka — okres", format="%d"),
-            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna — okres", format="%d"),
+            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka", format="%.8f"),
+            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna", format="%.8f"),
             "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
             "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
             "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
