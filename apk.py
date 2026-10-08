@@ -509,16 +509,50 @@ def create_stripe_checkout_session(user_email, price_id):
     return STRIPE_CHECKOUT_FALLBACK
 
 
+def _standard_ema(series: pd.Series, period: int) -> pd.Series:
+    """EMA z klasycznym seedem SMA, zgodnym z typowymi wykresami giełdowymi."""
+    period = max(1, int(period))
+    values = pd.to_numeric(series, errors="coerce").astype(float)
+    if len(values) < period:
+        return values.ewm(span=period, adjust=False, min_periods=1).mean()
+
+    alpha = 2.0 / (period + 1.0)
+    result = pd.Series(np.nan, index=values.index, dtype=float)
+    first_valid = values.first_valid_index()
+    if first_valid is None:
+        return result
+
+    start_pos = values.index.get_loc(first_valid)
+    valid = values.iloc[start_pos:]
+    if len(valid) < period:
+        return values.ewm(span=period, adjust=False, min_periods=1).mean()
+
+    seed_pos = start_pos + period - 1
+    seed = float(values.iloc[start_pos:seed_pos + 1].mean())
+    result.iloc[seed_pos] = seed
+
+    prev = seed
+    for pos in range(seed_pos + 1, len(values)):
+        x = values.iloc[pos]
+        if not np.isfinite(x):
+            result.iloc[pos] = np.nan
+            continue
+        prev = (x - prev) * alpha + prev
+        result.iloc[pos] = prev
+
+    return result
+
+
 def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     df = df.copy()
 
-    df["ema_fast"] = df["close"].ewm(
-        span=ema_fast, adjust=False
-    ).mean()
+    ema_fast = max(1, int(ema_fast))
+    ema_slow = max(2, int(ema_slow))
+    if ema_fast >= ema_slow:
+        ema_fast = max(1, ema_slow - 1)
 
-    df["ema_slow"] = df["close"].ewm(
-        span=ema_slow, adjust=False
-    ).mean()
+    df["ema_fast"] = _standard_ema(df["close"], ema_fast)
+    df["ema_slow"] = _standard_ema(df["close"], ema_slow)
 
     exp1 = df["close"].ewm(span=12, adjust=False).mean()
     exp2 = df["close"].ewm(span=26, adjust=False).mean()
@@ -1902,20 +1936,11 @@ if futures_ex:
                     if sym_volume <= 0:
                         continue
 
-                    limit_val = (
-                        min(
-                            150,
-                            max(
-                                60,
-                                e_slow + 20,
-                            ),
-                        )
-                        if tf == "1d"
-                        else max(
-                            100,
-                            e_slow + 30,
-                        )
-                    )
+                    # Nie wystarczy 60-100 świec: EMA musi mieć solidny
+                    # warm-up, inaczej wartości na skanerze mogą różnić się
+                    # od wykresu giełdy. Bierzemy co najmniej 300 świec,
+                    # a dla bardzo długiej EMA jeszcze więcej.
+                    limit_val = min(1000, max(300, e_slow * 8 + 50))
 
                     ohlcv = (
                         futures_ex.fetch_ohlcv(
@@ -2004,11 +2029,13 @@ if futures_ex:
                             "capital_multiplier"
                         ]
 
+                    # Szybka EMA zawsze musi mieć krótszy okres.
+                    # Nie zamieniamy ich miejscami, bo mogłoby to odwrócić
+                    # konfigurację użytkownika; korygujemy tylko konflikt.
+                    e_fast = max(1, int(e_fast))
+                    e_slow = max(2, int(e_slow))
                     if e_fast >= e_slow:
-                        e_fast, e_slow = (
-                            e_slow,
-                            e_fast,
-                        )
+                        e_fast = max(1, e_slow - 1)
 
                     df_sym = calculate_indicators(
                         df_sym,
@@ -2099,6 +2126,8 @@ if futures_ex:
                             "Cena": market_price,
                             "EMA Szybka": round(ema_fast_value, 8),
                             "EMA Wolna": round(ema_slow_value, 8),
+                            "Okres EMA szybkiej": int(e_fast),
+                            "Okres EMA wolnej": int(e_slow),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
