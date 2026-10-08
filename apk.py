@@ -2210,12 +2210,11 @@ if futures_ex:
                             "Interwał": tf,
                             "Para": symbol,
                             "Cena": market_price,
-                            # Wartości EMA są poziomami cenowymi wskaźnika —
-                            # tak definiuje się EMA. Okresy pozostają osobno.
-                            "EMA Szybka": round(ema_fast_value, 8),
-                            "EMA Wolna": round(ema_slow_value, 8),
-                            "EMA Szybka Okres": int(e_fast),
-                            "EMA Wolna Okres": int(e_slow),
+                            # W TABELI pokazujemy OKRESY EMA ustawione dla danego MTF.
+                            # Same wartości EMA (poziomy cenowe) nadal są liczone powyżej
+                            # i używane przez logikę sygnałów, ale nie są wyświetlane jako MA.
+                            "EMA Szybka": int(e_fast),
+                            "EMA Wolna": int(e_slow),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -2774,10 +2773,8 @@ st.subheader(
 )
 
 if scan_results:
-    # Jedna, uporządkowana tabela skanera.
-    # Pokazujemy wyłącznie AKTUALNE wartości EMA, bez dodatkowych
-    # kolumn z okresami EMA, które wcześniej wyglądały jak drugie
-    # wartości/„stałe liczby”.
+    # Jedna tabela skanera. EMA Szybka/Wolna pokazują OKRESY MA/EMA,
+    # np. 9 i 21 — nigdy ceny instrumentu.
     scanner_columns = [
         "Interwał",
         "Para",
@@ -2798,8 +2795,8 @@ if scan_results:
         hide_index=True,
         column_config={
             "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
-            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka — wartość", format="%.8f"),
-            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna — wartość", format="%.8f"),
+            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka — okres", format="%d"),
+            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna — okres", format="%d"),
             "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
             "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
             "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
