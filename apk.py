@@ -603,21 +603,24 @@ def calculate_risk_allocation(free_balance: float, entry: float, stop_price: flo
     if free_balance <= 0 or entry <= 0 or stop_price <= 0:
         return 0.0
     risk_amount = free_balance * DEFAULT_RISK_PCT
-    distance = max(abs(entry - stop_price) / entry, .005)
+    distance = abs(entry - stop_price) / entry
+    distance = max(distance, 0.005)
     risk_notional = risk_amount / distance
-    max_notional = min(free_balance * max(1, leverage) * .90, max_single * max(tf_multiplier, .1) * leverage)
-    return max(0, min(risk_notional, max_notional))
+    max_notional = min(free_balance * max(1, leverage) * 0.90, max_single * max(tf_multiplier, 0.1) * leverage)
+    return max(0.0, min(risk_notional, max_notional))
 
 
 def roe_to_price(entry: float, roe_percent: float, leverage: float, long: bool) -> float:
-    move = abs(float(roe_percent)) / max(float(leverage), 1) / 100
-    return entry * (1 - move if long else 1 + move)
+    # Approximate linear ROE relation used for local/exchange protection.
+    # Fee/funding are not included; local ROE guard remains the final backstop.
+    move = abs(float(roe_percent)) / max(float(leverage), 1.0) / 100.0
+    return entry * (1.0 - move if long else 1.0 + move)
 
 
 def create_protection_order(exchange, symbol: str, side: str, amount: float, trigger_price: float, kind: str) -> Optional[Dict[str, Any]]:
-    """Best-effort native protection. Polling ROE guard remains authoritative fallback."""
+    """Try CCXT unified trigger syntax first. The worker also has a polling guard, so failure of a native trigger order does not silently leave a position unprotected. """
     try:
-        params: Dict[str, Any] = {"reduceOnly": True, "triggerPrice": trigger_price}
+        params = {"reduceOnly": True, "triggerPrice": trigger_price}
         if kind == "stop":
             params["stopLossPrice"] = trigger_price
         else:
@@ -627,47 +630,51 @@ def create_protection_order(exchange, symbol: str, side: str, amount: float, tri
         log.warning("Native %s protection failed for %s: %s", kind, symbol, exc)
         return None
 
-def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float):
+
+def cancel_order_safe(exchange, order_id: str, symbol: str) -> None:
+    if not order_id:
+        return
+    try:
+        exchange.cancel_order(order_id, symbol)
+    except Exception:
+        pass
+
+
+def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[float]]:
     side = "buy" if signal == "LONG" else "sell"
     try:
-        order = exchange.create_market_order(symbol, side, amount)
+        order = exchange.create_order(symbol, "market", side, amount)
     except Exception as exc:
         log.error("ENTRY failed %s %s: %s", symbol, signal, exc)
         return None, None, None
 
+    # Use the exchange-reported average/fill price, never the pre-entry ticker price.
     entry = safe_float(order.get("average")) or safe_float(order.get("price"))
     if entry <= 0:
         try:
-            ticker = exchange.fetch_ticker(symbol)
-            entry = safe_float(ticker.get("last")) or safe_float(ticker.get("close")) or 0
+            p = find_position(fetch_positions_safe(exchange), symbol)
+            entry = safe_float(p.get("entryPrice")) if p else 0.0
         except Exception:
-            try:
-                p = find_position(fetch_positions_safe(exchange), symbol)
-                entry = safe_float(p.get("entryPrice")) if p else 0
-            except Exception:
-                entry = 0
-
+            entry = 0.0
     if entry <= 0:
-        log.error("Could not determine real entry price for %s", symbol)
-        return None, None, None
+        log.error("Could not determine real entry price for %s; local guard will use position entry when available", symbol)
+        return order, None, None
 
-    long_pos = signal == "LONG"
-    stop_price = roe_to_price(entry, stop_roe, leverage, long_pos)
-    take_price = roe_to_price(entry, take_roe, leverage, not long_pos)
-    close_side = "sell" if long_pos else "buy"
-    
+    long = signal == "LONG"
+    stop_price = roe_to_price(entry, stop_roe, leverage, long)
+    take_price = roe_to_price(entry, take_roe, leverage, not long)
+    close_side = "sell" if long else "buy"
     try:
         amount_prec = float(exchange.amount_to_precision(symbol, amount))
     except Exception:
         amount_prec = amount
-        
-    if amount_prec > 0:
-        sl_order = create_protection_order(exchange, symbol, close_side, amount_prec, stop_price, "stop")
-        tp_order = create_protection_order(exchange, symbol, close_side, amount_prec, take_price, "take")
-    else:
-        sl_order = tp_order = None
-        
-    log.info("Entry %s %s avg=%s SL=%s TP=%s", symbol, signal, entry, stop_price, take_price)
+    if amount_prec <= 0:
+        return order, stop_price, take_price
+
+    sl_order = create_protection_order(exchange, symbol, close_side, amount_prec, stop_price, "stop")
+    tp_order = create_protection_order(exchange, symbol, close_side, amount_prec, take_price, "take")
+    log.info("Entry %s %s avg=%s SL=%s TP=%s native_sl=%s native_tp=%s", symbol, signal, entry, stop_price, take_price,
+             bool(sl_order), bool(tp_order))
     return order, stop_price, take_price
 
 
