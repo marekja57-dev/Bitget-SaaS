@@ -1452,6 +1452,16 @@ class UserWorker:
                 fallback_price = safe_float(
                     ohlcv[-2][4] if len(ohlcv) >= 2 else 0.0
                 )
+                  # Obliczenie wartości EMA dla zamkniętej świecy
+                ema_f_period = int(cfg.get("ema_fast", 14))
+                ema_s_period = int(cfg.get("ema_slow", 30))
+                
+                fast_vals = df["close"].ewm(span=ema_f_period, adjust=False).mean()
+                slow_vals = df["close"].ewm(span=ema_s_period, adjust=False).mean()
+                
+                current_ema_fast = fast_vals.iloc[-2] if len(fast_vals) >= 2 else 0.0
+                current_ema_slow = slow_vals.iloc[-2] if len(slow_vals) >= 2 else 0.0
+
                 scanner_rows.append({
                     "timeframe": tf,
                     "symbol": symbol,
@@ -1459,8 +1469,8 @@ class UserWorker:
                     "price": safe_float(vals.get("price"), fallback_price),
                     "adx": safe_float(vals.get("adx"), 0.0),
                     "rsi": safe_float(vals.get("rsi"), 50.0),
-                    "ema_fast": safe_float(vals.get("ema_fast"), fallback_price),
-                    "ema_slow": safe_float(vals.get("ema_slow"), fallback_price),
+                    "ema_fast": safe_float(current_ema_fast, fallback_price),
+                    "ema_slow": safe_float(current_ema_slow, fallback_price),
                     "signal": signal,
                     "candle_ts": closed_candle_ts,
                 })
