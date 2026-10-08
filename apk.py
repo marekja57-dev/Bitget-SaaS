@@ -3298,7 +3298,7 @@ def run_streamlit_app() -> None:
     # versions simply render the same persistent SQLite data once per app
     # rerun, so the trading worker is never dependent on fragment support.
     if callable(getattr(st, "fragment", None)):
-@st.fragment(run_every=f"{refresh}s")
+        st.fragment(run_every=f"{refresh}s")
         def _live_scanner():
             render_scanner_live(
                 st.session_state.user_id,
