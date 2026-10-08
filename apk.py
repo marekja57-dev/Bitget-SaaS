@@ -1291,10 +1291,31 @@ def save_scanner_rows(user_id: int, rows: List[Dict[str, Any]]) -> None:
         conn.close()
 
 
-def read_scanner_rows( user_id: int, limit: int = 500, ) -> pd.DataFrame:
+def read_scanner_rows( user_id: int, limit: int = 500, active_timeframes: Optional[List[str]] = None, ) -> pd.DataFrame:
+    """Read only current, valid scanner snapshots. Old versions could leave rows containing ADX=0, RSI=50 and EMA=price. Those are not real indicator values and must never be displayed again. """
     conn = db_connect()
     try:
-        return pd.read_sql_query(""" SELECT timeframe AS Interwał, symbol AS Para, price AS Cena, adx AS ADX, rsi AS RSI, ema_fast AS EMA_Szybka, ema_slow AS EMA_Wolna, signal AS Sygnał, quote_volume AS Wolumen_24h, updated_at AS Aktualizacja FROM scanner_results WHERE user_id=? ORDER BY CASE signal WHEN 'LONG' THEN 0 WHEN 'SHORT' THEN 1 ELSE 2 END, quote_volume DESC LIMIT ? """, conn, params=(int(user_id), int(limit)))
+        where = [
+            "user_id=?",
+            "adx IS NOT NULL AND rsi IS NOT NULL",
+            "ema_fast IS NOT NULL AND ema_slow IS NOT NULL",
+            "adx >= 0 AND rsi >= 0 AND rsi <= 100",
+        ]
+        params: List[Any] = [int(user_id)]
+
+        if active_timeframes:
+            active = [tf for tf in active_timeframes if tf in AVAILABLE_TIMEFRAMES]
+            if active:
+                placeholders = ",".join("?" for _ in active)
+                where.append(f"timeframe IN ({placeholders})")
+                params.extend(active)
+
+        tf_order = "CASE timeframe WHEN '1h' THEN 0 WHEN '4h' THEN 1 WHEN '1d' THEN 2 WHEN '30m' THEN 3 WHEN '15m' THEN 4 WHEN '5m' THEN 5 WHEN '1m' THEN 6 ELSE 99 END"
+        signal_order = "CASE signal WHEN 'LONG' THEN 0 WHEN 'SHORT' THEN 1 ELSE 2 END"
+
+        query = f""" SELECT timeframe AS Interwał, symbol AS Para, price AS Cena, adx AS ADX, rsi AS RSI, ema_fast AS EMA_Szybka, ema_slow AS EMA_Wolna, signal AS Sygnał, quote_volume AS Wolumen_24h, updated_at AS Aktualizacja FROM scanner_results WHERE {' AND '.join(where)} ORDER BY {tf_order}, {signal_order}, quote_volume DESC, symbol ASC LIMIT ? """
+        params.append(int(limit))
+        return pd.read_sql_query(query, conn, params=params)
     except Exception:
         return pd.DataFrame()
     finally:
@@ -1321,6 +1342,7 @@ class UserWorker:
         self.last_scan_by_tf: Dict[str, float] = {}
         self.scan_cursor_by_tf: Dict[str, int] = {}
         self.scan_round_robin = 0
+        self.scan_tf_index = 0
         self.last_successful_scan_at = 0.0
         self.last_error_at = 0.0
         self.markets_loaded = False
@@ -1328,6 +1350,7 @@ class UserWorker:
         self.cached_tickers: Dict[str, Any] = {}
         self.last_ranked_at = 0.0
         self.cached_ranked: List[Tuple[str, float]] = []
+        self.scanner_initialized = False
 
     def run_once(self) -> None:
         if self.exchange is None:
@@ -1340,6 +1363,12 @@ class UserWorker:
         }
         if not bots:
             return
+
+        if not self.scanner_initialized:
+            # Remove rows left by an older bot process/version. New rows are
+            # then created only from the current active timeframe sequence.
+            clear_scanner_rows(self.user_id)
+            self.scanner_initialized = True
 
         risk = get_user_risk_settings(self.user_id)
 
@@ -1398,22 +1427,21 @@ class UserWorker:
             )
             return
 
-        # IMPORTANT: never scan every timeframe x every pair in one long
-        # blocking pass. That made the first scan take so long that the UI
-        # looked as if the background scanner had stopped. The worker now
-        # time-slices the workload: one timeframe and a small batch of pairs
-        # per cycle. SQLite keeps the results, so the table is continuously
-        # updated while the worker keeps moving through the full ranked list.
-        due_tfs = [
-            tf for tf in bots
-            if tf in AVAILABLE_TIMEFRAMES
-            and time.time() - self.last_scan_by_tf.get(tf, 0.0) >= SCAN_CACHE_SECONDS
-        ]
-        if not due_tfs:
+        # Scan active timeframes in a deterministic sequence. The requested
+        # priority is 1h -> 4h -> 1d -> 30m -> 15m -> 5m -> 1m. A timeframe
+        # is scanned through the whole ranked universe before the next one is
+        # started. This prevents 1h/4h rows from being mixed with stale rows
+        # from another interval and makes entry evaluation follow the same
+        # order every cycle.
+        tf_priority = ["1h", "4h", "1d", "30m", "15m", "5m", "1m"]
+        active_tfs = [tf for tf in tf_priority if tf in bots]
+        if not active_tfs:
             return
 
-        due_tfs.sort(key=lambda tf: self.last_scan_by_tf.get(tf, 0.0))
-        tf = due_tfs[0]
+        if self.scan_tf_index >= len(active_tfs):
+            self.scan_tf_index = 0
+
+        tf = active_tfs[self.scan_tf_index]
         cfg = dict(bots[tf])
         cfg["tf"] = tf
 
@@ -1432,8 +1460,15 @@ class UserWorker:
             batch = ranked[:SCAN_BATCH_SIZE]
 
         next_cursor = cursor + len(batch)
-        self.scan_cursor_by_tf[tf] = 0 if next_cursor >= len(ranked) else next_cursor
+        finished_tf = next_cursor >= len(ranked)
+        self.scan_cursor_by_tf[tf] = 0 if finished_tf else next_cursor
         self.last_scan_by_tf[tf] = time.time()
+
+        if finished_tf:
+            # Only after the complete 1h universe has been processed do we move
+            # to 4h (then 1d, etc.). The next timeframe gets a clean table
+            # generation and cannot inherit rows from the previous interval.
+            self.scan_tf_index = (self.scan_tf_index + 1) % len(active_tfs)
 
         scanner_rows: List[Dict[str, Any]] = []
 
@@ -2515,9 +2550,14 @@ def render_scanner_live(user_id: int, max_scan: int, active_count: int) -> None:
         f""" <div class="section-card"> <div class="section-title"> 🔎 {t('market_scanner_results')} <span class="scanner-live" style="float:right">● SKANER W TLE</span> </div> <div style="color:#9d9487;font-size:12px"> Worker skanuje partiami w tle i zapisuje wyniki w SQLite. Panel odświeża tylko ten fragment, bez zatrzymywania silnika. </div> """, unsafe_allow_html=True,
     )
 
+    active_tfs = [
+        tf for tf in ["1h", "4h", "1d", "30m", "15m", "5m", "1m"]
+        if tf in st.session_state.get("active_mtf_bots", {})
+    ]
     scanner_df = read_scanner_rows(
         user_id,
         max(100, max_scan * max(1, active_count)),
+        active_tfs,
     )
     if not scanner_df.empty:
         scanner_df["Wolumen_24h"] = pd.to_numeric(scanner_df["Wolumen_24h"], errors="coerce").fillna(0.0)
@@ -3298,7 +3338,7 @@ def run_streamlit_app() -> None:
     # versions simply render the same persistent SQLite data once per app
     # rerun, so the trading worker is never dependent on fragment support.
     if callable(getattr(st, "fragment", None)):
-        st.fragment(run_every=f"{refresh}s")
+        @st.fragment(run_every=f"{refresh}s")
         def _live_scanner():
             render_scanner_live(
                 st.session_state.user_id,
