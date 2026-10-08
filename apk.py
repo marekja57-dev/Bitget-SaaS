@@ -813,7 +813,7 @@ def get_exchange( api_k="", sec_k="", pass_k="", ex_name="Bitget", allow_public=
 
 
 def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, leverage, stop_loss_roe, take_profit_roe, ):
-    """Ustawia giełdowy SL i TP dokładnie według wartości ROE z panelu. ROE jest przeliczane na zmianę ceny instrumentu przez dźwignię: price_move = ROE / leverage Dzięki temu ustawienia z suwaków są identyczne z ochroną pozycji wystawioną na giełdzie, a nie tylko z lokalnym strażnikiem. """
+    """Place real exchange-side SL/TP using the exact ROE sliders. For Bitget USDT-M Futures we use Bitget's position TPSL endpoint directly, because that endpoint is specifically designed to attach position-level stop-loss and take-profit protection. For other exchanges we use CCXT's unified stopLossPrice/takeProfitPrice trigger orders. """
     result = {
         "sl_price": None,
         "tp_price": None,
@@ -824,14 +824,16 @@ def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, le
     }
 
     try:
-        entry = float(entry_price or 0)
+        entry = float(entry_price or 0.0)
         lev = max(1.0, float(leverage or 1.0))
         sl_roe = max(0.0, float(stop_loss_roe or 0.0))
         tp_roe = max(0.0, float(take_profit_roe or 0.0))
         qty = abs(float(amount or 0.0))
 
-        if entry <= 0 or qty <= 0 or sl_roe <= 0 or tp_roe <= 0:
-            raise ValueError("Nieprawidłowe parametry SL/TP.")
+        if entry <= 0 or qty <= 0:
+            raise ValueError("Nieprawidłowa cena wejścia lub ilość pozycji.")
+        if sl_roe <= 0 and tp_roe <= 0:
+            raise ValueError("Stop Loss i Take Profit są wyłączone.")
 
         side = str(position_side or "").lower()
         is_long = side in ("buy", "long")
@@ -842,80 +844,122 @@ def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, le
         tp_move = tp_roe / (100.0 * lev)
 
         if is_long:
-            sl_price = entry * (1.0 - sl_move)
-            tp_price = entry * (1.0 + tp_move)
-            close_side = "sell"
+            sl_price = entry * (1.0 - sl_move) if sl_roe > 0 else None
+            tp_price = entry * (1.0 + tp_move) if tp_roe > 0 else None
         else:
-            sl_price = entry * (1.0 + sl_move)
-            tp_price = entry * (1.0 - tp_move)
-            close_side = "buy"
+            sl_price = entry * (1.0 + sl_move) if sl_roe > 0 else None
+            tp_price = entry * (1.0 - tp_move) if tp_roe > 0 else None
 
-        sl_price = float(exchange.price_to_precision(symbol, sl_price))
-        tp_price = float(exchange.price_to_precision(symbol, tp_price))
-        result["sl_price"] = sl_price
-        result["tp_price"] = tp_price
+        if sl_price is not None:
+            sl_price = float(exchange.price_to_precision(symbol, sl_price))
+            result["sl_price"] = sl_price
+        if tp_price is not None:
+            tp_price = float(exchange.price_to_precision(symbol, tp_price))
+            result["tp_price"] = tp_price
+
+        # ------------------------------------------------------------
+        # BITGET USDT-FUTURES: use the native position TPSL endpoint.
+        # This avoids creating a normal market order with a trigger parameter,
+        # which can be rejected/ignored depending on the Bitget account mode.
+        # ------------------------------------------------------------
+        if getattr(exchange, "id", "") == "bitget":
+            method = getattr(exchange, "privateMixPostV2MixOrderPlacePosTpsl", None)
+            if method is None:
+                raise RuntimeError(
+                    "Zainstalowana wersja CCXT nie udostępnia Bitget "
+                    "place-pos-tpsl. Zaktualizuj pakiet ccxt."
+                )
+
+            market = exchange.market(symbol)
+            margin_coin = str(
+                market.get("settle")
+                or market.get("quote")
+                or "USDT"
+            ).upper()
+            product_type = "USDT-FUTURES"
+            # The app opens positions in one-way buy/sell mode.
+            hold_side = "buy" if is_long else "sell"
+
+            params = {
+                "marginCoin": margin_coin,
+                "productType": product_type,
+                "holdSide": hold_side,
+                "stpMode": "none",
+            }
+
+            if sl_price is not None:
+                params.update({
+                    "stopLossTriggerPrice": str(sl_price),
+                    "stopLossTriggerType": "mark_price",
+                    "stopLossExecutePrice": "0",
+                })
+            if tp_price is not None:
+                params.update({
+                    "stopSurplusTriggerPrice": str(tp_price),
+                    "stopSurplusTriggerType": "mark_price",
+                    "stopSurplusExecutePrice": "0",
+                })
+
+            # Position-level TPSL does not require a size. Bitget binds the
+            # protection to the currently open position on this symbol/side.
+            response = method(params)
+            if not isinstance(response, dict) or str(response.get("code", "00000")) != "00000":
+                raise RuntimeError(f"Bitget TPSL error: {response}")
+
+            if sl_price is not None:
+                result["sl_ok"] = True
+            if tp_price is not None:
+                result["tp_ok"] = True
+            return result
+
+        # ------------------------------------------------------------
+        # OTHER EXCHANGES: CCXT unified conditional orders.
+        # ------------------------------------------------------------
+        close_side = "sell" if is_long else "buy"
 
         def _submit(trigger_price, kind):
-            # Najpierw używamy zunifikowanego CCXT stopLossPrice /
-            # takeProfitPrice. To jest bezpieczniejsza ścieżka niż
-            # ręczne parametry zależne od konkretnej giełdy.
-            unified_key = "stopLossPrice" if kind == "SL" else "takeProfitPrice"
-            params = {
-                "reduceOnly": True,
-                unified_key: trigger_price,
-            }
-            try:
-                return exchange.create_order(
-                    symbol,
-                    "market",
-                    close_side,
-                    qty,
-                    None,
-                    params,
-                )
-            except Exception as first_error:
-                # Druga zunifikowana ścieżka CCXT dla giełd, które
-                # oczekują bezpośrednio triggerPrice.
-                trigger_direction = (
-                    "1" if trigger_price > entry else "2"
-                )
-                fallback = {
+            if trigger_price is None:
+                return None
+            if kind == "SL":
+                params = {
+                    "stopLossPrice": trigger_price,
                     "reduceOnly": True,
-                    "triggerPrice": trigger_price,
-                    "triggerDirection": trigger_direction,
                 }
-                try:
-                    return exchange.create_order(
-                        symbol,
-                        "market",
-                        close_side,
-                        qty,
-                        None,
-                        fallback,
-                    )
-                except Exception as second_error:
-                    raise RuntimeError(
-                        f"{kind}: {first_error}; fallback: {second_error}"
-                    ) from second_error
+            else:
+                params = {
+                    "takeProfitPrice": trigger_price,
+                    "reduceOnly": True,
+                }
+            return exchange.create_order(
+                symbol,
+                "market",
+                close_side,
+                qty,
+                None,
+                params,
+            )
 
-        try:
-            _submit(sl_price, "SL")
-            result["sl_ok"] = True
-        except Exception as exc:
-            result["sl_error"] = str(exc)
+        if sl_price is not None:
+            try:
+                _submit(sl_price, "SL")
+                result["sl_ok"] = True
+            except Exception as exc:
+                result["sl_error"] = str(exc)
 
-        try:
-            _submit(tp_price, "TP")
-            result["tp_ok"] = True
-        except Exception as exc:
-            result["tp_error"] = str(exc)
+        if tp_price is not None:
+            try:
+                _submit(tp_price, "TP")
+                result["tp_ok"] = True
+            except Exception as exc:
+                result["tp_error"] = str(exc)
 
     except Exception as exc:
-        result["sl_error"] = str(exc)
-        result["tp_error"] = str(exc)
+        if not result["sl_ok"]:
+            result["sl_error"] = str(exc)
+        if not result["tp_ok"]:
+            result["tp_error"] = str(exc)
 
     return result
-
 
 def calculate_risk_based_allocation( free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0, ):
     if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
@@ -1524,8 +1568,11 @@ if enable_roe_guard:
     )
 
 else:
-    custom_stop_loss_roe = 999.0
-    custom_take_profit_roe = 999.0
+    # Wyłączona ochrona = brak zlecenia SL/TP na giełdzie.
+    # Nie używamy wartości 999%, bo mogłaby przypadkowo stać się
+    # prawdziwym poziomem ochrony.
+    custom_stop_loss_roe = 0.0
+    custom_take_profit_roe = 0.0
     cooldown_after_sl_tp_minutes = 15
 
 
@@ -2588,7 +2635,7 @@ if futures_ex:
                                         "tp_price": None,
                                     }
 
-                                    if enable_roe_guard and actual_entry > 0 and filled_amount > 0:
+                                    if actual_entry > 0 and filled_amount > 0 and (custom_stop_loss_roe > 0 or custom_take_profit_roe > 0):
                                         protection = place_sl_tp_orders(
                                             futures_ex,
                                             symbol,
