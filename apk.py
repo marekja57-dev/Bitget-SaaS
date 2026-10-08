@@ -678,6 +678,33 @@ def place_entry_with_protection(exchange, symbol: str, signal: str, amount: floa
              bool(sl_order), bool(tp_order))
     return order, stop_price, take_price
 
+    def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
+        symbols_with_volume = []
+        try:
+            if not self.markets_loaded or not self.exchange.markets:
+                self.exchange.load_markets()
+                self.markets_loaded = True
+                
+            for symbol, market in self.exchange.markets.items():
+                if market.get('linear') and market.get('swap') and market.get('active'):
+                    if not symbol or '/USDT:USDT' not in symbol:
+                        continue
+                    
+                    base = market.get('base', '')
+                    if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
+                        continue
+                        
+                    info = market.get('info', {})
+                    vol = float(info.get('usdtVolume', 0) or info.get('quoteVolume', 0) or 0)
+                    symbols_with_volume.append((symbol, vol))
+                    
+            symbols_with_volume.sort(key=lambda x: x[1], reverse=True)
+            return symbols_with_volume[:max_pairs]
+        except Exception as e:
+            log.error(f"Błąd skanera: {e}")
+            return []
+
+
 # ============================================================
 # USER CONFIG / WORKER
 # ============================================================
