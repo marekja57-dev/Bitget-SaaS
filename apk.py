@@ -66,8 +66,8 @@ TRANSLATIONS = {
     "Polski": {
         "title": "BITGET FUTURES",
         "subtitle": "AUTONOMICZNY SYSTEM TRANSAKCYJNY",
-        "login_tab": "🔑 Zaloguj się",
-        "register_tab": "📝 Załóż konto",
+        "login_tab": "Zaloguj się",
+        "register_tab": "Załóż konto",
         "email_label": "Adres e-mail",
         "pass_label": "Hasło",
         "login_btn": "ZALOGUJ SIĘ",
@@ -79,51 +79,55 @@ TRANSLATIONS = {
         "reg_error_fill": "Wypełnij wszystkie pola.",
         "sidebar_role_admin": "Rola: Administrator",
         "sidebar_role_client": "Rola: Klient SaaS",
-        "logout_btn": "🚪 WYLOGUJ SIĘ",
-        "exchange_settings": "⚙️ Ustawienia Giełdy & API",
+        "logout_btn": "WYLOGUJ SIĘ",
+        "exchange_settings": "Ustawienia Giełdy & API",
         "select_exchange": "Wybierz Giełdę:",
         "api_keys_header": "Klucze API",
-        "save_keys_btn": "💾 ZAPISZ MOJE KLUCZE",
+        "save_keys_btn": "ZAPISZ MOJE KLUCZE",
         "keys_saved": "Zapisano klucze dla",
         "keys_error": "Wypełnij wymagane pola kluczy.",
-        "sub_zone": "🛡 Strefa Subskrypcji",
+        "sub_zone": "Strefa Subskrypcji",
         "sub_active": "Subskrypcja aktywna (Dostęp Pełny)",
-        "sub_inactive": "⚠️ Brak aktywnej subskrypcji",
+        "sub_inactive": "Brak aktywnej subskrypcji",
         "pay_btn": "OPŁAĆ DOSTĘP (49 PLN)",
-        "capital_risk": "💰 Kapitał i Ryzyko",
+        "capital_risk": "Kapitał i Ryzyko",
         "max_single": "Maksymalnie USDT na 1 pozycję (Bazowo)",
         "max_pos": "Maks. aktywne pozycje Futures",
-        "roe_guard": "🛑 Zarządzanie Ryzykiem ROE (SL / TP)",
+        "roe_guard": "Zarządzanie Ryzykiem ROE (SL / TP)",
         "enable_roe": "Włącz strażnika SL / TP ROE",
         "sl_roe": "Stop-Loss ROE (%)",
         "tp_roe": "Take-Profit ROE (%)",
-        "leverage_mgmt": "⚡ Zarządzanie Dźwignią",
+        "leverage_mgmt": "Zarządzanie Dźwignią",
         "lev_mode": "Tryb Dźwigni",
         "max_allowed_lev": "Maksymalna dozwolona dźwignia",
         "manual_lev": "Stała dźwignia Futures",
-        "bot_control": "🤖 Panel Sterowania Botami MTF",
+        "bot_control": "Panel Sterowania Botami MTF",
         "max_pairs": "Liczba par Futures do skanowania",
-        "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
-        "wallet_futures": "🔵 Portfel Futures",
+        "kill_switch": "ZAMKNIJ WSZYSTKO (KILL SWITCH)",
+        "wallet_futures": "Portfel Futures",
         "free_balance": "Wolne",
-        "session_results": "📊 Wyniki Sesji (PnL %)",
+        "session_results": "Wyniki Sesji (PnL %)",
         "pnl_usdt": "PnL USDT",
-        "slots_futures": "📈 Sloty Futures",
+        "slots_futures": "Sloty Futures",
         "active_max": "Aktywne / Maksymalne",
-        "session_time": "⏱ Czas Sesji",
-        "market_scanner_results": "📊 Wyniki Skanera Rynkowego",
-        "active_positions": "📈 Aktywne Pozycje Futures",
-        "trade_history": "📜 Historia Ostatnich Transakcji",
-        "admin_panel": "👑 Panel Administratora (Użytkownicy)",
+        "session_time": "Czas Sesji",
+        "market_scanner_results": "Wyniki Skanera Rynkowego",
+        "active_positions": "Aktywne Pozycje Futures",
+        "trade_history": "Historia Ostatnich Transakcji",
+        "admin_panel": "Panel Administratora (Użytkownicy)",
         "no_positions": "Brak otwartych pozycji futures.",
         "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
         "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania.",
+        "manual_title": "Instrukcja obsługi",
+        "terms_title": "Regulamin i zasady korzystania",
+        "manual_body": "Wybierz giełdę, zapisz klucze API, ustaw parametry MTF i uruchom wybrany interwał. Skaner pokazuje dane z tego samego rynku Futures. Ustawienia MTF są zapisywane dla użytkownika i przywracane po ponownym zalogowaniu.",
+        "terms_body": "System jest narzędziem wspomagającym handel. Użytkownik odpowiada za własne ustawienia, klucze API, środki oraz decyzje inwestycyjne. Handel Futures wiąże się z ryzykiem utraty kapitału. Nie udostępniaj kluczy API osobom trzecim.",
     },
     "English": {
         "title": "BITGET FUTURES",
         "subtitle": "AUTONOMOUS TRADING SYSTEM",
-        "login_tab": "🔑 Login",
-        "register_tab": "📝 Register",
+        "login_tab": "Login",
+        "register_tab": "Register",
         "email_label": "Email address",
         "pass_label": "Password",
         "login_btn": "SIGN IN",
@@ -135,45 +139,49 @@ TRANSLATIONS = {
         "reg_error_fill": "Please fill in all fields.",
         "sidebar_role_admin": "Role: Administrator",
         "sidebar_role_client": "Role: SaaS Client",
-        "logout_btn": "🚪 LOG OUT",
-        "exchange_settings": "⚙️ Exchange & API Settings",
+        "logout_btn": "LOG OUT",
+        "exchange_settings": "Exchange & API Settings",
         "select_exchange": "Select Exchange:",
         "api_keys_header": "API Keys",
-        "save_keys_btn": "💾 SAVE MY KEYS",
+        "save_keys_btn": "SAVE MY KEYS",
         "keys_saved": "Keys saved for",
         "keys_error": "Please fill in required key fields.",
-        "sub_zone": "🛡️ Subscription Zone",
+        "sub_zone": "Subscription Zone",
         "sub_active": "Subscription active (Full Access)",
-        "sub_inactive": "⚠️ No active subscription",
+        "sub_inactive": "No active subscription",
         "pay_btn": "PAY ACCESS (49 PLN)",
-        "capital_risk": "💰 Capital & Risk",
+        "capital_risk": "Capital & Risk",
         "max_single": "Max USDT per position (Base)",
         "max_pos": "Max active Futures positions",
-        "roe_guard": "🛑 ROE Risk Management (SL / TP)",
+        "roe_guard": "ROE Risk Management (SL / TP)",
         "enable_roe": "Enable SL / TP ROE guard",
         "sl_roe": "Stop-Loss ROE (%)",
         "tp_roe": "Take-Profit ROE (%)",
-        "leverage_mgmt": "⚡ Leverage Management",
+        "leverage_mgmt": "Leverage Management",
         "lev_mode": "Leverage Mode",
         "max_allowed_lev": "Maximum allowed leverage",
         "manual_lev": "Fixed Futures leverage",
-        "bot_control": "🤖 Multi-Timeframe Bot Control Panel",
+        "bot_control": "Multi-Timeframe Bot Control Panel",
         "max_pairs": "Number of Futures pairs to scan",
-        "kill_switch": "🔴 CLOSE ALL (KILL SWITCH)",
-        "wallet_futures": "🔵 Futures Wallet",
+        "kill_switch": "CLOSE ALL (KILL SWITCH)",
+        "wallet_futures": "Futures Wallet",
         "free_balance": "Free",
-        "session_results": "📊 Session Results (PnL %)",
+        "session_results": "Session Results (PnL %)",
         "pnl_usdt": "PnL USDT",
-        "slots_futures": "📈 Futures Slots",
+        "slots_futures": "Futures Slots",
         "active_max": "Active / Maximum",
-        "session_time": "⏱ Session Time",
-        "market_scanner_results": "📊 Market Scanner Results",
-        "active_positions": "📈 Active Futures Positions",
-        "trade_history": "📜 Recent Trade History",
-        "admin_panel": "👑 Admin Panel (Users)",
+        "session_time": "Session Time",
+        "market_scanner_results": "Market Scanner Results",
+        "active_positions": "Active Futures Positions",
+        "trade_history": "Recent Trade History",
+        "admin_panel": "Admin Panel (Users)",
         "no_positions": "No open futures positions.",
         "no_history": "No recorded trades in this session.",
         "no_scanner": "No active MTF bots or scanner results.",
+        "manual_title": "User Manual",
+        "terms_title": "Terms and Usage Rules",
+        "manual_body": "Select an exchange, save the API keys, configure MTF parameters and start the selected timeframe. The scanner uses data from the same Futures market. MTF settings are saved per user and restored after login.",
+        "terms_body": "The system is a trading assistance tool. The user is responsible for settings, API keys, funds and trading decisions. Futures trading involves risk of capital loss. Do not share API keys with third parties.",
     },
 }
 
@@ -913,7 +921,7 @@ if st.query_params.get("success") == "true":
             pass
 
     st.success(
-        "🎉 Płatność zakończona sukcesem! "
+        "Płatność zakończona sukcesem! "
         "Twoja subskrypcja została aktywowana."
     )
     st.query_params.clear()
@@ -924,7 +932,7 @@ if st.query_params.get("success") == "true":
 # ============================================================
 
 st.markdown(
-    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } </style> """,
+    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } /* Spójna typografia panelu: taka sama rodzina liter jak logowanie i zielone kafelki. */ h1, h2, h3, h4, h5, h6, [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6 { font-family: 'Cinzel', serif !important; } h1, h2, h3, h4, h5, h6 { color: #f3d57a !important; letter-spacing: 0.5px; } [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label { color: #e6c687 !important; } [data-testid="stExpander"] summary p { font-family: 'Cinzel', serif !important; color: #f3d57a !important; font-weight: 700 !important; } </style> """,
     unsafe_allow_html=True,
 )
 
@@ -1111,7 +1119,7 @@ apply_mtf_to_session(st.session_state.get("user_id"))
 # ============================================================
 
 st.session_state.lang = st.sidebar.selectbox(
-    "🌐 Język / Language",
+    "Język / Language",
     ["Polski", "English"],
     index=(
         0
@@ -1128,7 +1136,7 @@ st.session_state.lang = st.sidebar.selectbox(
 # ============================================================
 
 st.sidebar.markdown(
-    f"### 👤 {st.session_state.get('user_email', '')}"
+    f"### {st.session_state.get('user_email', '')}"
 )
 
 if is_user_admin():
@@ -1194,7 +1202,7 @@ st.session_state.selected_exchange = selected_exchange
 
 st.sidebar.markdown("---")
 st.sidebar.subheader(
-    f"🔑 {t('api_keys_header')} ({selected_exchange})"
+    f"{t('api_keys_header')} ({selected_exchange})"
 )
 
 input_api = st.sidebar.text_input(
@@ -1293,7 +1301,7 @@ st.sidebar.link_button(
 
 if ALLOW_TEST_ACTIVATION:
     if st.sidebar.button(
-        "⚡ [TEST] Aktywuj dostęp natychmiast",
+        "[TEST] Aktywuj dostęp natychmiast",
         use_container_width=True,
     ):
         st.session_state.stripe_paid = True
@@ -1453,7 +1461,7 @@ max_fut_scan_pairs = st.sidebar.slider(
 st.sidebar.markdown("---")
 
 auto_base_influence = st.sidebar.slider(
-    "🎚️ Wpływ suwaków bazowych w trybie Auto (%)",
+    "Wpływ suwaków bazowych w trybie Auto (%)",
     min_value=0,
     max_value=100,
     value=50,
@@ -1464,6 +1472,20 @@ auto_base_influence = st.sidebar.slider(
         "100% = dokładnie wartości z suwaków."
     ),
 )
+
+
+# ============================================================
+# INSTRUKCJA OBSŁUGI I REGULAMIN
+# ============================================================
+
+st.markdown("---")
+doc_col1, doc_col2 = st.columns(2)
+with doc_col1:
+    with st.expander(t("manual_title"), expanded=False):
+        st.markdown(t("manual_body"))
+with doc_col2:
+    with st.expander(t("terms_title"), expanded=False):
+        st.markdown(t("terms_body"))
 
 
 # ============================================================
@@ -1566,7 +1588,7 @@ if emergency_kill:
     st.session_state.symbol_cooldown = {}
 
     st.success(
-        "🔴 KILL SWITCH WYKONANY. "
+        "KILL SWITCH WYKONANY. "
         "Zatrzymano wszystkie boty."
     )
 
@@ -2056,9 +2078,12 @@ if futures_ex:
                     # świecy (-2), żeby bot nie reagował na niedokończoną
                     # świecę. Natomiast skaner ma pokazywać WARTOŚCI
                     # AKTUALNE (-1), czyli bieżącą EMA/ADX/RSI.
-                    signal_r = df_sym.iloc[-2]
+                    # Skaner i sygnał używają tej samej, ostatniej
+                    # ZAMKNIĘTEJ świecy. Nie pokazujemy niedokończonej
+                    # świecy (-1), która zmienia się co sekundę.
+                    display_r = df_sym.iloc[-2]
+                    signal_r = display_r
                     prev_r = df_sym.iloc[-3]
-                    display_r = df_sym.iloc[-1]
 
                     signal_values = [
                         signal_r.get("close"),
@@ -2076,17 +2101,24 @@ if futures_ex:
                     if any(pd.isna(v) for v in signal_values + display_values):
                         continue
 
-                    # Aktualna cena z tickera; jeżeli giełda jej nie zwróci,
-                    # używamy ostatniego close z OHLCV.
-                    ticker_last = t_info.get("last")
+                    # --------------------------------------------------
+                    # SKANER: JEDNO ŹRÓDŁO DANYCH
+                    # --------------------------------------------------
+                    # Cena oraz EMA MUSZĄ pochodzić z tego samego zestawu
+                    # świec. Nie mieszamy ceny z fetch_tickers() z EMA
+                    # liczonymi z fetch_ohlcv(), bo przy błędnym/starym
+                    # tickerze powstawały absurdalne sytuacje typu:
+                    # cena BTC ~32 tys., a EMA ~83 tys.
+                    #
+                    # W skanerze pokazujemy ostatnią ZAMKNIĘTĄ świecę.
+                    # Dzięki temu Cena, EMA szybka i EMA wolna odnoszą się
+                    # dokładnie do tego samego rynku i tego samego momentu.
                     try:
-                        market_price = float(ticker_last) if ticker_last is not None else float(display_r["close"])
-                    except (TypeError, ValueError):
                         market_price = float(display_r["close"])
+                    except (TypeError, ValueError):
+                        continue
 
-                    # To są AKTUALNE wartości EMA, a nie okresy 15/34.
-                    # Okresy pozostają częścią konfiguracji bota, ale nie
-                    # są już wyświetlane jako dodatkowe kolumny skanera.
+                    # To są rzeczywiste wartości EMA, a nie okresy EMA.
                     ema_fast_value = float(display_r["ema_fast"])
                     ema_slow_value = float(display_r["ema_slow"])
                     current_adx = float(display_r["adx"])
@@ -2099,19 +2131,12 @@ if futures_ex:
                     if not (0.0 <= current_adx <= 100.0):
                         continue
 
-                    # Zmienne sygnału odnoszą się do świecy zamkniętej.
+                    # Zmienne sygnału odnoszą się do tej samej zamkniętej świecy.
                     signal_close = float(signal_r["close"])
                     signal_ema_fast = float(signal_r["ema_fast"])
                     signal_ema_slow = float(signal_r["ema_slow"])
                     signal_adx = float(signal_r["adx"])
                     signal_rsi = float(signal_r["rsi"])
-
-                    if market_price <= 0 or ema_fast_value <= 0 or ema_slow_value <= 0:
-                        continue
-                    if not (0.0 <= current_rsi <= 100.0):
-                        continue
-                    if not (0.0 <= current_adx <= 100.0):
-                        continue
 
                     cross_above = (
                         prev_r["close"]
@@ -2512,7 +2537,7 @@ st.markdown(
 
 st.markdown("---")
 st.subheader(
-    f"🤖 {t('bot_control')}"
+    f"{t('bot_control')}"
 )
 
 st.text(
@@ -2531,7 +2556,7 @@ for idx, tf in enumerate(
     with cols_tf[idx]:
 
         st.markdown(
-            f"**📌 {tf}**"
+            f"**{tf}**"
         )
 
         # ----------------------------------------------------
@@ -2568,7 +2593,7 @@ for idx, tf in enumerate(
 
         if ema_f_val >= ema_s_val:
             st.warning(
-                "⚠️ EMA szybka musi mieć krótszy okres niż EMA wolna. "
+                "EMA szybka musi mieć krótszy okres niż EMA wolna. "
                 "Dla obliczeń używam EMA wolnej minus 1."
             )
             eff_ema_slow = int(ema_s_val)
@@ -2615,12 +2640,12 @@ for idx, tf in enumerate(
 
         if bot_mode == "Automatyczny":
             st.info(
-                "⚡ Auto: suwaki są bazą, "
+                "Auto: suwaki są bazą, "
                 "a optymalizator dobiera parametry w locie."
             )
         else:
             st.caption(
-                "🎛️ Ręczny: bot używa dokładnie "
+                "Ręczny: bot używa dokładnie "
                 "wartości z suwaków."
             )
 
@@ -2652,7 +2677,7 @@ for idx, tf in enumerate(
 
         if is_active:
 
-            st.success("🟢 AKTYWNY")
+            st.success("AKTYWNY")
 
             if st.button(
                 f"Zatrzymaj {tf}",
@@ -2665,7 +2690,7 @@ for idx, tf in enumerate(
 
         else:
 
-            st.warning("🔴 WYŁĄCZONY")
+            st.warning("WYŁĄCZONY")
 
             if st.button(
                 f"Uruchom {tf}",
@@ -2973,6 +2998,20 @@ if is_user_admin():
 
     except Exception:
         pass
+
+
+# ============================================================
+# INSTRUKCJA OBSŁUGI I REGULAMIN
+# ============================================================
+
+st.markdown("---")
+doc_col1, doc_col2 = st.columns(2)
+with doc_col1:
+    with st.expander(t("manual_title"), expanded=False):
+        st.markdown(t("manual_body"))
+with doc_col2:
+    with st.expander(t("terms_title"), expanded=False):
+        st.markdown(t("terms_body"))
 
 
 # ============================================================
