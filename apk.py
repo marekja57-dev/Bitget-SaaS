@@ -1312,6 +1312,342 @@ def read_scanner_rows( user_id: int, limit: int = 500, active_timeframes: Option
     finally:
         conn.close()
 
+        # Dodaj te definicje na poziomie modułu (np. nad klasą UserWorker lub w sekcji helperów):
+MANAGER = None # lub odpowiednia instancja managera, jeśli jest używana w innych miejscach
+
+def marketlimits(exchange, symbol: str) -> tuple[float, float]:
+    """Pobiera minimalną ilość oraz minimalny koszt dla danego symbolu z giełdy."""
+    try:
+        market = exchange.market(symbol)
+        limits = market.get("limits", {})
+        min_amount = float(limits.get("amount", {}).get("min") or 0.0)
+        min_cost = float(limits.get("cost", {}).get("min") or 0.0)
+        return min_amount, min_cost
+    except Exception:
+        return 0.0, 0.0
+
+
+class UserWorker:
+    def __init__(self, user: dict[str, Any]):
+        self.user = user
+        self.user_id = int(user["id"])
+        self.exchange = get_exchange(
+            user["api_key"],
+            user["secret_key"],
+            user["passphrase"],
+            user["exchange"],
+        )
+        self.cooldowns: dict[str, float] = {}
+        self.entry_locks: dict[str, float] = {}
+        self.last_protection_check = 0.0
+        self.last_scan_by_tf: dict[str, float] = {}
+        self.scan_cursor_by_tf: dict[str, int] = {}
+        self.scan_round_robin = 0
+        self.scan_tf_index = 0
+        self.last_successful_scan_at = 0.0
+        self.last_error_at = 0.0
+        self.markets_loaded = False
+        self.last_tickers_at = 0.0
+        self.cached_tickers: dict[str, Any] = {}
+        self.last_ranked_at = 0.0
+        self.cached_ranked: list[tuple[str, float]] = []
+        self.scanner_initialized = False
+
+    def run_once(self) -> None:
+        if self.exchange is None:
+            return
+
+        bots = load_active_bots(self.user_id)
+        bots = {
+            tf: cfg for tf, cfg in bots.items()
+            if tf in AVAILABLE_TIMEFRAMES and isinstance(cfg, dict)
+        }
+        if not bots:
+            return
+
+        if not self.scanner_initialized:
+            clear_scanner_rows(self.user_id)
+            self.scanner_initialized = True
+
+        risk = get_user_risk_settings(self.user_id)
+
+        if not self.markets_loaded:
+            if not load_markets_safe(self.exchange):
+                return
+            self.markets_loaded = True
+
+        now = time.time()
+        if now - self.last_tickers_at >= 60.0 or not self.cached_tickers:
+            try:
+                self.cached_tickers = self.exchange.fetch_tickers()
+                self.last_tickers_at = now
+            except Exception as exc:
+                log.warning("Ticker fetch failed user=%s: %s", self.user_id, exc)
+                if not self.cached_tickers:
+                    return
+        tickers = self.cached_tickers
+
+        self.protect_open_positions(risk)
+
+        positions = fetch_positions_safe(self.exchange)
+        pos_map = {
+            p.get("symbol"): p
+            for p in positions
+            if p.get("symbol") and position_contracts(p) > 0
+        }
+
+        active_count = len(pos_map)
+        balance_snapshot = fetch_usdt_balance(self.exchange)
+        free_balance = balance_snapshot["free"]
+
+        if now - self.last_ranked_at >= 60.0 or not self.cached_ranked:
+            try:
+                self.cached_ranked = rank_liquid_symbols(
+                    self.exchange, tickers, int(risk["max_scan_pairs"])
+                )
+                self.last_ranked_at = now
+            except Exception as exc:
+                self.last_error_at = time.time()
+                log.exception("Ranking failed user=%s: %s", self.user_id, exc)
+                return
+        else:
+            self.cached_ranked = self.cached_ranked[:max(1, int(risk["max_scan_pairs"]))]
+        ranked = self.cached_ranked
+
+        if not ranked:
+            log.warning("No liquid USDT swap symbols for user=%s", self.user_id)
+            return
+
+        tf_priority = ["1h", "4h", "1d", "30m", "15m", "5m", "1m"]
+        active_tfs = [tf for tf in tf_priority if tf in bots]
+        if not active_tfs:
+            return
+
+        if self.scan_tf_index >= len(active_tfs):
+            self.scan_tf_index = 0
+
+        tf = active_tfs[self.scan_tf_index]
+        cfg = dict(bots[tf])
+        cfg["tf"] = tf
+
+        cursor = int(self.scan_cursor_by_tf.get(tf, 0))
+        if cursor >= len(ranked):
+            cursor = 0
+
+        if cursor == 0:
+            clear_scanner_rows(self.user_id)
+
+        batch = ranked[cursor:cursor + SCAN_BATCH_SIZE]
+        if not batch:
+            cursor = 0
+            batch = ranked[:SCAN_BATCH_SIZE]
+
+        next_cursor = cursor + len(batch)
+        finished_tf = next_cursor >= len(ranked)
+        self.scan_cursor_by_tf[tf] = 0 if finished_tf else next_cursor
+        self.last_scan_by_tf[tf] = time.time()
+
+        if finished_tf:
+            self.scan_tf_index = (self.scan_tf_index + 1) % len(active_tfs)
+
+        scanner_rows: list[dict[str, Any]] = []
+
+        for symbol, qv in batch:
+            try:
+                limit = (
+                    180 if tf == "1d"
+                    else min(180, max(100, int(cfg.get("ema_slow", 21)) + 60))
+                )
+
+                ohlcv = fetch_ohlcv_safe(self.exchange, symbol, tf, limit)
+                min_bars = 70 if tf == "1d" else 60
+                if len(ohlcv) < min_bars:
+                    continue
+
+                closed_candle_ts = int(ohlcv[-2][0])
+                df = pd.DataFrame(
+                    ohlcv,
+                    columns=["timestamp", "open", "high", "low", "close", "volume"],
+                )
+
+                signal, vals = signal_from_closed_candle(
+                    df,
+                    cfg,
+                    float(risk["auto_base_influence"]) / 100.0,
+                )
+
+                required = ("price", "adx", "rsi", "ema_fast", "ema_slow")
+                if not vals or any(
+                    not np.isfinite(safe_float(vals.get(k), np.nan))
+                    for k in required
+                ):
+                    continue
+
+                closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+                if len(closes) < 30:
+                    continue
+                
+                last_close = float(closes.iloc[-2])
+                local_min = float(closes.tail(30).min())
+                local_max = float(closes.tail(30).max())
+                ema_fast_val = float(vals["ema_fast"])
+                ema_slow_val = float(vals["ema_slow"])
+
+                if not (local_min <= ema_fast_val <= local_max and local_min <= ema_slow_val <= local_max):
+                    continue
+
+                if (
+                    abs(ema_fast_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
+                    and abs(ema_slow_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
+                    and local_max - local_min > max(1e-12, abs(last_close) * 1e-6)
+                ):
+                    continue
+
+                scanner_rows.append({
+                    "timeframe": tf,
+                    "symbol": symbol,
+                    "quote_volume": qv,
+                    "price": float(vals["price"]),
+                    "adx": float(vals["adx"]),
+                    "rsi": float(vals["rsi"]),
+                    "ema_fast": float(vals["ema_fast"]),
+                    "ema_slow": float(vals["ema_slow"]),
+                    "signal": signal,
+                    "candle_ts": closed_candle_ts,
+                })
+
+                if signal == "NEUTRALNY":
+                    continue
+
+                if active_count >= int(risk["max_positions"]):
+                    break
+
+                if symbol in pos_map:
+                    continue
+
+                if time.time() < self.cooldowns.get(symbol, 0) or time.time() < self.entry_locks.get(symbol, 0):
+                    continue
+
+                if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
+                    continue
+
+                max_ex = exchange_max_leverage(self.exchange, symbol, int(risk["max_leverage"]))
+
+                if risk["leverage_mode"] == "Ręczny":
+                    lev = min(int(risk["manual_leverage"]), max_ex)
+                else:
+                    adx = safe_float(vals.get("adx"), 20.0)
+                    ratio = min(1.0, max(0.0, (adx - 10.0) / 45.0))
+                    lev = max(1, int(round(1 + ratio * (min(int(risk["max_leverage"]), max_ex) - 1))))
+
+                if not set_leverage_safe(self.exchange, symbol, lev):
+                    continue
+
+                entry_hint = safe_float((tickers.get(symbol) or {}).get("last")) or safe_float(vals.get("price"))
+                if entry_hint <= 0:
+                    continue
+
+                initial_stop = roe_to_price(entry_hint, float(risk["stop_roe"]), lev, signal == "LONG")
+                notional = calculate_risk_allocation(
+                    free_balance, entry_hint, initial_stop, lev,
+                    float(risk["max_single"]), float(vals.get("capital_multiplier", 1.0))
+                )
+
+                if notional <= 0:
+                    continue
+
+                base_amount = notional / entry_hint
+                contracts = base_amount_to_contracts(self.exchange, symbol, base_amount)
+                min_amt, min_cost = marketlimits(self.exchange, symbol)
+
+                if min_amt and contracts < min_amt:
+                    contracts = min_amt
+
+                if min_cost:
+                    current_quote = contracts * contract_size(self.exchange, symbol) * entry_hint
+                    if current_quote < min_cost:
+                        contracts = min_cost / entry_hint / contract_size(self.exchange, symbol)
+
+                contracts = float(self.exchange.amount_to_precision(symbol, contracts))
+                if contracts <= 0:
+                    continue
+
+                lock_seconds = max(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0)
+                self.entry_locks[symbol] = time.time() + 30.0
+
+                order, sl_price, tp_price = place_entry_with_protection(
+                    self.exchange, symbol, signal, contracts, lev,
+                    float(risk["stop_roe"]), float(risk["take_roe"]), self.user_id
+                )
+
+                if order:
+                    active_count += 1
+                    pos_map[symbol] = {"symbol": symbol, "contracts": contracts, "side": "long" if signal == "LONG" else "short"}
+                    self.cooldowns[symbol] = time.time() + lock_seconds
+                    set_entry_guard(self.user_id, symbol, time.time() + lock_seconds, closed_candle_ts, signal)
+                    log_trade(self.user_id, symbol, tf, "ENTRY", signal, entry_hint, contracts, str(order.get("id", "")), f"SL={sl_price};TP={tp_price};LEV={lev};")
+                else:
+                    retry_lock = max(60.0, min(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0))
+                    self.cooldowns[symbol] = time.time() + retry_lock
+                    self.entry_locks[symbol] = time.time() + retry_lock
+                    log_trade(self.user_id, symbol, tf, "ENTRY_ERROR", signal, entry_hint, contracts, "", "Order rejected")
+
+            except Exception as exc:
+                self.last_error_at = time.time()
+                log.exception("Signal/order failed user=%s tf=%s symbol=%s: %s", self.user_id, tf, symbol, exc)
+
+        if scanner_rows:
+            save_scanner_rows(self.user_id, scanner_rows)
+            self.last_successful_scan_at = time.time()
+
+    def protect_open_positions(self, risk: dict[str, Any]) -> None:
+        if not bool(risk["enable_roe"]):
+            return
+        if time.time() - self.last_protection_check < POSITION_GUARD_SECONDS:
+            return
+
+        self.last_protection_check = time.time()
+        positions = fetch_positions_safe(self.exchange)
+
+        for p in positions:
+            amount = position_contracts(p)
+            if amount <= 0:
+                continue
+            symbol = p.get("symbol", "")
+            if not symbol:
+                continue
+            entry = safe_float(p.get("entryPrice"))
+            if entry <= 0:
+                continue
+            mark = safe_float(p.get("markPrice")) or safe_float(p.get("lastPrice"))
+            lev = safe_float(p.get("leverage"), 1.0)
+            if mark <= 0:
+                continue
+
+            raw_move = ((mark - entry) / entry) * 100 if is_long(p) else ((entry - mark) / entry) * 100
+            roe = raw_move * max(1.0, lev)
+
+            if roe <= -float(risk["stop_roe"]) or roe >= float(risk["take_roe"]):
+                side_tag = "SL" if roe <= -float(risk["stop_roe"]) else "TP"
+                if close_position(self.exchange, p, f"ROE {side_tag} {roe:.2f}%"):
+                    guard_until = time.time() + float(risk["cooldown_minutes"]) * 60
+                    self.cooldowns[symbol] = guard_until
+                    self.entry_locks[symbol] = guard_until
+                    set_entry_guard(self.user_id, symbol, guard_until, 0, side_tag)
+                    delete_protection_state(self.user_id, symbol)
+                    log_trade(self.user_id, symbol, "guard", side_tag, position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
+
+    def loop(self, stop_event: threading.Event) -> None:
+        log.info("Worker started user=%s exchange=%s", self.user_id, self.user.get("exchange"))
+        while not stop_event.is_set():
+            try:
+                self.run_once()
+            except Exception:
+                log.exception("Worker top-level error user=%s", self.user_id)
+            stop_event.wait(WORKER_POLL_SECONDS)
+        log.info("Worker stopped user=%s", self.user_id)
+
+
 
 # ============================================================
 # WORKER
@@ -1356,8 +1692,6 @@ class UserWorker:
             return
 
         if not self.scanner_initialized:
-            # Remove rows left by an older bot process/version. New rows are
-            # then created only from the current active timeframe sequence.
             clear_scanner_rows(self.user_id)
             self.scanner_initialized = True
 
@@ -1379,15 +1713,13 @@ class UserWorker:
                     return
         tickers = self.cached_tickers
 
-        # Protection ALWAYS comes before new entries.
         self.protect_open_positions(risk)
 
         positions = fetch_positions_safe(self.exchange)
         pos_map = {
             p.get("symbol"): p
             for p in positions
-            if p.get("symbol")
-            and position_contracts(p) > 0
+            if p.get("symbol") and position_contracts(p) > 0
         }
 
         active_count = len(pos_map)
@@ -1402,28 +1734,16 @@ class UserWorker:
                 self.last_ranked_at = now
             except Exception as exc:
                 self.last_error_at = time.time()
-                log.exception(
-                    "Ranking failed user=%s: %s", self.user_id, exc
-                )
+                log.exception("Ranking failed user=%s: %s", self.user_id, exc)
                 return
         else:
-            # The user can change max_scan_pairs without waiting a minute.
             self.cached_ranked = self.cached_ranked[:max(1, int(risk["max_scan_pairs"]))]
         ranked = self.cached_ranked
 
         if not ranked:
-            log.warning(
-                "No liquid USDT swap symbols for user=%s",
-                self.user_id,
-            )
+            log.warning("No liquid USDT swap symbols for user=%s", self.user_id)
             return
 
-        # Scan active timeframes in a deterministic sequence. The requested
-        # priority is 1h -> 4h -> 1d -> 30m -> 15m -> 5m -> 1m. A timeframe
-        # is scanned through the whole ranked universe before the next one is
-        # started. This prevents 1h/4h rows from being mixed with stale rows
-        # from another interval and makes entry evaluation follow the same
-        # order every cycle.
         tf_priority = ["1h", "4h", "1d", "30m", "15m", "5m", "1m"]
         active_tfs = [tf for tf in tf_priority if tf in bots]
         if not active_tfs:
@@ -1440,9 +1760,6 @@ class UserWorker:
         if cursor >= len(ranked):
             cursor = 0
 
-        # A scanner table is a live snapshot, not an archive. At the start of
-        # every full timeframe generation, remove ALL previous timeframe rows.
-        # Therefore 1h can never remain visible when the engine has moved to 4h.
         if cursor == 0:
             clear_scanner_rows(self.user_id)
 
@@ -1457,9 +1774,6 @@ class UserWorker:
         self.last_scan_by_tf[tf] = time.time()
 
         if finished_tf:
-            # Only after the complete 1h universe has been processed do we move
-            # to 4h (then 1d, etc.). The next timeframe gets a clean table
-            # generation and cannot inherit rows from the previous interval.
             self.scan_tf_index = (self.scan_tf_index + 1) % len(active_tfs)
 
         scanner_rows: List[Dict[str, Any]] = []
@@ -1467,30 +1781,19 @@ class UserWorker:
         for symbol, qv in batch:
             try:
                 limit = (
-                    180
-                    if tf == "1d"
+                    180 if tf == "1d"
                     else min(180, max(100, int(cfg.get("ema_slow", 21)) + 60))
                 )
 
-                ohlcv = fetch_ohlcv_safe(
-                    self.exchange, symbol, tf, limit
-                )
-
+                ohlcv = fetch_ohlcv_safe(self.exchange, symbol, tf, limit)
                 min_bars = 70 if tf == "1d" else 60
                 if len(ohlcv) < min_bars:
-                    log.debug(
-                        "Not enough candles user=%s tf=%s symbol=%s got=%s",
-                        self.user_id, tf, symbol, len(ohlcv)
-                    )
                     continue
 
                 closed_candle_ts = int(ohlcv[-2][0])
                 df = pd.DataFrame(
                     ohlcv,
-                    columns=[
-                        "timestamp", "open", "high", "low",
-                        "close", "volume",
-                    ],
+                    columns=["timestamp", "open", "high", "low", "close", "volume"],
                 )
 
                 signal, vals = signal_from_closed_candle(
@@ -1504,42 +1807,26 @@ class UserWorker:
                     not np.isfinite(safe_float(vals.get(k), np.nan))
                     for k in required
                 ):
-                    log.warning(
-                        "Skipping invalid scanner row user=%s tf=%s symbol=%s vals=%s",
-                        self.user_id, tf, symbol, vals,
-                    )
                     continue
 
-                # Cross-check the returned indicators against the same OHLCV
-                # frame. This catches accidental price/fallback substitution.
                 closes = pd.to_numeric(df["close"], errors="coerce").dropna()
                 if len(closes) < 30:
                     continue
+                
                 last_close = float(closes.iloc[-2])
                 local_min = float(closes.tail(30).min())
                 local_max = float(closes.tail(30).max())
                 ema_fast_val = float(vals["ema_fast"])
                 ema_slow_val = float(vals["ema_slow"])
+
                 if not (local_min <= ema_fast_val <= local_max and local_min <= ema_slow_val <= local_max):
-                    log.warning(
-                        "EMA sanity reject user=%s tf=%s symbol=%s close=%s ema_fast=%s ema_slow=%s range=%s..%s",
-                        self.user_id, tf, symbol, last_close, ema_fast_val, ema_slow_val, local_min, local_max,
-                    )
                     continue
 
-                # EMA values must not be silently replaced with the current
-                # price. Exact equality is allowed mathematically, but for a
-                # normal EMA it is suspicious; reject it when both EMAs are
-                # exactly the close and the recent close range is non-flat.
                 if (
                     abs(ema_fast_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
                     and abs(ema_slow_val - last_close) <= max(1e-12, abs(last_close) * 1e-12)
                     and local_max - local_min > max(1e-12, abs(last_close) * 1e-6)
                 ):
-                    log.warning(
-                        "Rejecting suspicious EMA=price row user=%s tf=%s symbol=%s",
-                        self.user_id, tf, symbol,
-                    )
                     continue
 
                 scanner_rows.append({
@@ -1555,535 +1842,139 @@ class UserWorker:
                     "candle_ts": closed_candle_ts,
                 })
 
-                # Entry section.
                 if signal == "NEUTRALNY":
                     continue
 
-                if active_count >= int(
-                    risk["max_positions"]
-                ):
+                if active_count >= int(risk["max_positions"]):
                     break
 
                 if symbol in pos_map:
                     continue
 
-                if time.time() < self.cooldowns.get(symbol, 0):
+                if time.time() < self.cooldowns.get(symbol, 0) or time.time() < self.entry_locks.get(symbol, 0):
                     continue
 
-                if time.time() < self.entry_locks.get(symbol, 0):
+                if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
                     continue
 
-                if entry_guard_blocks(
-                    self.user_id,
-                    symbol,
-                    closed_candle_ts,
-                ):
-                    continue
-
-                # pos_map was fetched once immediately before the scan.
-                # Re-fetching the entire account for every candidate was a
-                # major source of latency/rate-limit pressure.
-                if symbol in pos_map:
-                    continue
-
-                max_ex = exchange_max_leverage(
-                    self.exchange,
-                    symbol,
-                    int(risk["max_leverage"]),
-                )
+                max_ex = exchange_max_leverage(self.exchange, symbol, int(risk["max_leverage"]))
 
                 if risk["leverage_mode"] == "Ręczny":
-                    lev = min(
-                        int(risk["manual_leverage"]),
-                        max_ex,
-                    )
+                    lev = min(int(risk["manual_leverage"]), max_ex)
                 else:
-                    adx = safe_float(
-                        vals.get("adx"),
-                        20.0,
-                    )
-                    ratio = min(
-                        1.0,
-                        max(
-                            0.0,
-                            (adx - 10.0) / 45.0,
-                        ),
-                    )
-                    lev = max(
-                        1,
-                        int(round(
-                            1
-                            + ratio
-                            * (
-                                min(
-                                    int(
-                                        risk[
-                                            "max_leverage"
-                                        ]
-                                    ),
-                                    max_ex,
-                                )
-                                - 1
-                            )
-                        )),
-                    )
+                    adx = safe_float(vals.get("adx"), 20.0)
+                    ratio = min(1.0, max(0.0, (adx - 10.0) / 45.0))
+                    lev = max(1, int(round(1 + ratio * (min(int(risk["max_leverage"]), max_ex) - 1))))
 
-                if not set_leverage_safe(
-                    self.exchange,
-                    symbol,
-                    lev,
-                ):
-                    log.warning(
-                        "Skipping entry: leverage setup failed user=%s symbol=%s lev=%s",
-                        self.user_id, symbol, lev,
-                    )
+                if not set_leverage_safe(self.exchange, symbol, lev):
                     continue
 
-                entry_hint = (
-                    safe_float(
-                        (tickers.get(symbol) or {}).get(
-                            "last"
-                        )
-                    )
-                    or safe_float(
-                        vals.get("price")
-                    )
-                )
-
+                entry_hint = safe_float((tickers.get(symbol) or {}).get("last")) or safe_float(vals.get("price"))
                 if entry_hint <= 0:
                     continue
 
-                initial_stop = roe_to_price(
-                    entry_hint,
-                    float(risk["stop_roe"]),
-                    lev,
-                    signal == "LONG",
-                )
-
+                initial_stop = roe_to_price(entry_hint, float(risk["stop_roe"]), lev, signal == "LONG")
                 notional = calculate_risk_allocation(
-                    free_balance,
-                    entry_hint,
-                    initial_stop,
-                    lev,
-                    float(risk["max_single"]),
-                    float(
-                        vals.get(
-                            "capital_multiplier",
-                            1.0,
-                        )
-                    ),
+                    free_balance, entry_hint, initial_stop, lev,
+                    float(risk["max_single"]), float(vals.get("capital_multiplier", 1.0))
                 )
 
                 if notional <= 0:
                     continue
 
-                # Base amount -> contract count.
                 base_amount = notional / entry_hint
-                contracts = base_amount_to_contracts(
-                    self.exchange,
-                    symbol,
-                    base_amount,
-                )
-
-                min_amt, min_cost, _ = market_limits(
-                    self.exchange,
-                    symbol,
-                )
+                contracts = base_amount_to_contracts(self.exchange, symbol, base_amount)
+                min_amt, min_cost = marketlimits(self.exchange, symbol)
 
                 if min_amt and contracts < min_amt:
                     contracts = min_amt
 
-                # min cost is quote notional. Convert it into contracts.
                 if min_cost:
-                    current_quote = (
-                        contracts
-                        * contract_size(
-                            self.exchange,
-                            symbol,
-                        )
-                        * entry_hint
-                    )
+                    current_quote = contracts * contract_size(self.exchange, symbol) * entry_hint
                     if current_quote < min_cost:
-                        contracts = (
-                            min_cost
-                            / entry_hint
-                            / contract_size(
-                                self.exchange,
-                                symbol,
-                            )
-                        )
+                        contracts = min_cost / entry_hint / contract_size(self.exchange, symbol)
 
-                contracts = float(
-                    self.exchange.amount_to_precision(
-                        symbol,
-                        contracts,
-                    )
-                )
-
+                contracts = float(self.exchange.amount_to_precision(symbol, contracts))
                 if contracts <= 0:
                     continue
 
-                # Only a short in-memory lock is set while the exchange
-                # request is in flight. A durable guard is created ONLY after
-                # an entry order is actually accepted.
-                lock_seconds = max(
-                    300.0,
-                    float(risk.get("cooldown_minutes", 15)) * 60.0,
-                )
+                lock_seconds = max(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0)
                 self.entry_locks[symbol] = time.time() + 30.0
 
-                order, sl_price, tp_price = (
-                    place_entry_with_protection(
-                        self.exchange,
-                        symbol,
-                        signal,
-                        contracts,
-                        lev,
-                        float(risk["stop_roe"]),
-                        float(risk["take_roe"]),
-                        self.user_id,
-                    )
+                order, sl_price, tp_price = place_entry_with_protection(
+                    self.exchange, symbol, signal, contracts, lev,
+                    float(risk["stop_roe"]), float(risk["take_roe"]), self.user_id
                 )
 
                 if order:
                     active_count += 1
-
-                    # The entry order was accepted. Mark the symbol as
-                    # occupied locally; the next worker cycle will reconcile
-                    # against the exchange positions.
-                    pos_map[symbol] = {
-                        "symbol": symbol,
-                        "contracts": contracts,
-                        "side": "long" if signal == "LONG" else "short",
-                    }
-
-                    self.cooldowns[symbol] = (
-                        time.time() + lock_seconds
-                    )
-
-                    set_entry_guard(
-                        self.user_id,
-                        symbol,
-                        time.time() + lock_seconds,
-                        closed_candle_ts,
-                        signal,
-                    )
-
-                    log_trade(
-                        self.user_id,
-                        symbol,
-                        tf,
-                        "ENTRY",
-                        signal,
-                        entry_hint,
-                        contracts,
-                        str(
-                            order.get("id", "")
-                        ),
-                        (
-                            f"SL={sl_price};"
-                            f"TP={tp_price};"
-                            f"LEV={lev};"
-                            f"CONTRACT_SIZE="
-                            f"{contract_size(self.exchange, symbol)}"
-                        ),
-                    )
+                    pos_map[symbol] = {"symbol": symbol, "contracts": contracts, "side": "long" if signal == "LONG" else "short"}
+                    self.cooldowns[symbol] = time.time() + lock_seconds
+                    set_entry_guard(self.user_id, symbol, time.time() + lock_seconds, closed_candle_ts, signal)
+                    log_trade(self.user_id, symbol, tf, "ENTRY", signal, entry_hint, contracts, str(order.get("id", "")), f"SL={sl_price};TP={tp_price};LEV={lev};")
                 else:
-                    # Order was not accepted: do not create the same durable
-                    # candle guard that is used after a real position entry.
-                    retry_lock = max(
-                        60.0,
-                        min(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0),
-                    )
+                    retry_lock = max(60.0, min(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0))
                     self.cooldowns[symbol] = time.time() + retry_lock
                     self.entry_locks[symbol] = time.time() + retry_lock
-                    log_trade(
-                        self.user_id,
-                        symbol,
-                        tf,
-                        "ENTRY_ERROR",
-                        signal,
-                        entry_hint,
-                        contracts,
-                        "",
-                        "Entry order rejected or failed before acceptance",
-                    )
+                    log_trade(self.user_id, symbol, tf, "ENTRY_ERROR", signal, entry_hint, contracts, "", "Order rejected")
 
             except Exception as exc:
                 self.last_error_at = time.time()
-                log.exception(
-                    "Signal/order failed user=%s tf=%s symbol=%s: %s",
-                    self.user_id, tf, symbol, exc,
-                )
+                log.exception("Signal/order failed user=%s tf=%s symbol=%s: %s", self.user_id, tf, symbol, exc)
 
         if scanner_rows:
             save_scanner_rows(self.user_id, scanner_rows)
             self.last_successful_scan_at = time.time()
-            log.info(
-                "SCAN OK user=%s tf=%s batch=%s cursor=%s/%s",
-                self.user_id, tf, len(scanner_rows),
-                self.scan_cursor_by_tf.get(tf, 0), len(ranked),
-            )
 
-    def protect_open_positions( self, risk: Dict[str, Any], ) -> None:
+    def protect_open_positions(self, risk: Dict[str, Any]) -> None:
         if not bool(risk["enable_roe"]):
             return
-
-        if (
-            time.time() - self.last_protection_check
-            < POSITION_GUARD_SECONDS
-        ):
+        if time.time() - self.last_protection_check < POSITION_GUARD_SECONDS:
             return
 
         self.last_protection_check = time.time()
-
-        positions = fetch_positions_safe(
-            self.exchange
-        )
+        positions = fetch_positions_safe(self.exchange)
 
         for p in positions:
             amount = position_contracts(p)
             if amount <= 0:
                 continue
-
             symbol = p.get("symbol", "")
             if not symbol:
                 continue
-
-            entry = safe_float(
-                p.get("entryPrice")
-            )
+            entry = safe_float(p.get("entryPrice"))
             if entry <= 0:
                 continue
-
-            mark = (
-                safe_float(p.get("markPrice"))
-                or safe_float(p.get("lastPrice"))
-            )
-
-            lev = safe_float(
-                p.get("leverage"),
-                1.0,
-            )
-
+            mark = safe_float(p.get("markPrice")) or safe_float(p.get("lastPrice"))
+            lev = safe_float(p.get("leverage"), 1.0)
             if mark <= 0:
                 continue
 
-            raw_move = (
-                ((mark - entry) / entry) * 100
-                if is_long(p)
-                else ((entry - mark) / entry) * 100
-            )
-
+            raw_move = ((mark - entry) / entry) * 100 if is_long(p) else ((entry - mark) / entry) * 100
             roe = raw_move * max(1.0, lev)
 
-            # First: hard local ROE guard.
-            if roe <= -float(
-                risk["stop_roe"]
-            ):
-                if close_position(
-                    self.exchange,
-                    p,
-                    f"ROE SL {roe:.2f}%",
-                ):
-                    guard_until = (
-                        time.time()
-                        + float(
-                            risk["cooldown_minutes"]
-                        ) * 60
-                    )
+            if roe <= -float(risk["stop_roe"]) or roe >= float(risk["take_roe"]):
+                side_tag = "SL" if roe <= -float(risk["stop_roe"]) else "TP"
+                if close_position(self.exchange, p, f"ROE {side_tag} {roe:.2f}%"):
+                    guard_until = time.time() + float(risk["cooldown_minutes"]) * 60
+                    self.cooldowns[symbol] = guard_until
+                    self.entry_locks[symbol] = guard_until
+                    set_entry_guard(self.user_id, symbol, guard_until, 0, side_tag)
+                    delete_protection_state(self.user_id, symbol)
+                    log_trade(self.user_id, symbol, "guard", side_tag, position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
 
-                    self.cooldowns[symbol] = (
-                        guard_until
-                    )
-                    self.entry_locks[symbol] = (
-                        guard_until
-                    )
-
-                    set_entry_guard(
-                        self.user_id,
-                        symbol,
-                        guard_until,
-                        0,
-                        "SL",
-                    )
-
-                    delete_protection_state(
-                        self.user_id,
-                        symbol,
-                    )
-
-                    log_trade(
-                        self.user_id,
-                        symbol,
-                        "guard",
-                        "SL",
-                        position_side(p),
-                        mark,
-                        amount,
-                        message=f"ROE={roe:.2f}%",
-                    )
-
-            elif roe >= float(
-                risk["take_roe"]
-            ):
-                if close_position(
-                    self.exchange,
-                    p,
-                    f"ROE TP {roe:.2f}%",
-                ):
-                    guard_until = (
-                        time.time()
-                        + float(
-                            risk["cooldown_minutes"]
-                        ) * 60
-                    )
-
-                    self.cooldowns[symbol] = (
-                        guard_until
-                    )
-                    self.entry_locks[symbol] = (
-                        guard_until
-                    )
-
-                    set_entry_guard(
-                        self.user_id,
-                        symbol,
-                        guard_until,
-                        0,
-                        "TP",
-                    )
-
-                    delete_protection_state(
-                        self.user_id,
-                        symbol,
-                    )
-
-                    log_trade(
-                        self.user_id,
-                        symbol,
-                        "guard",
-                        "TP",
-                        position_side(p),
-                        mark,
-                        amount,
-                        message=f"ROE={roe:.2f}%",
-                    )
-
-    def loop( self, stop_event: threading.Event, ) -> None:
-        log.info(
-            "Worker started user=%s email=%s exchange=%s",
-            self.user_id,
-            self.user.get("email"),
-            self.user.get("exchange"),
-        )
-
+    def loop(self, stop_event: threading.Event) -> None:
+        log.info("Worker started user=%s exchange=%s", self.user_id, self.user.get("exchange"))
         while not stop_event.is_set():
             try:
                 self.run_once()
             except Exception:
-                log.exception(
-                    "Worker top-level error user=%s",
-                    self.user_id,
-                )
-
-            # Do not sleep in the Streamlit request thread. This is a worker
-            # thread only, so wait is non-blocking for the UI.
+                log.exception("Worker top-level error user=%s", self.user_id)
             stop_event.wait(WORKER_POLL_SECONDS)
-
-        log.info(
-            "Worker stopped user=%s",
-            self.user_id,
-        )
+        log.info("Worker stopped user=%s", self.user_id)
 
 
-class WorkerManager:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.workers: Dict[
-            int,
-            Tuple[
-                threading.Thread,
-                threading.Event,
-            ],
-        ] = {}
-
-    def reconcile(self) -> None:
-        # The coordinator may run inside Streamlit, where the main script can
-        # rerun many times. SQLite is the source of truth; this method only
-        # starts missing workers and restarts dead ones.
-        init_db()
-        users = {
-            u["id"]: u
-            for u in get_all_trading_users()
-        }
-
-        active_ids = {
-            uid
-            for uid in users
-            if load_active_bots(uid)
-        }
-
-        with self.lock:
-            for uid in active_ids:
-                if (
-                    uid in self.workers
-                    and self.workers[uid][0].is_alive()
-                ):
-                    continue
-
-                worker = UserWorker(
-                    users[uid]
-                )
-                event = threading.Event()
-
-                thread = threading.Thread(
-                    target=worker.loop,
-                    args=(event,),
-                    daemon=True,
-                    name=f"bot-user-{uid}",
-                )
-
-                self.workers[uid] = (
-                    thread,
-                    event,
-                )
-                thread.start()
-
-            for uid in list(self.workers):
-                if uid not in active_ids:
-                    self.workers[uid][1].set()
-                    self.workers.pop(uid, None)
-
-    def stop_all(self) -> None:
-        with self.lock:
-            for _, event in self.workers.values():
-                event.set()
-            self.workers.clear()
-
-
-MANAGER = WorkerManager()
-
-
-def run_worker_mode() -> None:
-    init_db()
-
-    log.info(
-        "Autonomous worker service started. poll=%ss",
-        WORKER_POLL_SECONDS,
-    )
-
-    try:
-        while True:
-            MANAGER.reconcile()
-            time.sleep(
-                max(2, WORKER_POLL_SECONDS)
-            )
-    except KeyboardInterrupt:
-        MANAGER.stop_all()
-        log.info("Worker service stopped")
-
-
+        
 # ============================================================
 # STREAMLIT
 # ============================================================
@@ -3419,6 +3310,43 @@ def run_streamlit_app() -> None:
     # Do not sleep or call st.rerun() here. That blocks a Streamlit request
     # and causes unnecessary memory/CPU churn. The trading engine is a
     # background worker; the dashboard reads its persistent SQLite results.
+
+def run_worker_mode() -> None:
+                    """Główna funkcja uruchamiająca workery w tle."""
+                    # Pobieramy użytkowników bezpośrednio z bazy SQLite używanej w aplikacji
+                    try:
+                        import sqlite3
+                        conn = sqlite3.connect("users.db") # Zmień nazwę pliku bazy, jeśli masz inną
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT * FROM users")
+                        users = [dict(row) for row in cursor.fetchall()]
+                        conn.close()
+                    except Exception:
+                        users = []
+
+                    if not users:
+                        log.warning("No active users found for worker mode.")
+                        return
+
+                    stop_event = threading.Event()
+                    threads = []
+
+                    for user in users:
+                        worker = UserWorker(user)
+                        t = threading.Thread(target=worker.loop, args=(stop_event,), daemon=True)
+                        t.start()
+                        threads.append(t)
+
+                    try:
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        log.info("Stopping workers...")
+                        stop_event.set()
+                        for t in threads:
+                            t.join()
+
 
 
 # ============================================================
