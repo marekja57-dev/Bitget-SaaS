@@ -569,9 +569,16 @@ def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
     if ema_fast >= ema_slow:
         ema_fast = max(1, ema_slow - 1)
 
-    # To są WARTOŚCI EMA, nie okresy i nie ceny z fetch_tickers().
-    df["ema_fast"] = _standard_ema(df["close"], ema_fast)
-    df["ema_slow"] = _standard_ema(df["close"], ema_slow)
+    # ========================================================
+    # EMA — TYLKO Z CEN ZAMKNIĘCIA TEJ SAMEJ SERII OHLCV
+    # ========================================================
+    # ema_fast / ema_slow są OKRESAMI (np. 9 i 21).
+    # ema_fast_value / ema_slow_value są WARTOŚCIAMI wskaźnika.
+    # Nigdy nie pobieramy tutaj ceny z tickera i nigdy nie wpisujemy
+    # okresu jako wartości EMA.
+    close_series = pd.to_numeric(df["close"], errors="coerce").astype(float)
+    df["ema_fast"] = _standard_ema(close_series, ema_fast)
+    df["ema_slow"] = _standard_ema(close_series, ema_slow)
 
     exp1 = df["close"].ewm(span=12, adjust=False).mean()
     exp2 = df["close"].ewm(span=26, adjust=False).mean()
@@ -2129,7 +2136,12 @@ if futures_ex:
                     except (TypeError, ValueError):
                         continue
 
-                    # To są rzeczywiste wartości EMA, a nie okresy EMA.
+                    # ====================================================
+                    # EMA DO TABELI — RZECZYWISTE WARTOŚCI WSKAŹNIKA
+                    # ====================================================
+                    # Obie wartości są pobierane bezpośrednio z kolumn EMA
+                    # wyliczonych z `close` tego samego df_sym, tej samej
+                    # pary i tego samego interwału. Nie używamy ticker.price.
                     ema_fast_value = float(display_r["ema_fast"])
                     ema_slow_value = float(display_r["ema_slow"])
                     current_adx = float(display_r["adx"])
@@ -2198,8 +2210,12 @@ if futures_ex:
                             "Interwał": tf,
                             "Para": symbol,
                             "Cena": market_price,
+                            # Wartości EMA są poziomami cenowymi wskaźnika —
+                            # tak definiuje się EMA. Okresy pozostają osobno.
                             "EMA Szybka": round(ema_fast_value, 8),
                             "EMA Wolna": round(ema_slow_value, 8),
+                            "EMA Szybka Okres": int(e_fast),
+                            "EMA Wolna Okres": int(e_slow),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -2782,8 +2798,8 @@ if scan_results:
         hide_index=True,
         column_config={
             "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
-            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka", format="%.8f"),
-            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna", format="%.8f"),
+            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka — wartość", format="%.8f"),
+            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna — wartość", format="%.8f"),
             "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
             "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
             "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
