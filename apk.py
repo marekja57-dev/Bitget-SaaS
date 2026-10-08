@@ -2049,24 +2049,62 @@ if futures_ex:
                     if len(df_sym) < 3:
                         continue
 
-                    last_r = df_sym.iloc[-2]
+                    # --------------------------------------------------
+                    # DANE DO SYGNAŁU vs. DANE POKAZYWANE W SKANERZE
+                    # --------------------------------------------------
+                    # Sygnał tradingowy liczymy wyłącznie na zamkniętej
+                    # świecy (-2), żeby bot nie reagował na niedokończoną
+                    # świecę. Natomiast skaner ma pokazywać WARTOŚCI
+                    # AKTUALNE (-1), czyli bieżącą EMA/ADX/RSI.
+                    signal_r = df_sym.iloc[-2]
                     prev_r = df_sym.iloc[-3]
+                    display_r = df_sym.iloc[-1]
 
-                    values = [
-                        last_r.get("close"),
-                        last_r.get("ema_fast"),
-                        last_r.get("ema_slow"),
-                        last_r.get("adx"),
-                        last_r.get("rsi"),
+                    signal_values = [
+                        signal_r.get("close"),
+                        signal_r.get("ema_fast"),
+                        signal_r.get("ema_slow"),
+                        signal_r.get("adx"),
+                        signal_r.get("rsi"),
                     ]
-                    if any(pd.isna(v) for v in values):
+                    display_values = [
+                        display_r.get("ema_fast"),
+                        display_r.get("ema_slow"),
+                        display_r.get("adx"),
+                        display_r.get("rsi"),
+                    ]
+                    if any(pd.isna(v) for v in signal_values + display_values):
                         continue
 
-                    market_price = float(last_r["close"])
-                    ema_fast_value = float(last_r["ema_fast"])
-                    ema_slow_value = float(last_r["ema_slow"])
-                    current_adx = float(last_r["adx"])
-                    current_rsi = float(last_r["rsi"])
+                    # Aktualna cena z tickera; jeżeli giełda jej nie zwróci,
+                    # używamy ostatniego close z OHLCV.
+                    ticker_last = t_info.get("last")
+                    try:
+                        market_price = float(ticker_last) if ticker_last is not None else float(display_r["close"])
+                    except (TypeError, ValueError):
+                        market_price = float(display_r["close"])
+
+                    # To są AKTUALNE wartości EMA, a nie okresy 15/34.
+                    # Okresy pozostają częścią konfiguracji bota, ale nie
+                    # są już wyświetlane jako dodatkowe kolumny skanera.
+                    ema_fast_value = float(display_r["ema_fast"])
+                    ema_slow_value = float(display_r["ema_slow"])
+                    current_adx = float(display_r["adx"])
+                    current_rsi = float(display_r["rsi"])
+
+                    if market_price <= 0 or ema_fast_value <= 0 or ema_slow_value <= 0:
+                        continue
+                    if not (0.0 <= current_rsi <= 100.0):
+                        continue
+                    if not (0.0 <= current_adx <= 100.0):
+                        continue
+
+                    # Zmienne sygnału odnoszą się do świecy zamkniętej.
+                    signal_close = float(signal_r["close"])
+                    signal_ema_fast = float(signal_r["ema_fast"])
+                    signal_ema_slow = float(signal_r["ema_slow"])
+                    signal_adx = float(signal_r["adx"])
+                    signal_rsi = float(signal_r["rsi"])
 
                     if market_price <= 0 or ema_fast_value <= 0 or ema_slow_value <= 0:
                         continue
@@ -2078,30 +2116,30 @@ if futures_ex:
                     cross_above = (
                         prev_r["close"]
                         <= prev_r["ema_fast"]
-                        and last_r["close"]
-                        > last_r["ema_fast"]
+                        and signal_close
+                        > signal_ema_fast
                     )
 
                     trend_bull = (
                         cross_above
-                        and last_r["ema_fast"]
-                        > last_r["ema_slow"]
-                        and current_rsi
+                        and signal_ema_fast
+                        > signal_ema_slow
+                        and signal_rsi
                         < max_rsi_limit
                     )
 
                     cross_below = (
                         prev_r["close"]
                         >= prev_r["ema_fast"]
-                        and last_r["close"]
-                        < last_r["ema_fast"]
+                        and signal_close
+                        < signal_ema_fast
                     )
 
                     trend_bear = (
                         cross_below
-                        and last_r["ema_fast"]
-                        < last_r["ema_slow"]
-                        and current_rsi
+                        and signal_ema_fast
+                        < signal_ema_slow
+                        and signal_rsi
                         > min_rsi_limit
                     )
 
@@ -2109,13 +2147,13 @@ if futures_ex:
 
                     if (
                         trend_bull
-                        and current_adx >= m_adx
+                        and signal_adx >= m_adx
                     ):
                         signal_type = "LONG"
 
                     elif (
                         trend_bear
-                        and current_adx >= m_adx
+                        and signal_adx >= m_adx
                     ):
                         signal_type = "SHORT"
 
@@ -2126,8 +2164,6 @@ if futures_ex:
                             "Cena": market_price,
                             "EMA Szybka": round(ema_fast_value, 8),
                             "EMA Wolna": round(ema_slow_value, 8),
-                            "Okres EMA szybkiej": int(e_fast),
-                            "Okres EMA wolnej": int(e_slow),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -2532,24 +2568,14 @@ for idx, tf in enumerate(
 
         if ema_f_val >= ema_s_val:
             st.warning(
-                "⚠️ EMA szybka ≥ EMA wolna — "
-                "używam zamienionych wartości."
+                "⚠️ EMA szybka musi mieć krótszy okres niż EMA wolna. "
+                "Dla obliczeń używam EMA wolnej minus 1."
             )
-
-            eff_ema_fast = int(
-                ema_s_val
-            )
-            eff_ema_slow = int(
-                ema_f_val
-            )
-
+            eff_ema_slow = int(ema_s_val)
+            eff_ema_fast = max(1, eff_ema_slow - 1)
         else:
-            eff_ema_fast = int(
-                ema_f_val
-            )
-            eff_ema_slow = int(
-                ema_s_val
-            )
+            eff_ema_fast = int(ema_f_val)
+            eff_ema_slow = int(ema_s_val)
 
         adx_val = st.slider(
             f"Min ADX ({tf})",
@@ -2696,12 +2722,36 @@ st.subheader(
 )
 
 if scan_results:
-    df_scan = pd.DataFrame(
-        scan_results
-    )
+    # Jedna, uporządkowana tabela skanera.
+    # Pokazujemy wyłącznie AKTUALNE wartości EMA, bez dodatkowych
+    # kolumn z okresami EMA, które wcześniej wyglądały jak drugie
+    # wartości/„stałe liczby”.
+    scanner_columns = [
+        "Interwał",
+        "Para",
+        "Cena",
+        "EMA Szybka",
+        "EMA Wolna",
+        "ADX",
+        "RSI",
+        "Sygnał",
+        "Wolumen",
+    ]
+    df_scan = pd.DataFrame(scan_results)
+    df_scan = df_scan[[c for c in scanner_columns if c in df_scan.columns]]
+
     st.dataframe(
         df_scan,
         use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
+            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka", format="%.8f"),
+            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna", format="%.8f"),
+            "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
+            "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
+            "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
+        },
     )
 else:
     st.info(
