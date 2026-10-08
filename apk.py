@@ -228,13 +228,13 @@ for key, default_value in SESSION_DEFAULTS.items():
 AVAILABLE_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 DEFAULT_TF_VALUES = {
-    "1m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.5},
-    "5m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.8},
+    "1m":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.5},
+    "5m":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.8},
     "15m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 1.0},
     "30m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 1.5},
-    "1h": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 2.5},
-    "4h": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 4.0},
-    "1d": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 6.0},
+    "1h":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 2.5},
+    "4h":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 4.0},
+    "1d":  {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 6.0},
 }
 
 def _mtf_default_settings():
@@ -810,6 +810,111 @@ def get_exchange( api_k="", sec_k="", pass_k="", ex_name="Bitget", allow_public=
         return exchange_class(config)
     except Exception:
         return None
+
+
+def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, leverage, stop_loss_roe, take_profit_roe, ):
+    """Ustawia giełdowy SL i TP dokładnie według wartości ROE z panelu. ROE jest przeliczane na zmianę ceny instrumentu przez dźwignię: price_move = ROE / leverage Dzięki temu ustawienia z suwaków są identyczne z ochroną pozycji wystawioną na giełdzie, a nie tylko z lokalnym strażnikiem. """
+    result = {
+        "sl_price": None,
+        "tp_price": None,
+        "sl_ok": False,
+        "tp_ok": False,
+        "sl_error": "",
+        "tp_error": "",
+    }
+
+    try:
+        entry = float(entry_price or 0)
+        lev = max(1.0, float(leverage or 1.0))
+        sl_roe = max(0.0, float(stop_loss_roe or 0.0))
+        tp_roe = max(0.0, float(take_profit_roe or 0.0))
+        qty = abs(float(amount or 0.0))
+
+        if entry <= 0 or qty <= 0 or sl_roe <= 0 or tp_roe <= 0:
+            raise ValueError("Nieprawidłowe parametry SL/TP.")
+
+        side = str(position_side or "").lower()
+        is_long = side in ("buy", "long")
+        if not is_long and side not in ("sell", "short"):
+            raise ValueError(f"Nieznany kierunek pozycji: {position_side}")
+
+        sl_move = sl_roe / (100.0 * lev)
+        tp_move = tp_roe / (100.0 * lev)
+
+        if is_long:
+            sl_price = entry * (1.0 - sl_move)
+            tp_price = entry * (1.0 + tp_move)
+            close_side = "sell"
+        else:
+            sl_price = entry * (1.0 + sl_move)
+            tp_price = entry * (1.0 - tp_move)
+            close_side = "buy"
+
+        sl_price = float(exchange.price_to_precision(symbol, sl_price))
+        tp_price = float(exchange.price_to_precision(symbol, tp_price))
+        result["sl_price"] = sl_price
+        result["tp_price"] = tp_price
+
+        def _submit(trigger_price, kind):
+            # Najpierw używamy zunifikowanego CCXT stopLossPrice /
+            # takeProfitPrice. To jest bezpieczniejsza ścieżka niż
+            # ręczne parametry zależne od konkretnej giełdy.
+            unified_key = "stopLossPrice" if kind == "SL" else "takeProfitPrice"
+            params = {
+                "reduceOnly": True,
+                unified_key: trigger_price,
+            }
+            try:
+                return exchange.create_order(
+                    symbol,
+                    "market",
+                    close_side,
+                    qty,
+                    None,
+                    params,
+                )
+            except Exception as first_error:
+                # Druga zunifikowana ścieżka CCXT dla giełd, które
+                # oczekują bezpośrednio triggerPrice.
+                trigger_direction = (
+                    "1" if trigger_price > entry else "2"
+                )
+                fallback = {
+                    "reduceOnly": True,
+                    "triggerPrice": trigger_price,
+                    "triggerDirection": trigger_direction,
+                }
+                try:
+                    return exchange.create_order(
+                        symbol,
+                        "market",
+                        close_side,
+                        qty,
+                        None,
+                        fallback,
+                    )
+                except Exception as second_error:
+                    raise RuntimeError(
+                        f"{kind}: {first_error}; fallback: {second_error}"
+                    ) from second_error
+
+        try:
+            _submit(sl_price, "SL")
+            result["sl_ok"] = True
+        except Exception as exc:
+            result["sl_error"] = str(exc)
+
+        try:
+            _submit(tp_price, "TP")
+            result["tp_ok"] = True
+        except Exception as exc:
+            result["tp_error"] = str(exc)
+
+    except Exception as exc:
+        result["sl_error"] = str(exc)
+        result["tp_error"] = str(exc)
+
+    return result
 
 
 def calculate_risk_based_allocation( free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0, ):
@@ -2408,13 +2513,21 @@ if futures_ex:
                                 except Exception:
                                     pass
 
-                                stop_price = (
-                                    market_price * 0.98
-                                    if signal_type
-                                    == "LONG"
-                                    else market_price
-                                    * 1.02
-                                )
+                                # SL używany do wyliczenia wielkości pozycji MUSI być
+                                # dokładnie tym samym SL, który później wystawimy na giełdzie.
+                                # Nie stosujemy już sztywnego 2%.
+                                if enable_roe_guard:
+                                    roe_price_move = float(custom_stop_loss_roe) / (100.0 * max(float(chosen_lev), 1.0))
+                                    if signal_type == "LONG":
+                                        stop_price = market_price * (1.0 - roe_price_move)
+                                    else:
+                                        stop_price = market_price * (1.0 + roe_price_move)
+                                else:
+                                    stop_price = (
+                                        market_price * 0.98
+                                        if signal_type == "LONG"
+                                        else market_price * 1.02
+                                    )
 
                                 notional = (
                                     calculate_risk_based_allocation(
@@ -2448,12 +2561,44 @@ if futures_ex:
                                         else "sell"
                                     )
 
-                                    futures_ex.create_order(
+                                    entry_order = futures_ex.create_order(
                                         symbol,
                                         "market",
                                         o_side,
                                         amt_prec,
                                     )
+
+                                    # Używamy faktycznej ceny wykonania, jeśli giełda ją zwróci.
+                                    actual_entry = float(
+                                        (entry_order or {}).get("average")
+                                        or (entry_order or {}).get("price")
+                                        or market_price
+                                        or 0
+                                    )
+                                    filled_amount = float(
+                                        (entry_order or {}).get("filled")
+                                        or amt_prec
+                                        or 0
+                                    )
+
+                                    protection = {
+                                        "sl_ok": False,
+                                        "tp_ok": False,
+                                        "sl_price": None,
+                                        "tp_price": None,
+                                    }
+
+                                    if enable_roe_guard and actual_entry > 0 and filled_amount > 0:
+                                        protection = place_sl_tp_orders(
+                                            futures_ex,
+                                            symbol,
+                                            o_side,
+                                            filled_amount,
+                                            actual_entry,
+                                            chosen_lev,
+                                            custom_stop_loss_roe,
+                                            custom_take_profit_roe,
+                                        )
 
                                     st.session_state.signal_cooldown[
                                         cooldown_key
@@ -2479,6 +2624,21 @@ if futures_ex:
                                             ),
                                             "Dźwignia": (
                                                 f"{chosen_lev}x"
+                                            ),
+                                            "SL": (
+                                                f"{protection.get('sl_price'):.8f}"
+                                                if protection.get("sl_price")
+                                                else "BRAK"
+                                            ),
+                                            "TP": (
+                                                f"{protection.get('tp_price'):.8f}"
+                                                if protection.get("tp_price")
+                                                else "BRAK"
+                                            ),
+                                            "Ochrona": (
+                                                "SL + TP"
+                                                if protection.get("sl_ok") and protection.get("tp_ok")
+                                                else ("SL" if protection.get("sl_ok") else ("TP" if protection.get("tp_ok") else "BRAK"))
                                             ),
                                         },
                                     )
