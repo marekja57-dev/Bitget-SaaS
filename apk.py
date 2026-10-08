@@ -950,7 +950,7 @@ if st.query_params.get("success") == "true":
 # ============================================================
 
 st.markdown(
-    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } /* Spójna typografia panelu: taka sama rodzina liter jak logowanie i zielone kafelki. */ h1, h2, h3, h4, h5, h6, [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6 { font-family: 'Cinzel', serif !important; } h1, h2, h3, h4, h5, h6 { color: #f3d57a !important; letter-spacing: 0.5px; } [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label { color: #e6c687 !important; } [data-testid="stExpander"] summary p { font-family: 'Cinzel', serif !important; color: #f3d57a !important; font-weight: 700 !important; } </style> """,
+    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } /* Spójna typografia panelu: taka sama rodzina liter jak logowanie i zielone kafelki. */ /* Wyrównanie kafelków MTF: wszystkie kolumny mają równą wysokość i spokojnie mieszczą napisy. */ .st-key-mtf_grid [data-testid="stHorizontalBlock"] { align-items: stretch !important; gap: 0.55rem !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div { min-width: 0 !important; display: flex !important; align-items: stretch !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div > div { width: 100% !important; } /* Mniejsze, zwarte etykiety — bez rozpychania kafelków przez zawijanie tekstu. */ .st-key-mtf_grid [data-testid="stWidgetLabel"] p, .st-key-mtf_grid [data-testid="stWidgetLabel"] label { font-family: 'Cinzel', serif !important; font-size: 0.66rem !important; line-height: 1.05 !important; letter-spacing: 0 !important; margin-bottom: 0.12rem !important; } .st-key-mtf_grid .stRadio label, .st-key-mtf_grid [data-baseweb="radio"] label { font-size: 0.64rem !important; line-height: 1.05 !important; } .st-key-mtf_grid [data-testid="stCaptionContainer"], .st-key-mtf_grid [data-testid="stAlert"] { font-size: 0.62rem !important; line-height: 1.08 !important; } .st-key-mtf_grid div.stButton > button { min-height: 2.35rem !important; height: 2.35rem !important; padding: 0.25rem 0.35rem !important; font-size: 0.68rem !important; line-height: 1.0 !important; white-space: normal !important; } .st-key-mtf_grid [data-testid="stAlert"] { min-height: 3.4rem !important; padding: 0.45rem 0.5rem !important; } h1, h2, h3, h4, h5, h6, [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6 { font-family: 'Cinzel', serif !important; } h1, h2, h3, h4, h5, h6 { color: #f3d57a !important; letter-spacing: 0.5px; } [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label { color: #e6c687 !important; } [data-testid="stExpander"] summary p { font-family: 'Cinzel', serif !important; color: #f3d57a !important; font-weight: 700 !important; } </style> """,
     unsafe_allow_html=True,
 )
 
@@ -2571,176 +2571,120 @@ st.text(
     "Zmiana wartości wpływa na uruchomione boty."
 )
 
-cols_tf = st.columns(
-    len(AVAILABLE_TIMEFRAMES)
-)
+with st.container(key="mtf_grid"):
+    cols_tf = st.columns(
+        len(AVAILABLE_TIMEFRAMES)
+    )
 
-for idx, tf in enumerate(
-    AVAILABLE_TIMEFRAMES
-):
+    for idx, tf in enumerate(
+        AVAILABLE_TIMEFRAMES
+    ):
 
-    with cols_tf[idx]:
+        with cols_tf[idx]:
 
-        st.markdown(
-            f"**{tf}**"
-        )
-
-        # ----------------------------------------------------
-        # UWAGA:
-        # Widgety korzystają BEZPOŚREDNIO z kluczy session_state.
-        # Nie podajemy za każdym rerun wartości "value="
-        # z nowo obliczonych zmiennych.
-        # ----------------------------------------------------
-
-        bot_mode = st.radio(
-            f"Tryb ({tf})",
-            ["Automatyczny", "Ręczny"],
-            key=f"radio_mode_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        ema_f_val = st.number_input(
-            f"EMA Szybka ({tf})",
-            min_value=1,
-            max_value=200,
-            step=1,
-            key=f"ema_f_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        ema_s_val = st.number_input(
-            f"EMA Wolna ({tf})",
-            min_value=2,
-            max_value=300,
-            step=1,
-            key=f"ema_s_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        if ema_f_val >= ema_s_val:
-            st.warning(
-                "EMA szybka musi mieć krótszy okres niż EMA wolna. "
-                "Dla obliczeń używam EMA wolnej minus 1."
-            )
-            eff_ema_slow = int(ema_s_val)
-            eff_ema_fast = max(1, eff_ema_slow - 1)
-        else:
-            eff_ema_fast = int(ema_f_val)
-            eff_ema_slow = int(ema_s_val)
-
-        adx_val = st.slider(
-            f"Min ADX ({tf})",
-            min_value=10.0,
-            max_value=50.0,
-            step=1.0,
-            key=f"adx_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        max_rsi_val = st.slider(
-            f"Max RSI Long ({tf})",
-            min_value=50.0,
-            max_value=95.0,
-            step=1.0,
-            key=f"max_rsi_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        min_rsi_val = st.slider(
-            f"Min RSI Short ({tf})",
-            min_value=5.0,
-            max_value=50.0,
-            step=1.0,
-            key=f"min_rsi_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        tf_cap_mult = st.number_input(
-            f"Mnożnik kwoty ({tf})",
-            min_value=0.1,
-            max_value=20.0,
-            step=0.5,
-            key=f"cap_mult_{tf}",
-            on_change=_save_mtf_callback,
-        )
-
-        if bot_mode == "Automatyczny":
-            st.info(
-                "Auto: suwaki są bazą, "
-                "a optymalizator dobiera parametry w locie."
-            )
-        else:
-            st.caption(
-                "Ręczny: bot używa dokładnie "
-                "wartości z suwaków."
+            st.markdown(
+                f"**{tf}**"
             )
 
-        # ----------------------------------------------------
-        # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
-        # ----------------------------------------------------
+            # ----------------------------------------------------
+            # UWAGA:
+            # Widgety korzystają BEZPOŚREDNIO z kluczy session_state.
+            # Nie podajemy za każdym rerun wartości "value="
+            # z nowo obliczonych zmiennych.
+            # ----------------------------------------------------
 
-        if tf in st.session_state.active_mtf_bots:
-            st.session_state.active_mtf_bots[
-                tf
-            ].update(
-                {
-                    "mode": bot_mode,
-                    "ema_fast": eff_ema_fast,
-                    "ema_slow": eff_ema_slow,
-                    "min_adx": float(adx_val),
-                    "max_rsi": float(max_rsi_val),
-                    "min_rsi": float(min_rsi_val),
-                    "capital_multiplier": float(
-                        tf_cap_mult
-                    ),
-                }
+            bot_mode = st.radio(
+                f"Tryb ({tf})",
+                ["Automatyczny", "Ręczny"],
+                key=f"radio_mode_{tf}",
+                on_change=_save_mtf_callback,
             )
 
-        is_active = (
-            tf
-            in st.session_state.active_mtf_bots
-        )
+            ema_f_val = st.number_input(
+                f"EMA Szybka ({tf})",
+                min_value=1,
+                max_value=200,
+                step=1,
+                key=f"ema_f_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-        if is_active:
+            ema_s_val = st.number_input(
+                f"EMA Wolna ({tf})",
+                min_value=2,
+                max_value=300,
+                step=1,
+                key=f"ema_s_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-            st.success("AKTYWNY")
+            if ema_f_val >= ema_s_val:
+                st.warning(
+                    "EMA szybka musi mieć krótszy okres niż EMA wolna. "
+                    "Dla obliczeń używam EMA wolnej minus 1."
+                )
+                eff_ema_slow = int(ema_s_val)
+                eff_ema_fast = max(1, eff_ema_slow - 1)
+            else:
+                eff_ema_fast = int(ema_f_val)
+                eff_ema_slow = int(ema_s_val)
 
-            if st.button(
-                f"Zatrzymaj {tf}",
-                key=f"stop_tf_{tf}",
-                use_container_width=True,
-            ):
-                del st.session_state.active_mtf_bots[tf]
-                save_active_bots(st.session_state.user_id)
-                st.rerun()
+            adx_val = st.slider(
+                f"Min ADX ({tf})",
+                min_value=10.0,
+                max_value=50.0,
+                step=1.0,
+                key=f"adx_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-        else:
+            max_rsi_val = st.slider(
+                f"Max RSI Long ({tf})",
+                min_value=50.0,
+                max_value=95.0,
+                step=1.0,
+                key=f"max_rsi_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-            st.warning("WYŁĄCZONY")
+            min_rsi_val = st.slider(
+                f"Min RSI Short ({tf})",
+                min_value=5.0,
+                max_value=50.0,
+                step=1.0,
+                key=f"min_rsi_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-            if st.button(
-                f"Uruchom {tf}",
-                key=f"start_tf_{tf}",
-                use_container_width=True,
-            ):
+            tf_cap_mult = st.number_input(
+                f"Mnożnik kwoty ({tf})",
+                min_value=0.1,
+                max_value=20.0,
+                step=0.5,
+                key=f"cap_mult_{tf}",
+                on_change=_save_mtf_callback,
+            )
 
-                if (
-                    not st.session_state.api_key
-                    or not st.session_state.secret_key
-                ):
-                    st.error(
-                        "Najpierw zapisz klucze API "
-                        "w panelu bocznym!"
-                    )
+            if bot_mode == "Automatyczny":
+                st.info(
+                    "Auto: suwaki są bazą, "
+                    "a optymalizator dobiera parametry w locie."
+                )
+            else:
+                st.caption(
+                    "Ręczny: bot używa dokładnie "
+                    "wartości z suwaków."
+                )
 
-                else:
+            # ----------------------------------------------------
+            # AKTUALIZACJA KONFIGURACJI AKTYWNEGO BOTA
+            # ----------------------------------------------------
 
-                    st.session_state.active_mtf_bots[
-                        tf
-                    ] = {
-                        "start_time": datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
+            if tf in st.session_state.active_mtf_bots:
+                st.session_state.active_mtf_bots[
+                    tf
+                ].update(
+                    {
                         "mode": bot_mode,
                         "ema_fast": eff_ema_fast,
                         "ema_slow": eff_ema_slow,
@@ -2751,11 +2695,68 @@ for idx, tf in enumerate(
                             tf_cap_mult
                         ),
                     }
+                )
 
+            is_active = (
+                tf
+                in st.session_state.active_mtf_bots
+            )
+
+            if is_active:
+
+                st.success("AKTYWNY")
+
+                if st.button(
+                    f"Zatrzymaj {tf}",
+                    key=f"stop_tf_{tf}",
+                    use_container_width=True,
+                ):
+                    del st.session_state.active_mtf_bots[tf]
                     save_active_bots(st.session_state.user_id)
-                    save_mtf_settings(st.session_state.user_id)
-                    st.success(f"Uruchomiono bota na {tf}!")
                     st.rerun()
+
+            else:
+
+                st.warning("WYŁĄCZONY")
+
+                if st.button(
+                    f"Uruchom {tf}",
+                    key=f"start_tf_{tf}",
+                    use_container_width=True,
+                ):
+
+                    if (
+                        not st.session_state.api_key
+                        or not st.session_state.secret_key
+                    ):
+                        st.error(
+                            "Najpierw zapisz klucze API "
+                            "w panelu bocznym!"
+                        )
+
+                    else:
+
+                        st.session_state.active_mtf_bots[
+                            tf
+                        ] = {
+                            "start_time": datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            "mode": bot_mode,
+                            "ema_fast": eff_ema_fast,
+                            "ema_slow": eff_ema_slow,
+                            "min_adx": float(adx_val),
+                            "max_rsi": float(max_rsi_val),
+                            "min_rsi": float(min_rsi_val),
+                            "capital_multiplier": float(
+                                tf_cap_mult
+                            ),
+                        }
+
+                        save_active_bots(st.session_state.user_id)
+                        save_mtf_settings(st.session_state.user_id)
+                        st.success(f"Uruchomiono bota na {tf}!")
+                        st.rerun()
 
 
 # Zapisz konfigurację aktywnych botów tylko wtedy, gdy UI ją zmieniło.
