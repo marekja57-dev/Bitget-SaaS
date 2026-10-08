@@ -2506,6 +2506,7 @@ def run_streamlit_app() -> None:
     init_db()
     # Non-blocking background trading. No sleep/rerun is performed on the
     # Streamlit request thread.
+    global MANAGER
     MANAGER = get_streamlit_worker_service()
 
     for key, value in SESSION_DEFAULTS.items():
