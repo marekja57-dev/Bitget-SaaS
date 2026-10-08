@@ -711,10 +711,17 @@ def fetch_ohlcv_safe(exchange, symbol: str, timeframe: str, limit: int = 200) ->
 # ============================================================
 # WSKAŹNIKI / SYGNAŁY
 # ============================================================
+import pandas as pd
+import numpy as np
+from typing import Dict, Tuple, Any
 
-def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_period: int = 14, ) -> pd.DataFrame:
+def calculate_indicators(df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_period: int = 14) -> pd.DataFrame:
     """Calculate real indicators from the supplied OHLCV candles only."""
     out = df.copy()
+    
+    # Zabezpieczenie: unifikujemy nazwy kolumn do małych liter (obsługuje 'Close', 'CLOSE', 'close' itp.)
+    out.columns = [str(c).lower() for c in out.columns]
+    
     for col in ["open", "high", "low", "close", "volume"]:
         if col not in out.columns:
             out[col] = np.nan
@@ -724,13 +731,8 @@ def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_pe
     slow = max(fast + 1, int(ema_slow))
     period = max(2, int(adx_period))
 
-    # EMA is ALWAYS calculated from the actual close series.
-    out["ema_fast"] = out["close"].ewm(
-        span=fast, adjust=False, min_periods=fast
-    ).mean()
-    out["ema_slow"] = out["close"].ewm(
-        span=slow, adjust=False, min_periods=slow
-    ).mean()
+    out["ema_fast"] = out["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    out["ema_slow"] = out["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
 
     e12 = out["close"].ewm(span=12, adjust=False, min_periods=12).mean()
     e26 = out["close"].ewm(span=26, adjust=False, min_periods=26).mean()
@@ -769,7 +771,6 @@ def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_pe
         alpha=alpha, adjust=False, min_periods=period
     ).mean().clip(0.0, 100.0)
 
-    # Wilder RSI. No arbitrary 50 is inserted into valid market data.
     delta = out["close"].diff()
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
@@ -786,7 +787,9 @@ def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_pe
 
 def get_dynamic_parameters(df: pd.DataFrame, tf: str) -> Dict[str, float]:
     try:
-        closes = pd.to_numeric(df["close"], errors="coerce").dropna().values
+        temp_df = df.copy()
+        temp_df.columns = [str(c).lower() for c in temp_df.columns]
+        closes = pd.to_numeric(temp_df["close"], errors="coerce").dropna().values
         if len(closes) < 30:
             raise ValueError("not enough data")
 
@@ -832,39 +835,23 @@ def get_dynamic_parameters(df: pd.DataFrame, tf: str) -> Dict[str, float]:
         }
 
 
-def blend_params( base: Dict[str, Any], opt: Dict[str, Any], base_weight: float = 0.5, ) -> Dict[str, Any]:
+def blend_params(base: Dict[str, Any], opt: Dict[str, Any], base_weight: float = 0.5) -> Dict[str, Any]:
     w = max(0.0, min(1.0, float(base_weight)))
     return {
-        "ema_fast": max(
-            1,
-            int(round(
-                base["ema_fast"] * w
-                + opt["ema_fast"] * (1 - w)
-            )),
-        ),
-        "ema_slow": max(
-            2,
-            int(round(
-                base["ema_slow"] * w
-                + opt["ema_slow"] * (1 - w)
-            )),
-        ),
+        "ema_fast": max(1, int(round(base["ema_fast"] * w + opt["ema_fast"] * (1 - w)))),
+        "ema_slow": max(2, int(round(base["ema_slow"] * w + opt["ema_slow"] * (1 - w)))),
         "min_adx": base["min_adx"] * w + opt["min_adx"] * (1 - w),
         "max_rsi": base["max_rsi"] * w + opt["max_rsi"] * (1 - w),
         "min_rsi": base["min_rsi"] * w + opt["min_rsi"] * (1 - w),
-        "capital_multiplier": (
-            base["capital_multiplier"] * w
-            + opt["capital_multiplier"] * (1 - w)
-        ),
+        "capital_multiplier": base["capital_multiplier"] * w + opt["capital_multiplier"] * (1 - w),
     }
 
 
-def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = 0.5, ) -> Tuple[str, Dict[str, float]]:
+def signal_from_closed_candle(df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = 0.5) -> Tuple[str, Dict[str, float]]:
     """Return signal + real indicator values from the last closed candle."""
     if df is None or len(df) < 80:
         return "NEUTRALNY", {}
 
-    # These are the actual configured periods for THIS timeframe.
     fast = max(1, int(cfg.get("ema_fast", 9)))
     slow = max(fast + 1, int(cfg.get("ema_slow", 21)))
 
@@ -873,9 +860,6 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
     min_rsi = float(cfg.get("min_rsi", 25.0))
     cap_mult = float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0)))
 
-    # Automatic mode only adjusts thresholds/risk. It is NOT allowed to
-    # replace the EMA periods, otherwise the table can show indicators from
-    # parameters different from those configured for the timeframe.
     if cfg.get("mode") == "Automatyczny":
         auto = get_dynamic_parameters(df, cfg.get("tf", "15m"))
         w = max(0.0, min(1.0, float(auto_base_influence)))
@@ -888,7 +872,6 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
     if len(ind) < max(80, slow + 30):
         return "NEUTRALNY", {}
 
-    # -2 is the last completely closed candle.
     last = ind.iloc[-2]
     prev = ind.iloc[-3]
 
@@ -896,6 +879,15 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
         "close", "adx", "rsi", "plus_di", "minus_di",
         "ema_fast", "ema_slow", "macd_hist",
     ]
+    
+    # Bezpieczne sprawdzanie wartości numerycznych
+    def safe_float(val, default=0.0):
+        try:
+            res = float(val)
+            return res if np.isfinite(res) else default
+        except Exception:
+            return default
+
     if any(not np.isfinite(safe_float(last[c], np.nan)) for c in required):
         return "NEUTRALNY", {}
     if any(not np.isfinite(safe_float(prev[c], np.nan)) for c in [
@@ -917,8 +909,6 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
         "capital_multiplier": cap_mult,
     }
 
-    # Hard sanity checks. Values outside the mathematical range are never
-    # allowed into SQLite or into the order decision.
     if not (0.0 <= values["adx"] <= 100.0 and 0.0 <= values["rsi"] <= 100.0):
         return "NEUTRALNY", {}
     if not (0.0 <= values["plus_di"] <= 100.0 and 0.0 <= values["minus_di"] <= 100.0):
