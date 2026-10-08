@@ -599,6 +599,7 @@ def signal_from_closed_candle(df: pd.DataFrame, cfg: Dict[str, Any], auto_base_i
 # ============================================================
 # ORDERS / RISK
 # ============================================================
+
 def calculate_risk_allocation(free_balance: float, entry: float, stop_price: float, leverage: int, max_single: float, tf_multiplier: float) -> float:
     if free_balance <= 0 or entry <= 0 or stop_price <= 0:
         return 0.0
@@ -676,7 +677,6 @@ def place_entry_with_protection(exchange, symbol: str, signal: str, amount: floa
     log.info("Entry %s %s avg=%s SL=%s TP=%s native_sl=%s native_tp=%s", symbol, signal, entry, stop_price, take_price,
              bool(sl_order), bool(tp_order))
     return order, stop_price, take_price
-
 
 # ============================================================
 # USER CONFIG / WORKER
