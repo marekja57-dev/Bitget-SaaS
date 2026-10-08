@@ -2497,6 +2497,7 @@ def render_scanner_live(user_id: int, max_scan: int, active_count: int) -> None:
 
 
 def run_streamlit_app() -> None:
+    global MANAGER
     st.set_page_config(
         page_title="Multi-Exchange Futures SaaS",
         layout="wide",
