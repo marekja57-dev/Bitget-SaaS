@@ -28,6 +28,13 @@ except Exception:
 # KONFIGURACJA
 # ============================================================
 
+def env_int(name: str, default: int, minimum: int = 0) -> int:
+    """Read an integer environment variable without crashing the app."""
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return max(minimum, int(default))
+
 DB_FILE = os.getenv("DB_FILE", "users.db")
 LOG_FILE = os.getenv("BOT_LOG_FILE", "trading_bot.log")
 ALLOW_TEST_ACTIVATION = os.getenv("ALLOW_TEST_ACTIVATION", "0") == "1"
@@ -63,9 +70,11 @@ DEFAULT_MANUAL_LEVERAGE = 5
 DEFAULT_MAX_SCAN_PAIRS = 30
 MIN_QUOTE_VOLUME = 1_000_000.0
 
-WORKER_POLL_SECONDS = max(2, int(os.getenv("BOT_POLL_SECONDS", "5")))
-POSITION_GUARD_SECONDS = max(1, int(os.getenv("POSITION_GUARD_SECONDS", "3")))
-SCAN_CACHE_SECONDS = max(5, int(os.getenv("SCAN_CACHE_SECONDS", "15")))
+WORKER_POLL_SECONDS = env_int("BOT_POLL_SECONDS", 5, 2)
+POSITION_GUARD_SECONDS = env_int("POSITION_GUARD_SECONDS", 3, 1)
+SCAN_CACHE_SECONDS = env_int("SCAN_CACHE_SECONDS", 15, 5)
+SCAN_BATCH_SIZE = env_int("SCAN_BATCH_SIZE", 8, 3)
+UI_REFRESH_DEFAULT = env_int("UI_REFRESH_SECONDS", 10, 5)
 
 if stripe is not None and STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
@@ -1240,6 +1249,9 @@ def save_scanner_rows( user_id: int, rows: List[Dict[str, Any]], ) -> None:
     if not rows:
         return
 
+    if not rows:
+        return
+
     conn = db_connect()
     try:
         for row in rows:
@@ -1290,6 +1302,10 @@ class UserWorker:
         self.entry_locks: Dict[str, float] = {}
         self.last_protection_check = 0.0
         self.last_scan_by_tf: Dict[str, float] = {}
+        self.scan_cursor_by_tf: Dict[str, int] = {}
+        self.scan_round_robin = 0
+        self.last_successful_scan_at = 0.0
+        self.last_error_at = 0.0
         self.markets_loaded = False
         self.last_tickers_at = 0.0
         self.cached_tickers: Dict[str, Any] = {}
@@ -1301,6 +1317,10 @@ class UserWorker:
             return
 
         bots = load_active_bots(self.user_id)
+        bots = {
+            tf: cfg for tf, cfg in bots.items()
+            if tf in AVAILABLE_TIMEFRAMES and isinstance(cfg, dict)
+        }
         if not bots:
             return
 
@@ -1338,10 +1358,17 @@ class UserWorker:
         free_balance = balance_snapshot["free"]
 
         if now - self.last_ranked_at >= 60.0 or not self.cached_ranked:
-            self.cached_ranked = rank_liquid_symbols(
-                self.exchange, tickers, int(risk["max_scan_pairs"])
-            )
-            self.last_ranked_at = now
+            try:
+                self.cached_ranked = rank_liquid_symbols(
+                    self.exchange, tickers, int(risk["max_scan_pairs"])
+                )
+                self.last_ranked_at = now
+            except Exception as exc:
+                self.last_error_at = time.time()
+                log.exception(
+                    "Ranking failed user=%s: %s", self.user_id, exc
+                )
+                return
         else:
             # The user can change max_scan_pairs without waiting a minute.
             self.cached_ranked = self.cached_ranked[:max(1, int(risk["max_scan_pairs"]))]
@@ -1354,260 +1381,302 @@ class UserWorker:
             )
             return
 
-        # Each timeframe is scanned independently and results are persisted.
-        # The cache prevents a 5-second worker loop from hammering the exchange.
-        for tf, raw_cfg in list(bots.items()):
-            if tf not in AVAILABLE_TIMEFRAMES:
-                continue
+        # IMPORTANT: never scan every timeframe x every pair in one long
+        # blocking pass. That made the first scan take so long that the UI
+        # looked as if the background scanner had stopped. The worker now
+        # time-slices the workload: one timeframe and a small batch of pairs
+        # per cycle. SQLite keeps the results, so the table is continuously
+        # updated while the worker keeps moving through the full ranked list.
+        due_tfs = [
+            tf for tf in bots
+            if tf in AVAILABLE_TIMEFRAMES
+            and time.time() - self.last_scan_by_tf.get(tf, 0.0) >= SCAN_CACHE_SECONDS
+        ]
+        if not due_tfs:
+            return
 
-            if (
-                time.time() - self.last_scan_by_tf.get(tf, 0.0)
-                < SCAN_CACHE_SECONDS
-            ):
-                continue
+        due_tfs.sort(key=lambda tf: self.last_scan_by_tf.get(tf, 0.0))
+        tf = due_tfs[0]
+        cfg = dict(bots[tf])
+        cfg["tf"] = tf
 
-            self.last_scan_by_tf[tf] = time.time()
+        cursor = int(self.scan_cursor_by_tf.get(tf, 0))
+        if cursor >= len(ranked):
+            cursor = 0
+        batch = ranked[cursor:cursor + SCAN_BATCH_SIZE]
+        if not batch:
+            cursor = 0
+            batch = ranked[:SCAN_BATCH_SIZE]
 
-            cfg = dict(raw_cfg)
-            cfg["tf"] = tf
+        next_cursor = cursor + len(batch)
+        self.scan_cursor_by_tf[tf] = 0 if next_cursor >= len(ranked) else next_cursor
+        self.last_scan_by_tf[tf] = time.time()
 
-            scanner_rows: List[Dict[str, Any]] = []
+        scanner_rows: List[Dict[str, Any]] = []
 
-            for symbol, qv in ranked:
-                try:
-                    # Daily candles need substantially more history than the
-                    # intraday timeframes. 180 keeps indicators stable without
-                    # retaining huge DataFrames in memory.
-                    limit = 180 if tf == "1d" else min(180, max(100, int(cfg.get("ema_slow", 21)) + 60))
+        for symbol, qv in batch:
+            try:
+                limit = (
+                    180
+                    if tf == "1d"
+                    else min(180, max(100, int(cfg.get("ema_slow", 21)) + 60))
+                )
 
-                    ohlcv = fetch_ohlcv_safe(
-                        self.exchange,
-                        symbol,
-                        tf,
-                        limit,
+                ohlcv = fetch_ohlcv_safe(
+                    self.exchange, symbol, tf, limit
+                )
+
+                min_bars = 70 if tf == "1d" else 60
+                if len(ohlcv) < min_bars:
+                    log.debug(
+                        "Not enough candles user=%s tf=%s symbol=%s got=%s",
+                        self.user_id, tf, symbol, len(ohlcv)
                     )
+                    continue
 
-                    min_bars = 70 if tf == "1d" else 60
-                    if len(ohlcv) < min_bars:
-                        continue
+                closed_candle_ts = int(ohlcv[-2][0])
+                df = pd.DataFrame(
+                    ohlcv,
+                    columns=[
+                        "timestamp", "open", "high", "low",
+                        "close", "volume",
+                    ],
+                )
 
-                    closed_candle_ts = int(
-                        ohlcv[-2][0]
+                signal, vals = signal_from_closed_candle(
+                    df,
+                    cfg,
+                    float(risk["auto_base_influence"]) / 100.0,
+                )
+
+                fallback_price = safe_float(
+                    ohlcv[-2][4] if len(ohlcv) >= 2 else 0.0
+                )
+                scanner_rows.append({
+                    "timeframe": tf,
+                    "symbol": symbol,
+                    "quote_volume": qv,
+                    "price": safe_float(vals.get("price"), fallback_price),
+                    "adx": safe_float(vals.get("adx"), 0.0),
+                    "rsi": safe_float(vals.get("rsi"), 50.0),
+                    "ema_fast": safe_float(vals.get("ema_fast"), fallback_price),
+                    "ema_slow": safe_float(vals.get("ema_slow"), fallback_price),
+                    "signal": signal,
+                    "candle_ts": closed_candle_ts,
+                })
+
+                # Entry section.
+                if signal == "NEUTRALNY":
+                    continue
+
+                if active_count >= int(
+                    risk["max_positions"]
+                ):
+                    break
+
+                if symbol in pos_map:
+                    continue
+
+                if time.time() < self.cooldowns.get(symbol, 0):
+                    continue
+
+                if time.time() < self.entry_locks.get(symbol, 0):
+                    continue
+
+                if entry_guard_blocks(
+                    self.user_id,
+                    symbol,
+                    closed_candle_ts,
+                ):
+                    continue
+
+                # pos_map was fetched once immediately before the scan.
+                # Re-fetching the entire account for every candidate was a
+                # major source of latency/rate-limit pressure.
+                if symbol in pos_map:
+                    continue
+
+                max_ex = exchange_max_leverage(
+                    self.exchange,
+                    symbol,
+                    int(risk["max_leverage"]),
+                )
+
+                if risk["leverage_mode"] == "Ręczny":
+                    lev = min(
+                        int(risk["manual_leverage"]),
+                        max_ex,
                     )
-
-                    df = pd.DataFrame(
-                        ohlcv,
-                        columns=[
-                            "timestamp",
-                            "open",
-                            "high",
-                            "low",
-                            "close",
-                            "volume",
-                        ],
+                else:
+                    adx = safe_float(
+                        vals.get("adx"),
+                        20.0,
                     )
-
-                    signal, vals = signal_from_closed_candle(
-                        df,
-                        cfg,
-                        float(
-                            risk["auto_base_influence"]
-                        ) / 100.0,
-                    )
-
-                    # Never write a fake zero just because the signal is
-                    # neutral. The scanner must still show the last closed
-                    # price and the indicators when a setup is simply not
-                    # strong enough to trade.
-                    fallback_price = safe_float(ohlcv[-2][4]) if len(ohlcv) >= 2 else 0.0
-                    scanner_rows.append({
-                        "timeframe": tf,
-                        "symbol": symbol,
-                        "quote_volume": qv,
-                        "price": safe_float(vals.get("price"), fallback_price),
-                        "adx": safe_float(vals.get("adx"), 0.0),
-                        "rsi": safe_float(vals.get("rsi"), 50.0),
-                        "ema_fast": safe_float(vals.get("ema_fast"), fallback_price),
-                        "ema_slow": safe_float(vals.get("ema_slow"), fallback_price),
-                        "signal": signal,
-                        "candle_ts": closed_candle_ts,
-                    })
-
-                    # Entry section.
-                    if signal == "NEUTRALNY":
-                        continue
-
-                    if active_count >= int(
-                        risk["max_positions"]
-                    ):
-                        break
-
-                    if symbol in pos_map:
-                        continue
-
-                    if time.time() < self.cooldowns.get(symbol, 0):
-                        continue
-
-                    if time.time() < self.entry_locks.get(symbol, 0):
-                        continue
-
-                    if entry_guard_blocks(
-                        self.user_id,
-                        symbol,
-                        closed_candle_ts,
-                    ):
-                        continue
-
-                    # pos_map was fetched once immediately before the scan.
-                    # Re-fetching the entire account for every candidate was a
-                    # major source of latency/rate-limit pressure.
-                    if symbol in pos_map:
-                        continue
-
-                    max_ex = exchange_max_leverage(
-                        self.exchange,
-                        symbol,
-                        int(risk["max_leverage"]),
-                    )
-
-                    if risk["leverage_mode"] == "Ręczny":
-                        lev = min(
-                            int(risk["manual_leverage"]),
-                            max_ex,
-                        )
-                    else:
-                        adx = safe_float(
-                            vals.get("adx"),
-                            20.0,
-                        )
-                        ratio = min(
-                            1.0,
-                            max(
-                                0.0,
-                                (adx - 10.0) / 45.0,
-                            ),
-                        )
-                        lev = max(
-                            1,
-                            int(round(
-                                1
-                                + ratio
-                                * (
-                                    min(
-                                        int(
-                                            risk[
-                                                "max_leverage"
-                                            ]
-                                        ),
-                                        max_ex,
-                                    )
-                                    - 1
-                                )
-                            )),
-                        )
-
-                    set_leverage_safe(
-                        self.exchange,
-                        symbol,
-                        lev,
-                    )
-
-                    entry_hint = (
-                        safe_float(
-                            (tickers.get(symbol) or {}).get(
-                                "last"
-                            )
-                        )
-                        or safe_float(
-                            vals.get("price")
-                        )
-                    )
-
-                    if entry_hint <= 0:
-                        continue
-
-                    initial_stop = roe_to_price(
-                        entry_hint,
-                        float(risk["stop_roe"]),
-                        lev,
-                        signal == "LONG",
-                    )
-
-                    notional = calculate_risk_allocation(
-                        free_balance,
-                        entry_hint,
-                        initial_stop,
-                        lev,
-                        float(risk["max_single"]),
-                        float(
-                            vals.get(
-                                "capital_multiplier",
-                                1.0,
-                            )
+                    ratio = min(
+                        1.0,
+                        max(
+                            0.0,
+                            (adx - 10.0) / 45.0,
                         ),
                     )
-
-                    if notional <= 0:
-                        continue
-
-                    # Base amount -> contract count.
-                    base_amount = notional / entry_hint
-                    contracts = base_amount_to_contracts(
-                        self.exchange,
-                        symbol,
-                        base_amount,
+                    lev = max(
+                        1,
+                        int(round(
+                            1
+                            + ratio
+                            * (
+                                min(
+                                    int(
+                                        risk[
+                                            "max_leverage"
+                                        ]
+                                    ),
+                                    max_ex,
+                                )
+                                - 1
+                            )
+                        )),
                     )
 
-                    min_amt, min_cost, _ = market_limits(
-                        self.exchange,
-                        symbol,
+                set_leverage_safe(
+                    self.exchange,
+                    symbol,
+                    lev,
+                )
+
+                entry_hint = (
+                    safe_float(
+                        (tickers.get(symbol) or {}).get(
+                            "last"
+                        )
                     )
+                    or safe_float(
+                        vals.get("price")
+                    )
+                )
 
-                    if min_amt and contracts < min_amt:
-                        contracts = min_amt
+                if entry_hint <= 0:
+                    continue
 
-                    # min cost is quote notional. Convert it into contracts.
-                    if min_cost:
-                        current_quote = (
-                            contracts
-                            * contract_size(
+                initial_stop = roe_to_price(
+                    entry_hint,
+                    float(risk["stop_roe"]),
+                    lev,
+                    signal == "LONG",
+                )
+
+                notional = calculate_risk_allocation(
+                    free_balance,
+                    entry_hint,
+                    initial_stop,
+                    lev,
+                    float(risk["max_single"]),
+                    float(
+                        vals.get(
+                            "capital_multiplier",
+                            1.0,
+                        )
+                    ),
+                )
+
+                if notional <= 0:
+                    continue
+
+                # Base amount -> contract count.
+                base_amount = notional / entry_hint
+                contracts = base_amount_to_contracts(
+                    self.exchange,
+                    symbol,
+                    base_amount,
+                )
+
+                min_amt, min_cost, _ = market_limits(
+                    self.exchange,
+                    symbol,
+                )
+
+                if min_amt and contracts < min_amt:
+                    contracts = min_amt
+
+                # min cost is quote notional. Convert it into contracts.
+                if min_cost:
+                    current_quote = (
+                        contracts
+                        * contract_size(
+                            self.exchange,
+                            symbol,
+                        )
+                        * entry_hint
+                    )
+                    if current_quote < min_cost:
+                        contracts = (
+                            min_cost
+                            / entry_hint
+                            / contract_size(
                                 self.exchange,
                                 symbol,
                             )
-                            * entry_hint
                         )
-                        if current_quote < min_cost:
-                            contracts = (
-                                min_cost
-                                / entry_hint
-                                / contract_size(
-                                    self.exchange,
-                                    symbol,
-                                )
-                            )
 
-                    contracts = float(
-                        self.exchange.amount_to_precision(
-                            symbol,
-                            contracts,
+                contracts = float(
+                    self.exchange.amount_to_precision(
+                        symbol,
+                        contracts,
+                    )
+                )
+
+                if contracts <= 0:
+                    continue
+
+                # Durable lock BEFORE order.
+                lock_seconds = max(
+                    300.0,
+                    float(
+                        risk.get(
+                            "cooldown_minutes",
+                            15,
                         )
+                    ) * 60.0,
+                )
+
+                self.entry_locks[symbol] = (
+                    time.time() + lock_seconds
+                )
+
+                set_entry_guard(
+                    self.user_id,
+                    symbol,
+                    time.time() + lock_seconds,
+                    closed_candle_ts,
+                    signal,
+                )
+
+                order, sl_price, tp_price = (
+                    place_entry_with_protection(
+                        self.exchange,
+                        symbol,
+                        signal,
+                        contracts,
+                        lev,
+                        float(risk["stop_roe"]),
+                        float(risk["take_roe"]),
+                        self.user_id,
                     )
+                )
 
-                    if contracts <= 0:
-                        continue
+                if order:
+                    active_count += 1
 
-                    # Durable lock BEFORE order.
-                    lock_seconds = max(
-                        300.0,
-                        float(
-                            risk.get(
-                                "cooldown_minutes",
-                                15,
-                            )
-                        ) * 60.0,
-                    )
+                    # The entry order was accepted. Mark the symbol as
+                    # occupied locally; the next worker cycle will reconcile
+                    # against the exchange positions.
+                    pos_map[symbol] = {
+                        "symbol": symbol,
+                        "contracts": contracts,
+                        "side": "long" if signal == "LONG" else "short",
+                    }
 
-                    self.entry_locks[symbol] = (
+                    self.cooldowns[symbol] = (
                         time.time() + lock_seconds
                     )
 
@@ -1619,91 +1688,56 @@ class UserWorker:
                         signal,
                     )
 
-                    order, sl_price, tp_price = (
-                        place_entry_with_protection(
-                            self.exchange,
-                            symbol,
-                            signal,
-                            contracts,
-                            lev,
-                            float(risk["stop_roe"]),
-                            float(risk["take_roe"]),
-                            self.user_id,
-                        )
-                    )
-
-                    if order:
-                        active_count += 1
-
-                        # The entry order was accepted. Mark the symbol as
-                        # occupied locally; the next worker cycle will reconcile
-                        # against the exchange positions.
-                        pos_map[symbol] = {
-                            "symbol": symbol,
-                            "contracts": contracts,
-                            "side": "long" if signal == "LONG" else "short",
-                        }
-
-                        self.cooldowns[symbol] = (
-                            time.time() + lock_seconds
-                        )
-
-                        set_entry_guard(
-                            self.user_id,
-                            symbol,
-                            time.time() + lock_seconds,
-                            closed_candle_ts,
-                            signal,
-                        )
-
-                        log_trade(
-                            self.user_id,
-                            symbol,
-                            tf,
-                            "ENTRY",
-                            signal,
-                            entry_hint,
-                            contracts,
-                            str(
-                                order.get("id", "")
-                            ),
-                            (
-                                f"SL={sl_price};"
-                                f"TP={tp_price};"
-                                f"LEV={lev};"
-                                f"CONTRACT_SIZE="
-                                f"{contract_size(self.exchange, symbol)}"
-                            ),
-                        )
-                    else:
-                        retry_lock = max(
-                            60.0,
-                            float(
-                                risk.get(
-                                    "cooldown_minutes",
-                                    15,
-                                )
-                            ) * 60.0,
-                        )
-                        self.cooldowns[symbol] = (
-                            time.time() + retry_lock
-                        )
-                        self.entry_locks[symbol] = (
-                            time.time() + retry_lock
-                        )
-
-                except Exception as exc:
-                    log.exception(
-                        "Signal/order failed user=%s tf=%s symbol=%s: %s",
+                    log_trade(
                         self.user_id,
-                        tf,
                         symbol,
-                        exc,
+                        tf,
+                        "ENTRY",
+                        signal,
+                        entry_hint,
+                        contracts,
+                        str(
+                            order.get("id", "")
+                        ),
+                        (
+                            f"SL={sl_price};"
+                            f"TP={tp_price};"
+                            f"LEV={lev};"
+                            f"CONTRACT_SIZE="
+                            f"{contract_size(self.exchange, symbol)}"
+                        ),
+                    )
+                else:
+                    retry_lock = max(
+                        60.0,
+                        float(
+                            risk.get(
+                                "cooldown_minutes",
+                                15,
+                            )
+                        ) * 60.0,
+                    )
+                    self.cooldowns[symbol] = (
+                        time.time() + retry_lock
+                    )
+                    self.entry_locks[symbol] = (
+                        time.time() + retry_lock
                     )
 
-            save_scanner_rows(
-                self.user_id,
-                scanner_rows,
+            except Exception as exc:
+                self.last_error_at = time.time()
+                log.exception(
+                    "Signal/order failed user=%s tf=%s symbol=%s: %s",
+                    self.user_id, tf, symbol, exc,
+                )
+
+        if scanner_rows:
+            save_scanner_rows(self.user_id, scanner_rows)
+            self.last_successful_scan_at = time.time()
+            log.info(
+                "SCAN OK user=%s tf=%s batch=%s cursor=%s/%s",
+                self.user_id, tf, len(scanner_rows),
+                self.scan_cursor_by_tf.get(tf, 0), len(ranked),
             )
 
     def protect_open_positions( self, risk: Dict[str, Any], ) -> None:
@@ -1868,9 +1902,9 @@ class UserWorker:
                     self.user_id,
                 )
 
-            stop_event.wait(
-                WORKER_POLL_SECONDS
-            )
+            # Do not sleep in the Streamlit request thread. This is a worker
+            # thread only, so wait is non-blocking for the UI.
+            stop_event.wait(WORKER_POLL_SECONDS)
 
         log.info(
             "Worker stopped user=%s",
@@ -1890,6 +1924,10 @@ class WorkerManager:
         ] = {}
 
     def reconcile(self) -> None:
+        # The coordinator may run inside Streamlit, where the main script can
+        # rerun many times. SQLite is the source of truth; this method only
+        # starts missing workers and restarts dead ones.
+        init_db()
         users = {
             u["id"]: u
             for u in get_all_trading_users()
@@ -2435,11 +2473,36 @@ def get_streamlit_worker_service():
                 MANAGER.reconcile()
             except Exception:
                 log.exception("Embedded worker reconcile failed")
-            stop_event.wait(max(5, WORKER_POLL_SECONDS))
+            stop_event.wait(max(2, WORKER_POLL_SECONDS))
 
     thread = threading.Thread(target=coordinator, daemon=True, name="embedded-bot-manager")
     thread.start()
     return stop_event, thread
+
+
+def render_scanner_live(user_id: int, max_scan: int, active_count: int) -> None:
+    """Render only the scanner pane; safe to rerun independently from the UI."""
+    st.markdown(
+        f""" <div class="section-card"> <div class="section-title"> 🔎 {t('market_scanner_results')} <span class="scanner-live" style="float:right">● SKANER W TLE</span> </div> <div style="color:#9d9487;font-size:12px"> Worker skanuje partiami w tle i zapisuje wyniki w SQLite. Panel odświeża tylko ten fragment, bez zatrzymywania silnika. </div> """, unsafe_allow_html=True,
+    )
+
+    scanner_df = read_scanner_rows(
+        user_id,
+        max(100, max_scan * max(1, active_count)),
+    )
+    if not scanner_df.empty:
+        scanner_df["Wolumen_24h"] = pd.to_numeric(scanner_df["Wolumen_24h"], errors="coerce").fillna(0.0)
+        scanner_df["ADX"] = pd.to_numeric(scanner_df["ADX"], errors="coerce").round(2)
+        scanner_df["RSI"] = pd.to_numeric(scanner_df["RSI"], errors="coerce").round(2)
+        scanner_df = scanner_df.rename(columns={
+            "EMA_Szybka": "EMA szybka",
+            "EMA_Wolna": "EMA wolna",
+            "Wolumen_24h": "Wolumen 24h",
+        })
+        st.dataframe(scanner_df, use_container_width=True, hide_index=True)
+    else:
+        st.info(t("no_scanner"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def run_streamlit_app() -> None:
@@ -2457,7 +2520,7 @@ def run_streamlit_app() -> None:
         if key not in st.session_state:
             st.session_state[key] = value
 
-    st.markdown(""" <style> :root { --bg:#080706; --panel:#11100e; --gold:#d9ad4a; --gold2:#f3d57a; --gold3:#8d6a27; --green:#1fc56b; --red:#e05252; --muted:#9d9487; --text:#f5f0e6; } .stApp { background: radial-gradient(circle at 50% -10%,#292015 0%,#0b0908 35%,#070605 100%); color:var(--text); } [data-testid="stHeader"] { background:rgba(0,0,0,0); } section[data-testid="stSidebar"] { background:linear-gradient(180deg,#15120f,#0b0908); border-right:2px solid var(--gold3); } .block-container { padding-top:1.2rem; max-width:1700px; } h1,h2,h3 { color:var(--gold2)!important; } .section-card { border:1px solid #765b2c; border-radius:15px; padding:15px 17px; background:linear-gradient(145deg,rgba(22,18,13,.96),rgba(10,9,8,.96)); margin:12px 0; box-shadow:0 7px 24px rgba(0,0,0,.28); } .section-title { color:var(--gold2); font-weight:900; font-size:16px; letter-spacing:.8px; margin-bottom:10px; } .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:8px 0 20px; } .metric-card { min-height:110px; border:1px solid var(--gold); border-radius:14px; padding:15px 17px; background:linear-gradient(145deg,#1a1510,#0e0c0a); } .metric-card.green { border-color:#27b968; } .metric-card.red { border-color:#b84b4b; } .metric-label { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--gold2); font-weight:800; } .metric-value { font-size:25px; font-weight:900; color:#fff; margin-top:8px; } .metric-sub { font-size:12px; color:#a9a092; margin-top:8px; } .mtf-card { border:1px solid var(--gold3); border-radius:13px; background:linear-gradient(180deg,#17120d,#0d0b09); padding:10px; min-height:100%; } .mtf-card.active { border-color:#25ba68; } @media(max-width:1100px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:650px) { .metric-grid { grid-template-columns:1fr; } } </style> """, unsafe_allow_html=True)
+    st.markdown(""" <style> :root { --bg:#080706; --panel:#11100e; --gold:#d9ad4a; --gold2:#f3d57a; --gold3:#8d6a27; --green:#1fc56b; --red:#e05252; --muted:#9d9487; --text:#f5f0e6; } .stApp { background: radial-gradient(circle at 50% -10%,#292015 0%,#0b0908 35%,#070605 100%); color:var(--text); } [data-testid="stHeader"] { background:rgba(0,0,0,0); } section[data-testid="stSidebar"] { background:linear-gradient(180deg,#15120f,#0b0908); border-right:2px solid var(--gold3); } .block-container { padding-top:1.2rem; max-width:1700px; } h1,h2,h3 { color:var(--gold2)!important; } .section-card { border:1px solid #765b2c; border-radius:15px; padding:15px 17px; background:linear-gradient(145deg,rgba(22,18,13,.96),rgba(10,9,8,.96)); margin:12px 0; box-shadow:0 7px 24px rgba(0,0,0,.28); } .section-title { color:var(--gold2); font-weight:900; font-size:16px; letter-spacing:.8px; margin-bottom:10px; } .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:8px 0 20px; } .metric-card { min-height:110px; border:1px solid var(--gold); border-radius:14px; padding:15px 17px; background:linear-gradient(145deg,#1a1510,#0e0c0a); } .metric-card.green { border-color:#27b968; } .metric-card.red { border-color:#b84b4b; } .metric-label { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--gold2); font-weight:800; } .metric-value { font-size:25px; font-weight:900; color:#fff; margin-top:8px; } .metric-sub { font-size:12px; color:#a9a092; margin-top:8px; } .mtf-card { border:1px solid var(--gold3); border-radius:13px; background:linear-gradient(180deg,#17120d,#0d0b09); padding:10px; min-height:100%; } .mtf-card.active { border:2px solid #27c96f; box-shadow:0 0 18px rgba(39,201,111,.16), inset 0 0 18px rgba(39,201,111,.04); } /* Premium gold framed Streamlit controls */ div[data-testid="stButton"] > button, div[data-testid="stFormSubmitButton"] > button { border:1.5px solid var(--gold)!important; border-radius:11px!important; background:linear-gradient(145deg,#1d1710,#0d0b09)!important; color:#f7e8bf!important; font-weight:850!important; box-shadow:0 0 0 1px rgba(217,173,74,.08), 0 5px 18px rgba(0,0,0,.25); } div[data-testid="stButton"] > button:hover, div[data-testid="stFormSubmitButton"] > button:hover { border-color:#f3d57a!important; color:#fff4d0!important; transform:translateY(-1px); box-shadow:0 0 18px rgba(217,173,74,.20); } section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] { border:2px solid var(--gold)!important; background:linear-gradient(145deg,#12351f,#0b2114)!important; color:#7dffad!important; box-shadow:0 0 16px rgba(39,201,111,.18), inset 0 0 12px rgba(217,173,74,.08); } section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]:hover { border-color:#f3d57a!important; background:linear-gradient(145deg,#174a2a,#0d2918)!important; } div[data-baseweb="input"], div[data-baseweb="select"], div[data-baseweb="textarea"] { border:1px solid #8d6a27!important; border-radius:9px!important; background:#0e0c0a!important; } div[data-baseweb="input"]:focus-within, div[data-baseweb="select"]:focus-within { border-color:#f3d57a!important; box-shadow:0 0 0 1px rgba(243,213,122,.35)!important; } div[data-testid="stDataFrame"] { border:1px solid #8d6a27!important; border-radius:12px!important; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.22); } div[data-testid="stExpander"] { border:1px solid #8d6a27!important; border-radius:12px!important; background:rgba(15,12,9,.75)!important; } button[role="tab"] { color:#d9ad4a!important; } button[role="tab"][aria-selected="true"] { color:#fff0bf!important; border-bottom:2px solid #d9ad4a!important; } .scanner-live { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #27c96f; border-radius:999px; color:#75f3a4; background:rgba(25,100,55,.12); font-size:11px; font-weight:800; } @media(max-width:1100px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:650px) { .metric-grid { grid-template-columns:1fr; } } </style> """, unsafe_allow_html=True)
 
     if not st.session_state.logged_in:
         ui_login()
@@ -3187,57 +3250,24 @@ def run_streamlit_app() -> None:
     # --------------------------------------------------------
     # SKANER — CZYTA Z BAZY
     # --------------------------------------------------------
-
-    st.markdown(
-        f""" <div class="section-card"> <div class="section-title"> 🔎 {t('market_scanner_results')} </div> <div style="color:#9d9487;font-size:12px"> Wyniki są pobierane z trwałego skanera workera, dzięki czemu tabela nie znika tylko dlatego, że Streamlit wykonał rerun. </div> """,
-        unsafe_allow_html=True,
-    )
-
-    scanner_df = read_scanner_rows(
-        st.session_state.user_id,
-        max(100, max_scan * max(
-            1,
-            len(
-                st.session_state.active_mtf_bots
-            ),
-        )),
-    )
-
-    if not scanner_df.empty:
-        scanner_df["Wolumen_24h"] = pd.to_numeric(
-            scanner_df["Wolumen_24h"],
-            errors="coerce",
-        ).fillna(0.0)
-
-        scanner_df["ADX"] = pd.to_numeric(
-            scanner_df["ADX"],
-            errors="coerce",
-        ).round(2)
-
-        scanner_df["RSI"] = pd.to_numeric(
-            scanner_df["RSI"],
-            errors="coerce",
-        ).round(2)
-
-        scanner_df = scanner_df.rename(columns={
-            "EMA_Szybka": "EMA szybka",
-            "EMA_Wolna": "EMA wolna",
-            "Wolumen_24h": "Wolumen 24h",
-        })
-
-        st.dataframe(
-            scanner_df,
-            use_container_width=True,
-        )
+    # Streamlit >= 1.37: refresh only the scanner pane. Older Streamlit
+    # versions simply render the same persistent SQLite data once per app
+    # rerun, so the trading worker is never dependent on fragment support.
+    if callable(getattr(st, "fragment", None)):
+        @st.fragment(run_every=f"{refresh}s")
+        def _live_scanner():
+            render_scanner_live(
+                st.session_state.user_id,
+                max_scan,
+                len(st.session_state.active_mtf_bots),
+            )
+        _live_scanner()
     else:
-        st.info(
-            t("no_scanner")
+        render_scanner_live(
+            st.session_state.user_id,
+            max_scan,
+            len(st.session_state.active_mtf_bots),
         )
-
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
-    )
 
     # --------------------------------------------------------
     # ADMIN
