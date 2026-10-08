@@ -2505,7 +2505,7 @@ def run_streamlit_app() -> None:
     init_db()
     # Non-blocking background trading. No sleep/rerun is performed on the
     # Streamlit request thread.
-    get_streamlit_worker_service()
+    MANAGER = get_streamlit_worker_service()
 
     for key, value in SESSION_DEFAULTS.items():
         if key not in st.session_state:
