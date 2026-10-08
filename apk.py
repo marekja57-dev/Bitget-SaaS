@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import hmac
 import json
@@ -22,15 +23,19 @@ try:
 except Exception:
     stripe = None
 
+
 # ============================================================
-# CONFIG
+# KONFIGURACJA
 # ============================================================
+
 DB_FILE = os.getenv("DB_FILE", "users.db")
 LOG_FILE = os.getenv("BOT_LOG_FILE", "trading_bot.log")
 ALLOW_TEST_ACTIVATION = os.getenv("ALLOW_TEST_ACTIVATION", "0") == "1"
+
 ADMIN_EMAILS = ["marekja57@wp.pl", "admin@bot-bitget.pl"]
 SUPPORTED_EXCHANGES = ["Bitget", "Binance", "Bybit", "OKX"]
 AVAILABLE_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+
 DEFAULT_TF_VALUES = {
     "1m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.5},
     "5m": {"ema_fast": 9, "ema_slow": 21, "adx": 28.0, "max_rsi": 75.0, "min_rsi": 25.0, "cap_mult": 0.8},
@@ -44,10 +49,9 @@ DEFAULT_TF_VALUES = {
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
-    "STRIPE_CHECKOUT_FALLBACK", "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
+    "STRIPE_CHECKOUT_FALLBACK",
+    "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03",
 )
-if stripe is not None and STRIPE_SECRET_KEY:
-    stripe.api_key = STRIPE_SECRET_KEY
 
 DEFAULT_STOP_ROE = 4.0
 DEFAULT_TAKE_ROE = 15.0
@@ -58,145 +62,139 @@ DEFAULT_MAX_LEVERAGE = 15
 DEFAULT_MANUAL_LEVERAGE = 5
 DEFAULT_MAX_SCAN_PAIRS = 30
 MIN_QUOTE_VOLUME = 1_000_000.0
+
 WORKER_POLL_SECONDS = max(2, int(os.getenv("BOT_POLL_SECONDS", "5")))
 POSITION_GUARD_SECONDS = max(1, int(os.getenv("POSITION_GUARD_SECONDS", "3")))
-TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
+SCAN_CACHE_SECONDS = max(5, int(os.getenv("SCAN_CACHE_SECONDS", "15")))
+
+if stripe is not None and STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE, encoding="utf-8")],
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+    ],
 )
 log = logging.getLogger("futures_saas")
 
-# ============================================================
-# HELPERS
-# ============================================================
-def safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        x = float(value)
-        return default if not np.isfinite(x) else x
-    except Exception:
-        return default
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def normalize_symbol(symbol: str) -> str:
-    return str(symbol or "").strip()
-
-
-def is_valid_usdt_linear_market(market: Dict[str, Any]) -> bool:
-    return bool(
-        market
-        and market.get("active", True)
-        and market.get("linear") is True
-        and str(market.get("quote", "")).upper() == "USDT"
-        and market.get("contract") is True
-    )
-
-
-def fetch_tickers_safe(exchange, symbols: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
-    """Fetch tickers with bulk->per-symbol fallback. Never silently return an empty scan."""
-    if exchange is None:
-        return {}
-    try:
-        data = exchange.fetch_tickers(symbols) if symbols else exchange.fetch_tickers()
-        if isinstance(data, dict) and data:
-            return data
-    except Exception as exc:
-        log.warning("fetch_tickers failed (bulk): %s", exc)
-    result: Dict[str, Dict[str, Any]] = {}
-    if symbols is None:
-        try:
-            symbols = list(exchange.markets.keys())
-        except Exception:
-            symbols = []
-    for symbol in symbols:
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-            if ticker:
-                result[symbol] = ticker
-        except Exception as exc:
-            log.debug("fetch_ticker failed %s: %s", symbol, exc)
-    return result
-
-
-def rank_usdt_linear_symbols(exchange, max_pairs: int) -> List[Tuple[str, float]]:
-    """Return liquid USDT perpetuals ordered strictly by 24h quote volume."""
-    if exchange is None:
-        return []
-    try:
-        markets = exchange.load_markets()
-    except Exception as exc:
-        log.warning("load_markets failed during ranking: %s", exc)
-        return []
-    candidates = [symbol for symbol, market in markets.items() if is_valid_usdt_linear_market(market)]
-    if not candidates:
-        return []
-    tickers = fetch_tickers_safe(exchange, candidates)
-    ranked: List[Tuple[str, float]] = []
-    for symbol in candidates:
-        ticker = tickers.get(symbol) or {}
-        qv = safe_float(ticker.get("quoteVolume"))
-        if qv >= MIN_QUOTE_VOLUME:
-            ranked.append((symbol, qv))
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked[:max(1, int(max_pairs))]
 
 # ============================================================
-# TRANSLATIONS
+# TŁUMACZENIA
 # ============================================================
+
 TRANSLATIONS = {
     "Polski": {
-        "title": "BITGET FUTURES", "subtitle": "AUTONOMICZNY SYSTEM TRANSAKCYJNY",
-        "login_tab": "🔑 Zaloguj się", "register_tab": "📝 Załóż konto",
-        "email_label": "Adres e-mail", "pass_label": "Hasło", "login_btn": "ZALOGUJ SIĘ",
-        "register_btn": "ZAREJESTRUJ SIĘ", "login_success": "Zalogowano pomyślnie!",
-        "login_error": "Nieprawidłowy e-mail lub hasło.", "reg_success": "Konto założone! Przejdź do zakładki logowania.",
-        "reg_error_exists": "Ten e-mail jest już zarejestrowany.", "reg_error_fill": "Wypełnij wszystkie pola.",
-        "sidebar_role_admin": "Rola: Administrator", "sidebar_role_client": "Rola: Klient SaaS",
-        "logout_btn": "🚪 WYLOGUJ SIĘ", "exchange_settings": "⚙️ Ustawienia Giełdy & API",
-        "select_exchange": "Wybierz Giełdę:", "api_keys_header": "Klucze API", "save_keys_btn": "💾 ZAPISZ MOJE KLUCZE",
-        "keys_saved": "Zapisano klucze dla", "keys_error": "Wypełnij wymagane pola kluczy.",
-        "sub_zone": "🛡 Strefa Subskrypcji", "sub_active": "Subskrypcja aktywna (Dostęp Pełny)",
-        "sub_inactive": "⚠️ Brak aktywnej subskrypcji", "pay_btn": "OPŁAĆ DOSTĘP (49 PLN)",
-        "capital_risk": "💰 Kapitał i Ryzyko", "max_single": "Maksymalnie USDT na 1 pozycję (Bazowo)",
-        "max_pos": "Maks. aktywne pozycje Futures", "roe_guard": "🛑 Zarządzanie Ryzykiem ROE (SL / TP)",
-        "enable_roe": "Włącz strażnika SL / TP ROE", "sl_roe": "Stop-Loss ROE (%)", "tp_roe": "Take-Profit ROE (%)",
-        "leverage_mgmt": "⚡ Zarządzanie Dźwignią", "lev_mode": "Tryb Dźwigni",
-        "max_allowed_lev": "Maksymalna dozwolona dźwignia", "manual_lev": "Stała dźwignia Futures",
-        "bot_control": "🤖 Panel Sterowania Botami MTF", "max_pairs": "Liczba par Futures do skanowania",
-        "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)", "wallet_futures": "🔵 Portfel Futures",
-        "free_balance": "Wolne", "session_results": "📊 Wyniki Sesji (PnL %)", "pnl_usdt": "PnL USDT",
-        "slots_futures": "📈 Sloty Futures", "active_max": "Aktywne / Maksymalne", "session_time": "⏱ Czas Sesji",
-        "market_scanner_results": "📊 Wyniki Skanera Rynkowego", "active_positions": "📈 Aktywne Pozycje Futures",
-        "trade_history": "📜 Historia Ostatnich Transakcji", "admin_panel": "👑 Panel Administratora (Użytkownicy)",
-        "no_positions": "Brak otwartych pozycji futures.", "no_history": "Brak zarejestrowanych transakcji w tej sesji.",
-        "no_scanner": "Brak aktywnych botów MTF lub wyników skanowania.",
+        "title": "BITGET FUTURES",
+        "subtitle": "AUTONOMICZNY SYSTEM TRANSAKCYJNY",
+        "login_tab": "🔑 Zaloguj się",
+        "register_tab": "📝 Załóż konto",
+        "email_label": "Adres e-mail",
+        "pass_label": "Hasło",
+        "login_btn": "ZALOGUJ SIĘ",
+        "register_btn": "ZAREJESTRUJ SIĘ",
+        "login_success": "Zalogowano pomyślnie!",
+        "login_error": "Nieprawidłowy e-mail lub hasło.",
+        "reg_success": "Konto założone! Przejdź do zakładki logowania.",
+        "reg_error_exists": "Ten e-mail jest już zarejestrowany.",
+        "reg_error_fill": "Wypełnij wszystkie pola.",
+        "sidebar_role_admin": "Rola: Administrator",
+        "sidebar_role_client": "Rola: Klient SaaS",
+        "logout_btn": "🚪 WYLOGUJ SIĘ",
+        "exchange_settings": "⚙️ Ustawienia Giełdy & API",
+        "select_exchange": "Wybierz Giełdę:",
+        "save_keys_btn": "💾 ZAPISZ MOJE KLUCZE",
+        "keys_saved": "Zapisano klucze dla",
+        "keys_error": "Wypełnij wymagane pola kluczy.",
+        "sub_zone": "🛡️ Strefa Subskrypcji",
+        "sub_active": "Subskrypcja aktywna (Dostęp Pełny)",
+        "sub_inactive": "⚠️ Brak aktywnej subskrypcji",
+        "pay_btn": "OPŁAĆ DOSTĘP (49 PLN)",
+        "capital_risk": "💰 Kapitał i Ryzyko",
+        "max_single": "Maksymalnie USDT na 1 pozycję (Bazowo)",
+        "max_pos": "Maks. aktywne pozycje Futures",
+        "roe_guard": "🛑 Zarządzanie Ryzykiem ROE (SL / TP)",
+        "enable_roe": "Włącz strażnika SL / TP ROE",
+        "sl_roe": "Stop-Loss ROE (%)",
+        "tp_roe": "Take-Profit ROE (%)",
+        "leverage_mgmt": "⚡ Zarządzanie Dźwignią",
+        "lev_mode": "Tryb Dźwigni",
+        "max_allowed_lev": "Maksymalna dozwolona dźwignia",
+        "manual_lev": "Stała dźwignia Futures",
+        "bot_control": "🤖 Panel Sterowania Botami MTF",
+        "max_pairs": "Liczba par Futures do skanowania",
+        "kill_switch": "🔴 ZAMKNIJ WSZYSTKO (KILL SWITCH)",
+        "wallet_futures": "🔵 Portfel Futures",
+        "free_balance": "Wolne",
+        "session_results": "📊 Wyniki Sesji (PnL %)",
+        "pnl_usdt": "PnL USDT",
+        "slots_futures": "📈 Sloty Futures",
+        "active_max": "Aktywne / Maksymalne",
+        "session_time": "⏱ Czas Sesji",
+        "market_scanner_results": "📊 Wyniki Skanera Rynkowego",
+        "active_positions": "📈 Aktywne Pozycje Futures",
+        "trade_history": "📜 Historia Ostatnich Transakcji",
+        "admin_panel": "👑 Panel Administratora",
+        "no_positions": "Brak otwartych pozycji futures.",
+        "no_history": "Brak zarejestrowanych transakcji.",
+        "no_scanner": "Brak danych skanera. Uruchom co najmniej jednego bota MTF.",
     },
     "English": {
-        "title": "BITGET FUTURES", "subtitle": "AUTONOMOUS TRADING SYSTEM", "login_tab": "🔑 Login", "register_tab": "📝 Register",
-        "email_label": "Email address", "pass_label": "Password", "login_btn": "SIGN IN", "register_btn": "SIGN UP",
-        "login_success": "Logged in successfully!", "login_error": "Invalid email or password.", "reg_success": "Account created! Go to the login tab.",
-        "reg_error_exists": "This email is already registered.", "reg_error_fill": "Please fill in all fields.",
-        "sidebar_role_admin": "Role: Administrator", "sidebar_role_client": "Role: SaaS Client", "logout_btn": "🚪 LOG OUT",
-        "exchange_settings": "⚙️ Exchange & API Settings", "select_exchange": "Select Exchange:", "api_keys_header": "API Keys",
-        "save_keys_btn": "💾 SAVE MY KEYS", "keys_saved": "Keys saved for", "keys_error": "Please fill in required key fields.",
-        "sub_zone": "🛡️ Subscription Zone", "sub_active": "Subscription active (Full Access)", "sub_inactive": "⚠️ No active subscription",
-        "pay_btn": "PAY ACCESS (49 PLN)", "capital_risk": "💰 Capital & Risk", "max_single": "Max USDT per position (Base)",
-        "max_pos": "Max active Futures positions", "roe_guard": "🛑 ROE Risk Management (SL / TP)", "enable_roe": "Enable SL / TP ROE guard",
-        "sl_roe": "Stop-Loss ROE (%)", "tp_roe": "Take-Profit ROE (%)", "leverage_mgmt": "⚡ Leverage Management", "lev_mode": "Leverage Mode",
-        "max_allowed_lev": "Maximum allowed leverage", "manual_lev": "Fixed Futures leverage", "bot_control": "🤖 Multi-Timeframe Bot Control Panel",
-        "max_pairs": "Number of Futures pairs to scan", "kill_switch": "🔴 CLOSE ALL (KILL SWITCH)", "wallet_futures": "🔵 Futures Wallet",
-        "free_balance": "Free", "session_results": "📊 Session Results (PnL %)", "pnl_usdt": "PnL USDT", "slots_futures": "📈 Futures Slots",
-        "active_max": "Active / Maximum", "session_time": "⏱ Session Time", "market_scanner_results": "📊 Market Scanner Results",
-        "active_positions": "📈 Active Futures Positions", "trade_history": "📜 Recent Trade History", "admin_panel": "👑 Admin Panel (Users)",
-        "no_positions": "No open futures positions.", "no_history": "No recorded trades in this session.", "no_scanner": "No active MTF bots or scanner results.",
+        "title": "BITGET FUTURES",
+        "subtitle": "AUTONOMOUS TRADING SYSTEM",
+        "login_tab": "🔑 Login",
+        "register_tab": "📝 Register",
+        "email_label": "Email address",
+        "pass_label": "Password",
+        "login_btn": "SIGN IN",
+        "register_btn": "SIGN UP",
+        "login_success": "Logged in successfully!",
+        "login_error": "Invalid email or password.",
+        "reg_success": "Account created! Go to the login tab.",
+        "reg_error_exists": "This email is already registered.",
+        "reg_error_fill": "Please fill in all fields.",
+        "sidebar_role_admin": "Role: Administrator",
+        "sidebar_role_client": "Role: SaaS Client",
+        "logout_btn": "🚪 LOG OUT",
+        "exchange_settings": "⚙️ Exchange & API Settings",
+        "select_exchange": "Select Exchange:",
+        "save_keys_btn": "💾 SAVE MY KEYS",
+        "keys_saved": "Keys saved for",
+        "keys_error": "Please fill in required key fields.",
+        "sub_zone": "🛡️ Subscription Zone",
+        "sub_active": "Subscription active (Full Access)",
+        "sub_inactive": "⚠️ No active subscription",
+        "pay_btn": "PAY ACCESS (49 PLN)",
+        "capital_risk": "💰 Capital & Risk",
+        "max_single": "Max USDT per position",
+        "max_pos": "Max active Futures positions",
+        "roe_guard": "🛑 ROE Risk Management (SL / TP)",
+        "enable_roe": "Enable SL / TP ROE guard",
+        "sl_roe": "Stop-Loss ROE (%)",
+        "tp_roe": "Take-Profit ROE (%)",
+        "leverage_mgmt": "⚡ Leverage Management",
+        "lev_mode": "Leverage Mode",
+        "max_allowed_lev": "Maximum allowed leverage",
+        "manual_lev": "Fixed Futures leverage",
+        "bot_control": "🤖 Multi-Timeframe Bot Control Panel",
+        "max_pairs": "Number of Futures pairs to scan",
+        "kill_switch": "🔴 CLOSE ALL (KILL SWITCH)",
+        "wallet_futures": "🔵 Futures Wallet",
+        "free_balance": "Free",
+        "session_results": "📊 Session Results (PnL %)",
+        "pnl_usdt": "PnL USDT",
+        "slots_futures": "📈 Futures Slots",
+        "active_max": "Active / Maximum",
+        "session_time": "⏱ Session Time",
+        "market_scanner_results": "📊 Market Scanner Results",
+        "active_positions": "📈 Active Futures Positions",
+        "trade_history": "📜 Recent Trade History",
+        "admin_panel": "👑 Admin Panel",
+        "no_positions": "No open futures positions.",
+        "no_history": "No recorded trades.",
+        "no_scanner": "No scanner data. Start at least one MTF bot.",
     },
 }
 
@@ -205,30 +203,63 @@ def t(key: str) -> str:
     lang = st.session_state.get("lang", "Polski")
     return TRANSLATIONS.get(lang, TRANSLATIONS["Polski"]).get(key, key)
 
+
 # ============================================================
-# DATABASE
+# NARZĘDZIA
 # ============================================================
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        x = float(value)
+        if not np.isfinite(x):
+            return default
+        return x
+    except Exception:
+        return default
+
+
 def db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
+# ============================================================
+# BAZA
+# ============================================================
+
 def init_db() -> None:
     conn = db_connect()
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT, is_admin INTEGER DEFAULT 0, stripe_paid INTEGER DEFAULT 0, api_key TEXT DEFAULT '', secret_key TEXT DEFAULT '', passphrase TEXT DEFAULT '', selected_exchange TEXT DEFAULT 'Bitget', settings_json TEXT DEFAULT '{}' )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS user_mtf_settings ( user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS user_bot_state ( user_id INTEGER PRIMARY KEY, active_bots_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS trade_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, created_at TEXT NOT NULL, symbol TEXT, timeframe TEXT, action TEXT, side TEXT, price REAL, amount REAL, order_id TEXT, message TEXT, FOREIGN KEY(user_id) REFERENCES users(id) )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS entry_guard ( user_id INTEGER NOT NULL, symbol TEXT NOT NULL, locked_until REAL NOT NULL DEFAULT 0, last_candle INTEGER NOT NULL DEFAULT 0, last_side TEXT DEFAULT '', updated_at TEXT NOT NULL, PRIMARY KEY(user_id, symbol), FOREIGN KEY(user_id) REFERENCES users(id) )""")
+        conn.execute(""" CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT, is_admin INTEGER DEFAULT 0, stripe_paid INTEGER DEFAULT 0, api_key TEXT DEFAULT '', secret_key TEXT DEFAULT '', passphrase TEXT DEFAULT '', selected_exchange TEXT DEFAULT 'Bitget', settings_json TEXT DEFAULT '{}' ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS user_mtf_settings ( user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS user_bot_state ( user_id INTEGER PRIMARY KEY, active_bots_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS trade_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, created_at TEXT NOT NULL, symbol TEXT, timeframe TEXT, action TEXT, side TEXT, price REAL, amount REAL, order_id TEXT, message TEXT, FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS entry_guard ( user_id INTEGER NOT NULL, symbol TEXT NOT NULL, locked_until REAL NOT NULL DEFAULT 0, last_candle INTEGER NOT NULL DEFAULT 0, last_side TEXT DEFAULT '', updated_at TEXT NOT NULL, PRIMARY KEY(user_id, symbol), FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS scanner_results ( user_id INTEGER NOT NULL, timeframe TEXT NOT NULL, symbol TEXT NOT NULL, quote_volume REAL DEFAULT 0, price REAL DEFAULT 0, adx REAL DEFAULT 0, rsi REAL DEFAULT 0, ema_fast REAL DEFAULT 0, ema_slow REAL DEFAULT 0, signal TEXT DEFAULT 'NEUTRALNY', candle_ts INTEGER DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(user_id, timeframe, symbol), FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+        conn.execute(""" CREATE TABLE IF NOT EXISTS protection_state ( user_id INTEGER NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL, amount REAL NOT NULL, entry_price REAL NOT NULL, leverage REAL NOT NULL, stop_price REAL NOT NULL, take_price REAL NOT NULL, stop_order_id TEXT DEFAULT '', take_order_id TEXT DEFAULT '', updated_at TEXT NOT NULL, PRIMARY KEY(user_id, symbol), FOREIGN KEY(user_id) REFERENCES users(id) ) """)
+
         cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-        for name, typ in [("selected_exchange", "TEXT DEFAULT 'Bitget'"), ("settings_json", "TEXT DEFAULT '{}'")]:
+        migrations = [
+            ("selected_exchange", "TEXT DEFAULT 'Bitget'"),
+            ("settings_json", "TEXT DEFAULT '{}'"),
+        ]
+        for name, typ in migrations:
             if name not in cols:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {name} {typ}")
+
         for adm in ADMIN_EMAILS:
-            conn.execute("UPDATE users SET is_admin=1, stripe_paid=1 WHERE LOWER(TRIM(email))=?", (adm.lower(),))
+            conn.execute(
+                "UPDATE users SET is_admin=1, stripe_paid=1 WHERE LOWER(TRIM(email))=?",
+                (adm.lower(),),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -243,16 +274,19 @@ def hash_password(password: str, salt: Optional[str] = None) -> str:
 def verify_password(password: str, stored: str) -> bool:
     if not stored:
         return False
-    stored = str(stored)
-    if stored.startswith("sha256$"):
+    if str(stored).startswith("sha256$"):
         try:
-            _, salt, expected = stored.split("$", 2)
+            _, salt, expected = str(stored).split("$", 2)
             candidate = hashlib.sha256((salt + password).encode()).hexdigest()
             return hmac.compare_digest(candidate, expected)
         except Exception:
             return False
-    return hmac.compare_digest(stored, password)
+    return hmac.compare_digest(str(stored), password)
 
+
+# ============================================================
+# USTAWIENIA MTF
+# ============================================================
 
 def default_mtf_payload() -> Dict[str, Dict[str, Any]]:
     return {tf: {**vals, "mode": "Automatyczny"} for tf, vals in DEFAULT_TF_VALUES.items()}
@@ -262,9 +296,13 @@ def load_mtf_settings(user_id: int) -> Dict[str, Dict[str, Any]]:
     payload = default_mtf_payload()
     conn = db_connect()
     try:
-        row = conn.execute("SELECT settings_json FROM user_mtf_settings WHERE user_id=?", (int(user_id),)).fetchone()
+        row = conn.execute(
+            "SELECT settings_json FROM user_mtf_settings WHERE user_id=?",
+            (int(user_id),),
+        ).fetchone()
     finally:
         conn.close()
+
     if row and row[0]:
         try:
             saved = json.loads(row[0])
@@ -273,15 +311,14 @@ def load_mtf_settings(user_id: int) -> Dict[str, Dict[str, Any]]:
                     if isinstance(saved.get(tf), dict):
                         payload[tf].update(saved[tf])
         except Exception:
-            log.exception("Invalid MTF JSON for user %s", user_id)
+            log.exception("Invalid MTF JSON for user=%s", user_id)
     return payload
 
 
 def save_mtf_settings(user_id: int, payload: Dict[str, Dict[str, Any]]) -> None:
     conn = db_connect()
     try:
-        conn.execute("""INSERT INTO user_mtf_settings(user_id,settings_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json,updated_at=excluded.updated_at""",
-                     (int(user_id), json.dumps(payload, ensure_ascii=False), utc_now()))
+        conn.execute(""" INSERT INTO user_mtf_settings(user_id,settings_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json, updated_at=excluded.updated_at """, (int(user_id), json.dumps(payload, ensure_ascii=False), utc_now()))
         conn.commit()
     finally:
         conn.close()
@@ -290,7 +327,10 @@ def save_mtf_settings(user_id: int, payload: Dict[str, Dict[str, Any]]) -> None:
 def load_active_bots(user_id: int) -> Dict[str, Dict[str, Any]]:
     conn = db_connect()
     try:
-        row = conn.execute("SELECT active_bots_json FROM user_bot_state WHERE user_id=?", (int(user_id),)).fetchone()
+        row = conn.execute(
+            "SELECT active_bots_json FROM user_bot_state WHERE user_id=?",
+            (int(user_id),),
+        ).fetchone()
     finally:
         conn.close()
     if not row or not row[0]:
@@ -305,30 +345,39 @@ def load_active_bots(user_id: int) -> Dict[str, Dict[str, Any]]:
 def save_active_bots(user_id: int, bots: Dict[str, Dict[str, Any]]) -> None:
     conn = db_connect()
     try:
-        conn.execute("""INSERT INTO user_bot_state(user_id,active_bots_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET active_bots_json=excluded.active_bots_json,updated_at=excluded.updated_at""",
-                     (int(user_id), json.dumps(bots, ensure_ascii=False), utc_now()))
+        conn.execute(""" INSERT INTO user_bot_state(user_id,active_bots_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET active_bots_json=excluded.active_bots_json, updated_at=excluded.updated_at """, (int(user_id), json.dumps(bots, ensure_ascii=False), utc_now()))
         conn.commit()
     finally:
         conn.close()
 
 
+# ============================================================
+# GUARDY / LOG
+# ============================================================
+
 def get_entry_guard(user_id: int, symbol: str) -> Dict[str, Any]:
     conn = db_connect()
     try:
-        row = conn.execute("SELECT locked_until,last_candle,last_side FROM entry_guard WHERE user_id=? AND symbol=?",
-                           (int(user_id), symbol)).fetchone()
+        row = conn.execute(""" SELECT locked_until,last_candle,last_side FROM entry_guard WHERE user_id=? AND symbol=? """, (int(user_id), symbol)).fetchone()
     finally:
         conn.close()
+
     if not row:
         return {"locked_until": 0.0, "last_candle": 0, "last_side": ""}
-    return {"locked_until": safe_float(row[0]), "last_candle": int(row[1] or 0), "last_side": str(row[2] or "")}
+    return {
+        "locked_until": safe_float(row[0]),
+        "last_candle": int(row[1] or 0),
+        "last_side": str(row[2] or ""),
+    }
 
 
-def set_entry_guard(user_id: int, symbol: str, locked_until: float, last_candle: int = 0, last_side: str = "") -> None:
+def set_entry_guard( user_id: int, symbol: str, locked_until: float, last_candle: int = 0, last_side: str = "", ) -> None:
     conn = db_connect()
     try:
-        conn.execute("""INSERT INTO entry_guard(user_id,symbol,locked_until,last_candle,last_side,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET locked_until=excluded.locked_until, last_candle=excluded.last_candle,last_side=excluded.last_side,updated_at=excluded.updated_at""",
-                     (int(user_id), symbol, float(locked_until), int(last_candle or 0), str(last_side or ""), utc_now()))
+        conn.execute(""" INSERT INTO entry_guard( user_id,symbol,locked_until,last_candle,last_side,updated_at ) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET locked_until=excluded.locked_until, last_candle=excluded.last_candle, last_side=excluded.last_side, updated_at=excluded.updated_at """, (
+            int(user_id), symbol, float(locked_until),
+            int(last_candle or 0), str(last_side or ""), utc_now()
+        ))
         conn.commit()
     finally:
         conn.close()
@@ -338,67 +387,137 @@ def entry_guard_blocks(user_id: int, symbol: str, candle_ts: int = 0) -> bool:
     guard = get_entry_guard(user_id, symbol)
     if guard["locked_until"] > time.time():
         return True
-    return bool(candle_ts and guard["last_candle"] == int(candle_ts))
+    if candle_ts and guard["last_candle"] == int(candle_ts):
+        return True
+    return False
 
 
-def log_trade(user_id: int, symbol: str, tf: str, action: str, side: str, price: float = 0.0, amount: float = 0.0, order_id: str = "", message: str = "") -> None:
+def log_trade( user_id: int, symbol: str, tf: str, action: str, side: str, price: float = 0.0, amount: float = 0.0, order_id: str = "", message: str = "", ) -> None:
     conn = db_connect()
     try:
-        conn.execute("""INSERT INTO trade_log(user_id,created_at,symbol,timeframe,action,side,price,amount,order_id,message) VALUES(?,?,?,?,?,?,?,?,?,?)""", (user_id, utc_now(), symbol, tf, action, side, price, amount, order_id, message))
+        conn.execute(""" INSERT INTO trade_log( user_id,created_at,symbol,timeframe,action,side, price,amount,order_id,message ) VALUES(?,?,?,?,?,?,?,?,?,?) """, (
+            user_id, utc_now(), symbol, tf, action, side,
+            price, amount, order_id, message
+        ))
         conn.commit()
     finally:
         conn.close()
 
+
 # ============================================================
-# EXCHANGE
+# OCHRONA POZYCJI — PERSISTENT
 # ============================================================
+
+def save_protection_state( user_id: int, symbol: str, side: str, amount: float, entry_price: float, leverage: float, stop_price: float, take_price: float, stop_order_id: str = "", take_order_id: str = "", ) -> None:
+    conn = db_connect()
+    try:
+        conn.execute(""" INSERT INTO protection_state( user_id,symbol,side,amount,entry_price,leverage, stop_price,take_price,stop_order_id,take_order_id,updated_at ) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET side=excluded.side, amount=excluded.amount, entry_price=excluded.entry_price, leverage=excluded.leverage, stop_price=excluded.stop_price, take_price=excluded.take_price, stop_order_id=excluded.stop_order_id, take_order_id=excluded.take_order_id, updated_at=excluded.updated_at """, (
+            user_id, symbol, side, amount, entry_price, leverage,
+            stop_price, take_price, stop_order_id, take_order_id, utc_now()
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_protection_state(user_id: int, symbol: str) -> None:
+    conn = db_connect()
+    try:
+        conn.execute(
+            "DELETE FROM protection_state WHERE user_id=? AND symbol=?",
+            (int(user_id), symbol),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ============================================================
+# GIEŁDA
+# ============================================================
+
 def get_exchange(api_key: str, secret: str, passphrase: str, name: str):
     if not api_key or not secret:
         return None
+
     try:
-        ex_id = name.lower()
+        name = name or "Bitget"
+        mapping = {
+            "Bitget": "bitget",
+            "Binance": "binanceusdm",
+            "Bybit": "bybit",
+            "OKX": "okx",
+        }
+        ex_id = mapping.get(name, name.lower())
         cls = getattr(ccxt, ex_id)
-        config: Dict[str, Any] = {
+
+        config = {
             "apiKey": api_key,
             "secret": secret,
             "enableRateLimit": True,
             "timeout": 30000,
-            "options": {"defaultType": "swap"},
+            "options": {
+                "defaultType": "swap",
+                "defaultSubType": "linear",
+            },
         }
-        if ex_id == "bitget":
+
+        if ex_id in {"bitget", "okx"} and passphrase:
             config["password"] = passphrase
-            config["options"].update({"defaultSubType": "USDT-FUTURES"})
-        elif ex_id == "okx" and passphrase:
-            config["password"] = passphrase
-        return cls(config)
+
+        exchange = cls(config)
+        return exchange
     except Exception as exc:
         log.error("Exchange init failed for %s: %s", name, exc)
         return None
+
+
+def load_markets_safe(exchange) -> bool:
+    try:
+        exchange.load_markets(reload=False)
+        return True
+    except Exception as exc:
+        log.error("load_markets failed: %s", exc)
+        return False
 
 
 def fetch_usdt_balance(exchange) -> Dict[str, float]:
     result = {"total": 0.0, "used": 0.0, "free": 0.0}
     if exchange is None:
         return result
+
     try:
         bal = exchange.fetch_balance({"type": "swap"})
         u = bal.get("USDT", {}) or {}
-        def val(name: str) -> float:
+
+        def nested(name: str) -> float:
             x = safe_float(u.get(name))
-            if x != 0:
+            if x > 0:
                 return x
             top = bal.get(name, {}) or {}
-            return safe_float(top.get("USDT")) if isinstance(top, dict) else 0.0
-        total, free, used = val("total"), val("free"), val("used")
+            if isinstance(top, dict):
+                return safe_float(top.get("USDT"))
+            return 0.0
+
+        total = nested("total")
+        free = nested("free")
+        used = nested("used")
+
         if total <= 0 and free > 0:
             total = free + max(0.0, used)
-        if used <= 0 and total > 0 and total >= free:
-            used = total - free
-        if free <= 0 and total > 0 and total >= used:
-            free = total - used
-        result = {"total": max(0, total), "used": max(0, used), "free": max(0, free)}
+        if used <= 0 and total > 0:
+            used = max(0.0, total - free)
+        if free <= 0 and total > 0:
+            free = max(0.0, total - used)
+
+        result.update({
+            "total": max(0.0, total),
+            "used": max(0.0, used),
+            "free": max(0.0, free),
+        })
     except Exception as exc:
         log.warning("USDT balance fetch failed: %s", exc)
+
     return result
 
 
@@ -440,16 +559,29 @@ def find_position(positions: List[Dict[str, Any]], symbol: str) -> Optional[Dict
 
 
 def close_position(exchange, p: Dict[str, Any], reason: str = "") -> bool:
-    symbol, amount = p.get("symbol"), position_contracts(p)
+    symbol = p.get("symbol")
+    amount = position_contracts(p)
     if not symbol or amount <= 0:
         return False
+
     try:
         amount = float(exchange.amount_to_precision(symbol, amount))
         if amount <= 0:
             return False
-        exchange.create_order(symbol, "market", close_side_for_position(p), amount, None, reduce_only_params(exchange))
-        log.info("Closed %s %s amount=%s reason=%s", symbol, position_side(p), amount, reason)
-        return True
+
+        order = exchange.create_order(
+            symbol,
+            "market",
+            close_side_for_position(p),
+            amount,
+            None,
+            reduce_only_params(exchange),
+        )
+        log.info(
+            "Closed %s %s amount=%s reason=%s",
+            symbol, position_side(p), amount, reason
+        )
+        return bool(order)
     except Exception as exc:
         log.error("Close position failed %s: %s", symbol, exc)
         return False
@@ -457,60 +589,167 @@ def close_position(exchange, p: Dict[str, Any], reason: str = "") -> bool:
 
 def market_limits(exchange, symbol: str) -> Tuple[float, float, float]:
     market = exchange.market(symbol)
-    limits = market.get("limits") or {}
-    amount_min = safe_float((limits.get("amount") or {}).get("min"))
-    cost_min = safe_float((limits.get("cost") or {}).get("min"))
-    max_lev = safe_float((limits.get("leverage") or {}).get("max"))
+    limits = market.get("limits", {})
+    amount_min = safe_float((limits.get("amount") or {}).get("min"), 0.0)
+    cost_min = safe_float((limits.get("cost") or {}).get("min"), 0.0)
+    max_lev = safe_float((limits.get("leverage") or {}).get("max"), 0.0)
     return amount_min, cost_min, max_lev
+
+
+def contract_size(exchange, symbol: str) -> float:
+    try:
+        value = safe_float(exchange.market(symbol).get("contractSize"), 1.0)
+        return value if value > 0 else 1.0
+    except Exception:
+        return 1.0
+
+
+def base_amount_to_contracts(exchange, symbol: str, base_amount: float) -> float:
+    # IMPORTANT:
+    # For contract markets CCXT expects number of contracts, not necessarily
+    # the base-asset amount. contracts = base_amount / contractSize.
+    cs = contract_size(exchange, symbol)
+    return max(0.0, float(base_amount) / cs)
+
+
+def contracts_to_base_amount(exchange, symbol: str, contracts: float) -> float:
+    return max(0.0, float(contracts) * contract_size(exchange, symbol))
 
 
 def exchange_max_leverage(exchange, symbol: str, fallback: int = 15) -> int:
     try:
         _, _, max_lev = market_limits(exchange, symbol)
-        return max(1, int(max_lev)) if max_lev > 0 else fallback
+        if max_lev > 0:
+            return max(1, int(max_lev))
     except Exception:
-        return fallback
+        pass
+    return max(1, int(fallback))
 
 
-def set_leverage_safe(exchange, symbol: str, leverage: int) -> None:
+def set_leverage_safe(exchange, symbol: str, leverage: int) -> bool:
     try:
-        exchange.set_leverage(int(leverage), symbol)
-    except Exception as exc:
-        log.warning("set_leverage failed for %s at %sx: %s", symbol, leverage, exc)
+        exchange.set_leverage(
+            int(leverage),
+            symbol,
+            {"marginMode": "isolated"},
+        )
+        return True
+    except Exception as first_exc:
+        try:
+            exchange.set_leverage(int(leverage), symbol)
+            return True
+        except Exception as second_exc:
+            log.warning(
+                "set_leverage failed %s %sx: %s / %s",
+                symbol, leverage, first_exc, second_exc
+            )
+            return False
+
 
 # ============================================================
-# INDICATORS / SIGNALS
+# RYNKI / SKANOWANIE
 # ============================================================
-def calculate_indicators(df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_period: int = 14) -> pd.DataFrame:
+
+def is_tradeable_usdt_swap(market: Dict[str, Any]) -> bool:
+    return bool(
+        market.get("active", True)
+        and market.get("swap")
+        and market.get("linear")
+        and str(market.get("quote", "")).upper() == "USDT"
+    )
+
+
+def rank_liquid_symbols(exchange, tickers: Dict[str, Any], max_pairs: int) -> List[Tuple[str, float]]:
+    ranked: List[Tuple[str, float]] = []
+
+    for symbol, ticker in tickers.items():
+        try:
+            market = exchange.markets.get(symbol) or {}
+            if not is_tradeable_usdt_swap(market):
+                continue
+
+            qv = safe_float(ticker.get("quoteVolume"))
+            if qv < MIN_QUOTE_VOLUME:
+                continue
+
+            ranked.append((symbol, qv))
+        except Exception:
+            continue
+
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    return ranked[:max(1, int(max_pairs))]
+
+
+def fetch_ohlcv_safe(exchange, symbol: str, timeframe: str, limit: int = 200) -> List[List[Any]]:
+    try:
+        return exchange.fetch_ohlcv(symbol, timeframe, limit=int(limit))
+    except Exception as exc:
+        log.debug("OHLCV failed %s %s: %s", symbol, timeframe, exc)
+        return []
+
+
+# ============================================================
+# WSKAŹNIKI / SYGNAŁY
+# ============================================================
+
+def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_period: int = 14, ) -> pd.DataFrame:
     df = df.copy()
+
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["ema_fast"] = df["close"].ewm(span=max(1, ema_fast), adjust=False).mean()
-    df["ema_slow"] = df["close"].ewm(span=max(2, ema_slow), adjust=False).mean()
+
+    df["ema_fast"] = df["close"].ewm(
+        span=max(1, int(ema_fast)), adjust=False
+    ).mean()
+    df["ema_slow"] = df["close"].ewm(
+        span=max(2, int(ema_slow)), adjust=False
+    ).mean()
+
     exp1 = df["close"].ewm(span=12, adjust=False).mean()
     exp2 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = exp1 - exp2
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["macd_signal"]
+
     prev_close = df["close"].shift(1)
-    tr = pd.concat([(df["high"] - df["low"]).abs(), (df["high"] - prev_close).abs(), (df["low"] - prev_close).abs()], axis=1).max(axis=1)
-    up, down = df["high"].diff(), -df["low"].diff()
-    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
-    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
-    alpha = 1.0 / max(2, adx_period)
+    tr = pd.concat([
+        (df["high"] - df["low"]).abs(),
+        (df["high"] - prev_close).abs(),
+        (df["low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    up = df["high"].diff()
+    down = -df["low"].diff()
+    plus_dm = pd.Series(
+        np.where((up > down) & (up > 0), up, 0.0),
+        index=df.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down > up) & (down > 0), down, 0.0),
+        index=df.index,
+    )
+
+    alpha = 1.0 / max(2, int(adx_period))
     tr_s = tr.ewm(alpha=alpha, adjust=False).mean().replace(0, np.nan)
     plus_s = plus_dm.ewm(alpha=alpha, adjust=False).mean()
     minus_s = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+
     df["plus_di"] = 100 * plus_s / tr_s
     df["minus_di"] = 100 * minus_s / tr_s
     di_sum = (df["plus_di"] + df["minus_di"]).replace(0, np.nan)
-    df["dx"] = 100 * (df["plus_di"] - df["minus_di"]).abs() / di_sum
+    df["dx"] = (
+        100
+        * (df["plus_di"] - df["minus_di"]).abs()
+        / di_sum
+    )
     df["adx"] = df["dx"].ewm(alpha=alpha, adjust=False).mean()
+
     delta = df["close"].diff()
     gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(span=14, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     df["rsi"] = 100 - 100 / (1 + rs)
+
     return df
 
 
@@ -519,58 +758,130 @@ def get_dynamic_parameters(df: pd.DataFrame, tf: str) -> Dict[str, float]:
         closes = pd.to_numeric(df["close"], errors="coerce").dropna().values
         if len(closes) < 30:
             raise ValueError("not enough data")
+
         returns = np.diff(closes) / closes[:-1]
         vol = float(np.std(returns) * np.sqrt(len(returns)))
+
         if tf in {"1m", "5m"}:
-            return {"ema_fast": 5 if vol > .02 else 9, "ema_slow": 13 if vol > .02 else 21, "min_adx": 22 if vol > .02 else 26, "max_rsi": 72 if vol > .02 else 75, "min_rsi": 28 if vol > .02 else 25, "capital_multiplier": .6 if vol > .02 else .8}
+            return {
+                "ema_fast": 5 if vol > 0.02 else 9,
+                "ema_slow": 13 if vol > 0.02 else 21,
+                "min_adx": 22.0 if vol > 0.02 else 26.0,
+                "max_rsi": 72.0 if vol > 0.02 else 75.0,
+                "min_rsi": 28.0 if vol > 0.02 else 25.0,
+                "capital_multiplier": 0.6 if vol > 0.02 else 0.8,
+            }
+
         if tf in {"15m", "30m"}:
-            return {"ema_fast": 7 if vol > .03 else 10, "ema_slow": 18 if vol > .03 else 25, "min_adx": 24 if vol > .03 else 25, "max_rsi": 70 if vol > .03 else 78, "min_rsi": 30 if vol > .03 else 22, "capital_multiplier": 1.0 if vol > .03 else 1.2}
-        return {"ema_fast": 12, "ema_slow": 26, "min_adx": 20, "max_rsi": 80, "min_rsi": 20, "capital_multiplier": 2.5}
+            return {
+                "ema_fast": 7 if vol > 0.03 else 10,
+                "ema_slow": 18 if vol > 0.03 else 25,
+                "min_adx": 24.0 if vol > 0.03 else 25.0,
+                "max_rsi": 70.0 if vol > 0.03 else 78.0,
+                "min_rsi": 30.0 if vol > 0.03 else 22.0,
+                "capital_multiplier": 1.0 if vol > 0.03 else 1.2,
+            }
+
+        return {
+            "ema_fast": 12,
+            "ema_slow": 26,
+            "min_adx": 20.0,
+            "max_rsi": 80.0,
+            "min_rsi": 20.0,
+            "capital_multiplier": 2.5,
+        }
     except Exception:
-        return {"ema_fast": 9, "ema_slow": 21, "min_adx": 25, "max_rsi": 75, "min_rsi": 25, "capital_multiplier": 1.0}
+        return {
+            "ema_fast": 9,
+            "ema_slow": 21,
+            "min_adx": 25.0,
+            "max_rsi": 75.0,
+            "min_rsi": 25.0,
+            "capital_multiplier": 1.0,
+        }
 
 
-def blend_params(base: Dict[str, Any], opt: Dict[str, Any], base_weight: float = .5) -> Dict[str, Any]:
-    w = max(0, min(1, float(base_weight)))
+def blend_params( base: Dict[str, Any], opt: Dict[str, Any], base_weight: float = 0.5, ) -> Dict[str, Any]:
+    w = max(0.0, min(1.0, float(base_weight)))
     return {
-        "ema_fast": max(1, int(round(base["ema_fast"] * w + opt["ema_fast"] * (1-w)))),
-        "ema_slow": max(2, int(round(base["ema_slow"] * w + opt["ema_slow"] * (1-w)))),
-        "min_adx": base["min_adx"] * w + opt["min_adx"] * (1-w),
-        "max_rsi": base["max_rsi"] * w + opt["max_rsi"] * (1-w),
-        "min_rsi": base["min_rsi"] * w + opt["min_rsi"] * (1-w),
-        "capital_multiplier": base["capital_multiplier"] * w + opt["capital_multiplier"] * (1-w),
+        "ema_fast": max(
+            1,
+            int(round(
+                base["ema_fast"] * w
+                + opt["ema_fast"] * (1 - w)
+            )),
+        ),
+        "ema_slow": max(
+            2,
+            int(round(
+                base["ema_slow"] * w
+                + opt["ema_slow"] * (1 - w)
+            )),
+        ),
+        "min_adx": base["min_adx"] * w + opt["min_adx"] * (1 - w),
+        "max_rsi": base["max_rsi"] * w + opt["max_rsi"] * (1 - w),
+        "min_rsi": base["min_rsi"] * w + opt["min_rsi"] * (1 - w),
+        "capital_multiplier": (
+            base["capital_multiplier"] * w
+            + opt["capital_multiplier"] * (1 - w)
+        ),
     }
 
 
-def signal_from_closed_candle(df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = .5) -> Tuple[str, Dict[str, float]]:
-    fast, slow = int(cfg.get("ema_fast", 9)), int(cfg.get("ema_slow", 21))
+def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = 0.5, ) -> Tuple[str, Dict[str, float]]:
+    if len(df) < 60:
+        return "NEUTRALNY", {}
+
+    fast = int(cfg.get("ema_fast", 9))
+    slow = int(cfg.get("ema_slow", 21))
+
     if fast >= slow:
-        fast = max(1, slow - 1)
+        fast, slow = slow, fast
+
     params = {
         "ema_fast": fast,
         "ema_slow": slow,
-        "min_adx": float(cfg.get("min_adx", cfg.get("adx", 28))),
-        "max_rsi": float(cfg.get("max_rsi", 75)),
-        "min_rsi": float(cfg.get("min_rsi", 25)),
-        "capital_multiplier": float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))),
+        "min_adx": float(
+            cfg.get("min_adx", cfg.get("adx", 28.0))
+        ),
+        "max_rsi": float(cfg.get("max_rsi", 75.0)),
+        "min_rsi": float(cfg.get("min_rsi", 25.0)),
+        "capital_multiplier": float(
+            cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))
+        ),
     }
-    if cfg.get("mode") == "Automatyczny":
-        params = blend_params(params, get_dynamic_parameters(df, cfg.get("tf", "15m")), auto_base_influence)
-    if params["ema_fast"] >= params["ema_slow"]:
-        params["ema_fast"] = max(1, params["ema_slow"] - 1)
 
-    ind = calculate_indicators(df, int(params["ema_fast"]), int(params["ema_slow"]), 14)
-    if len(ind) < max(60, int(params["ema_slow"]) + 20):
+    if cfg.get("mode") == "Automatyczny":
+        params = blend_params(
+            params,
+            get_dynamic_parameters(df, cfg.get("tf", "15m")),
+            auto_base_influence,
+        )
+        if params["ema_fast"] >= params["ema_slow"]:
+            params["ema_fast"], params["ema_slow"] = (
+                params["ema_slow"],
+                params["ema_fast"],
+            )
+
+    ind = calculate_indicators(
+        df,
+        int(params["ema_fast"]),
+        int(params["ema_slow"]),
+        14,
+    )
+
+    if len(ind) < max(55, int(params["ema_slow"]) + 10):
         return "NEUTRALNY", {}
 
-    # Always evaluate the last CLOSED candle. Trading is trend-following rather than
-    # waiting for a single EMA crossover, which previously made entries extremely rare.
+    # Closed candles only. -1 may still be forming.
     last = ind.iloc[-2]
     prev = ind.iloc[-3]
+    older = ind.iloc[-4]
+
     values = {
         "price": safe_float(last["close"]),
         "adx": safe_float(last["adx"]),
-        "rsi": safe_float(last["rsi"], 50),
+        "rsi": safe_float(last["rsi"], 50.0),
         "plus_di": safe_float(last["plus_di"]),
         "minus_di": safe_float(last["minus_di"]),
         "ema_fast": safe_float(last["ema_fast"]),
@@ -579,436 +890,1061 @@ def signal_from_closed_candle(df: pd.DataFrame, cfg: Dict[str, Any], auto_base_i
         "prev_ema_fast": safe_float(prev["ema_fast"]),
         "prev_ema_slow": safe_float(prev["ema_slow"]),
     }
-    long_trend = (
-        values["ema_fast"] > values["ema_slow"]
-        and values["plus_di"] > values["minus_di"]
-        and values["macd_hist"] > 0
+
+    # IMPORTANT FIX:
+    # The old version demanded a fresh close crossing EMA on exactly one candle.
+    # That is far too restrictive and can result in virtually no trades.
+    # Now we require confirmed trend alignment on the closed candle and one
+    # additional confirmation candle, while RSI/ADX still filter weak setups.
+
+    long_alignment = (
+        last["ema_fast"] > last["ema_slow"]
+        and prev["ema_fast"] > prev["ema_slow"]
+        and last["plus_di"] > last["minus_di"]
+        and prev["plus_di"] >= prev["minus_di"]
+        and last["macd_hist"] > 0
+        and prev["macd_hist"] >= 0
+    )
+
+    short_alignment = (
+        last["ema_fast"] < last["ema_slow"]
+        and prev["ema_fast"] < prev["ema_slow"]
+        and last["minus_di"] > last["plus_di"]
+        and prev["minus_di"] >= prev["plus_di"]
+        and last["macd_hist"] < 0
+        and prev["macd_hist"] <= 0
+    )
+
+    # Price must also be on the trend side of the fast EMA.
+    long_price_ok = last["close"] > last["ema_fast"]
+    short_price_ok = last["close"] < last["ema_fast"]
+
+    long_ok = (
+        long_alignment
+        and long_price_ok
         and values["adx"] >= params["min_adx"]
         and values["rsi"] < params["max_rsi"]
+        and values["rsi"] > 50.0
     )
-    short_trend = (
-        values["ema_fast"] < values["ema_slow"]
-        and values["minus_di"] > values["plus_di"]
-        and values["macd_hist"] < 0
+
+    short_ok = (
+        short_alignment
+        and short_price_ok
         and values["adx"] >= params["min_adx"]
         and values["rsi"] > params["min_rsi"]
+        and values["rsi"] < 50.0
     )
-    signal = "LONG" if long_trend else "SHORT" if short_trend else "NEUTRALNY"
+
+    # Do not demand crossover, but give a slight preference to fresh
+    # transitions. The returned signal is still a normal trend signal.
+    _fresh_long = (
+        older["ema_fast"] <= older["ema_slow"]
+        and prev["ema_fast"] > prev["ema_slow"]
+    )
+    _fresh_short = (
+        older["ema_fast"] >= older["ema_slow"]
+        and prev["ema_fast"] < prev["ema_slow"]
+    )
+
+    signal = "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY"
     return signal, {**values, **params}
 
+
 # ============================================================
-# ORDERS / RISK
+# RYZYKO / ZLECENIA
 # ============================================================
 
-def calculate_risk_allocation(free_balance: float, entry: float, stop_price: float, leverage: int, max_single: float, tf_multiplier: float) -> float:
+def calculate_risk_allocation( free_balance: float, entry: float, stop_price: float, leverage: int, max_single: float, tf_multiplier: float, ) -> float:
     if free_balance <= 0 or entry <= 0 or stop_price <= 0:
         return 0.0
+
     risk_amount = free_balance * DEFAULT_RISK_PCT
     distance = abs(entry - stop_price) / entry
     distance = max(distance, 0.005)
+
     risk_notional = risk_amount / distance
-    max_notional = min(free_balance * max(1, leverage) * 0.90, max_single * max(tf_multiplier, 0.1) * leverage)
-    return max(0.0, min(risk_notional, max_notional))
+
+    max_notional = min(
+        free_balance * max(1, leverage) * 0.90,
+        max_single * max(tf_multiplier, 0.1) * leverage,
+    )
+
+    return max(
+        0.0,
+        min(risk_notional, max_notional),
+    )
 
 
-def roe_to_price(entry: float, roe_percent: float, leverage: float, long: bool) -> float:
-    # Approximate linear ROE relation used for local/exchange protection.
-    # Fee/funding are not included; local ROE guard remains the final backstop.
-    move = abs(float(roe_percent)) / max(float(leverage), 1.0) / 100.0
-    return entry * (1.0 - move if long else 1.0 + move)
+def roe_to_price( entry: float, roe_percent: float, leverage: float, long: bool, ) -> float:
+    move = (
+        abs(float(roe_percent))
+        / max(float(leverage), 1.0)
+        / 100.0
+    )
+    return entry * (
+        1.0 - move if long else 1.0 + move
+    )
 
 
-def create_protection_order(exchange, symbol: str, side: str, amount: float, trigger_price: float, kind: str) -> Optional[Dict[str, Any]]:
-    """Try CCXT unified trigger syntax first. The worker also has a polling guard, so failure of a native trigger order does not silently leave a position unprotected. """
+def normalize_price(exchange, symbol: str, price: float) -> float:
     try:
-        params = {"reduceOnly": True, "triggerPrice": trigger_price}
-        if kind == "stop":
-            params["stopLossPrice"] = trigger_price
-        else:
-            params["takeProfitPrice"] = trigger_price
-        return exchange.create_order(symbol, "market", side, amount, None, params)
-    except Exception as exc:
-        log.warning("Native %s protection failed for %s: %s", kind, symbol, exc)
-        return None
-
-
-def cancel_order_safe(exchange, order_id: str, symbol: str) -> None:
-    if not order_id:
-        return
-    try:
-        exchange.cancel_order(order_id, symbol)
+        return float(exchange.price_to_precision(symbol, price))
     except Exception:
-        pass
+        return float(price)
 
 
-def place_entry_with_protection(exchange, symbol: str, signal: str, amount: float, leverage: int, stop_roe: float, take_roe: float) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[float]]:
+def create_trigger_order( exchange, symbol: str, side: str, amount: float, trigger_price: float, kind: str, ) -> Optional[Dict[str, Any]]:
+    """ First try CCXT's unified trigger parameters. Then try the common stopPrice form used by several derivatives exchanges. Exchange-specific params are intentionally kept isolated here because CCXT documents that custom order parameters are exchange-specific. """
+    trigger_price = normalize_price(exchange, symbol, trigger_price)
+
+    attempts = []
+
+    if kind == "stop":
+        attempts.append({
+            "triggerPrice": trigger_price,
+            "stopLossPrice": trigger_price,
+            "reduceOnly": True,
+        })
+        attempts.append({
+            "triggerPrice": trigger_price,
+            "reduceOnly": True,
+        })
+        attempts.append({
+            "stopPrice": trigger_price,
+            "reduceOnly": True,
+        })
+    else:
+        attempts.append({
+            "triggerPrice": trigger_price,
+            "takeProfitPrice": trigger_price,
+            "reduceOnly": True,
+        })
+        attempts.append({
+            "triggerPrice": trigger_price,
+            "reduceOnly": True,
+        })
+        attempts.append({
+            "stopPrice": trigger_price,
+            "reduceOnly": True,
+        })
+
+    for params in attempts:
+        try:
+            order = exchange.create_order(
+                symbol,
+                "market",
+                side,
+                amount,
+                None,
+                params,
+            )
+            if order:
+                return order
+        except Exception as exc:
+            log.debug(
+                "Trigger %s failed %s params=%s: %s",
+                kind, symbol, params, exc
+            )
+
+    log.warning(
+        "All native %s protection attempts failed for %s",
+        kind, symbol,
+    )
+    return None
+
+
+def place_entry_with_protection( exchange, symbol: str, signal: str, contracts: float, leverage: int, stop_roe: float, take_roe: float, user_id: int, ) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[float]]:
     side = "buy" if signal == "LONG" else "sell"
+
     try:
-        order = exchange.create_order(symbol, "market", side, amount)
+        contracts = float(
+            exchange.amount_to_precision(symbol, contracts)
+        )
+        if contracts <= 0:
+            raise ValueError("contracts <= 0")
+
+        order = exchange.create_order(
+            symbol,
+            "market",
+            side,
+            contracts,
+            None,
+            {},
+        )
     except Exception as exc:
-        log.error("ENTRY failed %s %s: %s", symbol, signal, exc)
+        log.error(
+            "ENTRY failed %s %s contracts=%s: %s",
+            symbol, signal, contracts, exc
+        )
         return None, None, None
 
-    # Use the exchange-reported average/fill price, never the pre-entry ticker price.
-    entry = safe_float(order.get("average")) or safe_float(order.get("price"))
+    entry = (
+        safe_float(order.get("average"))
+        or safe_float(order.get("price"))
+    )
+
     if entry <= 0:
-        try:
-            p = find_position(fetch_positions_safe(exchange), symbol)
-            entry = safe_float(p.get("entryPrice")) if p else 0.0
-        except Exception:
-            entry = 0.0
+        time.sleep(0.25)
+        p = find_position(
+            fetch_positions_safe(exchange),
+            symbol,
+        )
+        if p:
+            entry = safe_float(p.get("entryPrice"))
+
     if entry <= 0:
-        log.error("Could not determine real entry price for %s; local guard will use position entry when available", symbol)
+        log.error(
+            "Entry price unavailable after successful order %s",
+            symbol,
+        )
         return order, None, None
 
     long = signal == "LONG"
-    stop_price = roe_to_price(entry, stop_roe, leverage, long)
-    take_price = roe_to_price(entry, take_roe, leverage, not long)
-    close_side = "sell" if long else "buy"
-    try:
-        amount_prec = float(exchange.amount_to_precision(symbol, amount))
-    except Exception:
-        amount_prec = amount
-    if amount_prec <= 0:
-        return order, stop_price, take_price
 
-    sl_order = create_protection_order(exchange, symbol, close_side, amount_prec, stop_price, "stop")
-    tp_order = create_protection_order(exchange, symbol, close_side, amount_prec, take_price, "take")
-    log.info("Entry %s %s avg=%s SL=%s TP=%s native_sl=%s native_tp=%s", symbol, signal, entry, stop_price, take_price,
-             bool(sl_order), bool(tp_order))
+    stop_price = normalize_price(
+        exchange,
+        symbol,
+        roe_to_price(
+            entry, stop_roe, leverage, long
+        ),
+    )
+
+    take_price = normalize_price(
+        exchange,
+        symbol,
+        roe_to_price(
+            entry, take_roe, leverage, not long
+        ),
+    )
+
+    close_side = "sell" if long else "buy"
+
+    sl_order = create_trigger_order(
+        exchange,
+        symbol,
+        close_side,
+        contracts,
+        stop_price,
+        "stop",
+    )
+
+    tp_order = create_trigger_order(
+        exchange,
+        symbol,
+        close_side,
+        contracts,
+        take_price,
+        "take",
+    )
+
+    save_protection_state(
+        user_id=user_id,
+        symbol=symbol,
+        side=position_side(
+            find_position(
+                fetch_positions_safe(exchange),
+                symbol,
+            ) or {"side": signal.lower()}
+        ),
+        amount=contracts,
+        entry_price=entry,
+        leverage=leverage,
+        stop_price=stop_price,
+        take_price=take_price,
+        stop_order_id=str(
+            (sl_order or {}).get("id", "")
+        ),
+        take_order_id=str(
+            (tp_order or {}).get("id", "")
+        ),
+    )
+
+    log.info(
+        "ENTRY %s %s contracts=%s entry=%s SL=%s TP=%s nativeSL=%s nativeTP=%s",
+        symbol,
+        signal,
+        contracts,
+        entry,
+        stop_price,
+        take_price,
+        bool(sl_order),
+        bool(tp_order),
+    )
+
     return order, stop_price, take_price
 
-    def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
-        symbols_with_volume = []
-        try:
-            if not self.markets_loaded or not self.exchange.markets:
-                self.exchange.load_markets()
-                self.markets_loaded = True
-                
-            for symbol, market in self.exchange.markets.items():
-                if market.get('linear') and market.get('swap') and market.get('active'):
-                    if not symbol or '/USDT:USDT' not in symbol:
-                        continue
-                    
-                    base = market.get('base', '')
-                    if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
-                        continue
-                        
-                    info = market.get('info', {})
-                    vol = float(info.get('usdtVolume', 0) or info.get('quoteVolume', 0) or 0)
-                    symbols_with_volume.append((symbol, vol))
-                    
-            symbols_with_volume.sort(key=lambda x: x[1], reverse=True)
-            return symbols_with_volume[:max_pairs]
-        except Exception as e:
-            log.error(f"Błąd skanera: {e}")
-            return []
-
 
 # ============================================================
-# USER CONFIG / WORKER
+# USTAWIENIA UŻYTKOWNIKA
 # ============================================================
+
 def get_all_trading_users() -> List[Dict[str, Any]]:
     conn = db_connect()
     try:
-        rows = conn.execute("""SELECT id,email,api_key,secret_key,passphrase,selected_exchange,is_admin,stripe_paid FROM users WHERE api_key<>'' AND secret_key<>''""").fetchall()
+        rows = conn.execute(""" SELECT id,email,api_key,secret_key,passphrase, selected_exchange,is_admin,stripe_paid FROM users WHERE api_key<>'' AND secret_key<>'' """).fetchall()
     finally:
         conn.close()
-    return [{"id": int(r[0]), "email": r[1], "api_key": r[2] or "", "secret_key": r[3] or "", "passphrase": r[4] or "",
-             "exchange": r[5] or "Bitget", "is_admin": bool(r[6]), "paid": bool(r[7])} for r in rows]
+
+    return [{
+        "id": int(r[0]),
+        "email": r[1],
+        "api_key": r[2] or "",
+        "secret_key": r[3] or "",
+        "passphrase": r[4] or "",
+        "exchange": r[5] or "Bitget",
+        "is_admin": bool(r[6]),
+        "paid": bool(r[7]),
+    } for r in rows]
 
 
 def get_user_risk_settings(user_id: int) -> Dict[str, Any]:
+    base = {
+        "max_single": DEFAULT_MAX_SINGLE,
+        "max_positions": DEFAULT_MAX_POSITIONS,
+        "enable_roe": True,
+        "stop_roe": DEFAULT_STOP_ROE,
+        "take_roe": DEFAULT_TAKE_ROE,
+        "max_leverage": DEFAULT_MAX_LEVERAGE,
+        "manual_leverage": DEFAULT_MANUAL_LEVERAGE,
+        "leverage_mode": "Autonomiczny (płynny w granicach limitu)",
+        "max_scan_pairs": DEFAULT_MAX_SCAN_PAIRS,
+        "auto_base_influence": 50,
+        "cooldown_minutes": 15,
+    }
+
     conn = db_connect()
     try:
-        row = conn.execute("SELECT settings_json FROM users WHERE id=?", (int(user_id),)).fetchone()
+        row = conn.execute(
+            "SELECT settings_json FROM users WHERE id=?",
+            (int(user_id),),
+        ).fetchone()
     finally:
         conn.close()
-    base = {"max_single": DEFAULT_MAX_SINGLE, "max_positions": DEFAULT_MAX_POSITIONS, "enable_roe": True,
-            "stop_roe": DEFAULT_STOP_ROE, "take_roe": DEFAULT_TAKE_ROE, "max_leverage": DEFAULT_MAX_LEVERAGE,
-            "manual_leverage": DEFAULT_MANUAL_LEVERAGE, "leverage_mode": "Autonomiczny (płynny w granicach limitu)",
-            "max_scan_pairs": DEFAULT_MAX_SCAN_PAIRS, "auto_base_influence": 50, "cooldown_minutes": 15}
+
     if row and row[0]:
         try:
             saved = json.loads(row[0])
             if isinstance(saved, dict):
                 base.update(saved)
         except Exception:
-            log.exception("Invalid risk settings for user %s", user_id)
+            pass
+
     return base
 
 
-def save_user_risk_settings(user_id: int, settings: Dict[str, Any]) -> None:
+def save_user_risk_settings( user_id: int, settings: Dict[str, Any], ) -> None:
     conn = db_connect()
     try:
-        conn.execute("UPDATE users SET settings_json=? WHERE id=?", (json.dumps(settings), int(user_id)))
+        conn.execute(
+            "UPDATE users SET settings_json=? WHERE id=?",
+            (json.dumps(settings, ensure_ascii=False), int(user_id)),
+        )
         conn.commit()
     finally:
         conn.close()
 
 
+# ============================================================
+# TRWAŁY SKANER
+# ============================================================
+
+def save_scanner_rows( user_id: int, rows: List[Dict[str, Any]], ) -> None:
+    if not rows:
+        return
+
+    conn = db_connect()
+    try:
+        for row in rows:
+            conn.execute(""" INSERT INTO scanner_results( user_id,timeframe,symbol,quote_volume,price,adx,rsi, ema_fast,ema_slow,signal,candle_ts,updated_at ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,timeframe,symbol) DO UPDATE SET quote_volume=excluded.quote_volume, price=excluded.price, adx=excluded.adx, rsi=excluded.rsi, ema_fast=excluded.ema_fast, ema_slow=excluded.ema_slow, signal=excluded.signal, candle_ts=excluded.candle_ts, updated_at=excluded.updated_at """, (
+                user_id,
+                row["timeframe"],
+                row["symbol"],
+                row["quote_volume"],
+                row["price"],
+                row["adx"],
+                row["rsi"],
+                row["ema_fast"],
+                row["ema_slow"],
+                row["signal"],
+                row["candle_ts"],
+                utc_now(),
+            ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def read_scanner_rows( user_id: int, limit: int = 500, ) -> pd.DataFrame:
+    conn = db_connect()
+    try:
+        return pd.read_sql_query(""" SELECT timeframe AS Interwał, symbol AS Para, price AS Cena, adx AS ADX, rsi AS RSI, ema_fast AS EMA_Szybka, ema_slow AS EMA_Wolna, signal AS Sygnał, quote_volume AS Wolumen_24h, updated_at AS Aktualizacja FROM scanner_results WHERE user_id=? ORDER BY CASE signal WHEN 'LONG' THEN 0 WHEN 'SHORT' THEN 1 ELSE 2 END, quote_volume DESC LIMIT ? """, conn, params=(int(user_id), int(limit)))
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+# ============================================================
+# WORKER
+# ============================================================
+
 class UserWorker:
     def __init__(self, user: Dict[str, Any]):
         self.user = user
         self.user_id = int(user["id"])
-        self.exchange = get_exchange(user["api_key"], user["secret_key"], user["passphrase"], user["exchange"])
+        self.exchange = get_exchange(
+            user["api_key"],
+            user["secret_key"],
+            user["passphrase"],
+            user["exchange"],
+        )
         self.cooldowns: Dict[str, float] = {}
         self.entry_locks: Dict[str, float] = {}
         self.last_protection_check = 0.0
+        self.last_scan_by_tf: Dict[str, float] = {}
         self.markets_loaded = False
-        self.markets: Dict[str, Any] = {}
-        self.last_candle_by_symbol_tf: Dict[Tuple[str, str], int] = {}
-
-    def refresh_credentials(self) -> None:
-        users = [u for u in get_all_trading_users() if u["id"] == self.user_id]
-        if users:
-            new = users[0]
-            if (new["api_key"], new["secret_key"], new["passphrase"], new["exchange"]) != (
-                self.user["api_key"], self.user["secret_key"], self.user["passphrase"], self.user["exchange"]):
-                self.user = new
-                self.exchange = get_exchange(new["api_key"], new["secret_key"], new["passphrase"], new["exchange"])
-                self.markets_loaded = False
-
-    def load_markets_safe(self) -> bool:
-        if self.exchange is None:
-            return False
-        try:
-            if not self.markets_loaded:
-                self.markets = self.exchange.load_markets()
-                self.markets_loaded = True
-            return True
-        except Exception as exc:
-            self.markets_loaded = False
-            log.warning("load_markets failed user=%s: %s", self.user_id, exc)
-            return False
-
-    def get_ranked_symbols(self, max_pairs: int) -> List[Tuple[str, float]]:
-        symbols_with_volume = []
-        try:
-            if not self.markets_loaded or not self.exchange.markets:
-                self.exchange.load_markets()
-                self.markets_loaded = True
-            
-            for symbol, market in self.exchange.markets.items():
-                if not market.get("active", True):
-                    continue
-                    
-                sym_str = market.get("symbol", symbol)
-                if "USDT" not in sym_str:
-                    continue
-                    
-                base = market.get("base", "")
-                if base in ["GOOGL", "MSFT", "DELL", "AAPL", "AMZN", "TSLA", "META", "NFLX", "XAU", "XAG", "EURUSD"]:
-                    continue
-                
-                # Zabezpieczenie przed podwójnym sufiksem powodującym błąd API
-                clean_symbol = symbol.split(":")[0] if ":" in symbol else symbol
-                if "/" not in clean_symbol and base:
-                    clean_symbol = f"{base}/USDT"
-                    
-                info = market.get("info", {})
-                raw_val = (
-                    info.get("usdtVolume") or 
-                    info.get("quoteVolume") or 
-                    market.get("quoteVolume") or 
-                    0
-                )
-                try:
-                    vol = float(raw_val)
-                except (ValueError, TypeError):
-                    vol = 0.0
-                    
-                symbols_with_volume.append((clean_symbol, vol))
-            
-            unique_dict = {}
-            for sym, vol in symbols_with_volume:
-                if sym not in unique_dict or vol > unique_dict[sym]:
-                    unique_dict[sym] = vol
-                    
-            sorted_symbols = sorted(unique_dict.items(), key=lambda x: x[1], reverse=True)
-            top_symbols = sorted_symbols[:max_pairs]
-            
-            if top_symbols:
-                return top_symbols
-        except Exception as e:
-            log.error("Error: %s", e)
-            
-        return []
-
 
     def run_once(self) -> None:
-        self.refresh_credentials()
         if self.exchange is None:
             return
+
         bots = load_active_bots(self.user_id)
         if not bots:
-            log.info("User %s: no active MTF bots", self.user_id)
             return
+
         risk = get_user_risk_settings(self.user_id)
+
+        if not self.markets_loaded:
+            if not load_markets_safe(self.exchange):
+                return
+            self.markets_loaded = True
+
+        try:
+            tickers = self.exchange.fetch_tickers()
+        except Exception as exc:
+            log.warning(
+                "Ticker fetch failed user=%s: %s",
+                self.user_id,
+                exc,
+            )
+            return
+
+        # Protection ALWAYS comes before new entries.
         self.protect_open_positions(risk)
+
         positions = fetch_positions_safe(self.exchange)
-        pos_map = {p.get("symbol"): p for p in positions if p.get("symbol") and position_contracts(p) > 0}
+        pos_map = {
+            p.get("symbol"): p
+            for p in positions
+            if p.get("symbol")
+            and position_contracts(p) > 0
+        }
+
         active_count = len(pos_map)
-        if active_count >= int(risk["max_positions"]):
-            return
-        balance = fetch_usdt_balance(self.exchange)
-        free_balance = balance["free"]
-        ranked = self.get_ranked_symbols(int(risk["max_scan_pairs"]))
+        balance_snapshot = fetch_usdt_balance(self.exchange)
+        free_balance = balance_snapshot["free"]
+
+        ranked = rank_liquid_symbols(
+            self.exchange,
+            tickers,
+            int(risk["max_scan_pairs"]),
+        )
+
         if not ranked:
-            log.warning("User %s: scanner returned 0 liquid symbols", self.user_id)
+            log.warning(
+                "No liquid USDT swap symbols for user=%s",
+                self.user_id,
+            )
             return
-        tickers = fetch_tickers_safe(self.exchange, [s for s, _ in ranked])
-        log.info("User %s: scanning %s symbols across %s timeframe bots; free balance=%.4f",
-                 self.user_id, len(ranked), list(bots.keys()), free_balance)
-        if free_balance <= 0:
-            log.warning("User %s: free USDT balance is %.4f; scanning continues but orders are disabled", self.user_id, free_balance)
+
+        # Each timeframe is scanned independently and results are persisted.
+        # The cache prevents a 5-second worker loop from hammering the exchange.
         for tf, raw_cfg in list(bots.items()):
-            if active_count >= int(risk["max_positions"]):
-                break
+            if tf not in AVAILABLE_TIMEFRAMES:
+                continue
+
+            if (
+                time.time() - self.last_scan_by_tf.get(tf, 0.0)
+                < SCAN_CACHE_SECONDS
+            ):
+                continue
+
+            self.last_scan_by_tf[tf] = time.time()
+
             cfg = dict(raw_cfg)
             cfg["tf"] = tf
-            for symbol, _qv in ranked:
-                if active_count >= int(risk["max_positions"]):
-                    break
-                now = time.time()
-                if now < self.cooldowns.get(symbol, 0) or now < self.entry_locks.get(symbol, 0):
-                    continue
-                if symbol in pos_map or entry_guard_blocks(self.user_id, symbol):
-                    continue
+
+            scanner_rows: List[Dict[str, Any]] = []
+
+            for symbol, qv in ranked:
                 try:
-                    limit = min(300, max(100, int(cfg.get("ema_slow", 21)) + 50))
-                    ohlcv = self.exchange.fetch_ohlcv(symbol, tf, limit=limit)
-                    if len(ohlcv) < 3:
+                    limit = min(
+                        250,
+                        max(
+                            100,
+                            int(cfg.get("ema_slow", 21)) + 60,
+                        ),
+                    )
+
+                    ohlcv = fetch_ohlcv_safe(
+                        self.exchange,
+                        symbol,
+                        tf,
+                        limit,
+                    )
+
+                    if len(ohlcv) < 60:
                         continue
-                    closed_candle_ts = int(ohlcv[-2][0])
-                    candle_key = (tf, symbol)
-                    if self.last_candle_by_symbol_tf.get(candle_key) == closed_candle_ts:
-                        continue
-                    self.last_candle_by_symbol_tf[candle_key] = closed_candle_ts
-                    if entry_guard_blocks(self.user_id, symbol, closed_candle_ts):
-                        continue
-                    df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                    signal, vals = signal_from_closed_candle(df, cfg, float(risk["auto_base_influence"]) / 100)
+
+                    closed_candle_ts = int(
+                        ohlcv[-2][0]
+                    )
+
+                    df = pd.DataFrame(
+                        ohlcv,
+                        columns=[
+                            "timestamp",
+                            "open",
+                            "high",
+                            "low",
+                            "close",
+                            "volume",
+                        ],
+                    )
+
+                    signal, vals = signal_from_closed_candle(
+                        df,
+                        cfg,
+                        float(
+                            risk["auto_base_influence"]
+                        ) / 100.0,
+                    )
+
+                    scanner_rows.append({
+                        "timeframe": tf,
+                        "symbol": symbol,
+                        "quote_volume": qv,
+                        "price": safe_float(
+                            vals.get("price")
+                        ),
+                        "adx": safe_float(
+                            vals.get("adx")
+                        ),
+                        "rsi": safe_float(
+                            vals.get("rsi")
+                        ),
+                        "ema_fast": safe_float(
+                            vals.get("ema_fast")
+                        ),
+                        "ema_slow": safe_float(
+                            vals.get("ema_slow")
+                        ),
+                        "signal": signal,
+                        "candle_ts": closed_candle_ts,
+                    })
+
+                    # Entry section.
                     if signal == "NEUTRALNY":
                         continue
-                    max_ex = exchange_max_leverage(self.exchange, symbol, int(risk["max_leverage"]))
+
+                    if active_count >= int(
+                        risk["max_positions"]
+                    ):
+                        break
+
+                    if symbol in pos_map:
+                        continue
+
+                    if time.time() < self.cooldowns.get(symbol, 0):
+                        continue
+
+                    if time.time() < self.entry_locks.get(symbol, 0):
+                        continue
+
+                    if entry_guard_blocks(
+                        self.user_id,
+                        symbol,
+                        closed_candle_ts,
+                    ):
+                        continue
+
+                    # Re-check position immediately before order.
+                    latest_positions = fetch_positions_safe(
+                        self.exchange
+                    )
+                    latest_position = find_position(
+                        latest_positions,
+                        symbol,
+                    )
+
+                    if latest_position:
+                        pos_map[symbol] = latest_position
+                        continue
+
+                    max_ex = exchange_max_leverage(
+                        self.exchange,
+                        symbol,
+                        int(risk["max_leverage"]),
+                    )
+
                     if risk["leverage_mode"] == "Ręczny":
-                        lev = min(int(risk["manual_leverage"]), max_ex)
+                        lev = min(
+                            int(risk["manual_leverage"]),
+                            max_ex,
+                        )
                     else:
-                        adx = safe_float(vals.get("adx"), 20)
-                        ratio = min(1, max(0, (adx - 10) / 45))
-                        lev = max(1, int(round(1 + ratio * (min(int(risk["max_leverage"]), max_ex) - 1))))
-                    set_leverage_safe(self.exchange, symbol, lev)
-                    ticker = tickers.get(symbol, {}) or {}
-                    entry_hint = safe_float(ticker.get("last")) or safe_float(vals.get("price"))
+                        adx = safe_float(
+                            vals.get("adx"),
+                            20.0,
+                        )
+                        ratio = min(
+                            1.0,
+                            max(
+                                0.0,
+                                (adx - 10.0) / 45.0,
+                            ),
+                        )
+                        lev = max(
+                            1,
+                            int(round(
+                                1
+                                + ratio
+                                * (
+                                    min(
+                                        int(
+                                            risk[
+                                                "max_leverage"
+                                            ]
+                                        ),
+                                        max_ex,
+                                    )
+                                    - 1
+                                )
+                            )),
+                        )
+
+                    set_leverage_safe(
+                        self.exchange,
+                        symbol,
+                        lev,
+                    )
+
+                    entry_hint = (
+                        safe_float(
+                            (tickers.get(symbol) or {}).get(
+                                "last"
+                            )
+                        )
+                        or safe_float(
+                            vals.get("price")
+                        )
+                    )
+
                     if entry_hint <= 0:
                         continue
-                    initial_stop = roe_to_price(entry_hint, float(risk["stop_roe"]), lev, signal == "LONG")
-                    notional = calculate_risk_allocation(free_balance, entry_hint, initial_stop, lev,
-                                                         float(risk["max_single"]), float(vals.get("capital_multiplier", 1)))
+
+                    initial_stop = roe_to_price(
+                        entry_hint,
+                        float(risk["stop_roe"]),
+                        lev,
+                        signal == "LONG",
+                    )
+
+                    notional = calculate_risk_allocation(
+                        free_balance,
+                        entry_hint,
+                        initial_stop,
+                        lev,
+                        float(risk["max_single"]),
+                        float(
+                            vals.get(
+                                "capital_multiplier",
+                                1.0,
+                            )
+                        ),
+                    )
+
                     if notional <= 0:
                         continue
-                    amount = notional / entry_hint
-                    min_amt, min_cost, _ = market_limits(self.exchange, symbol)
-                    if min_amt and amount < min_amt:
-                        amount = min_amt
-                    if min_cost and amount * entry_hint < min_cost:
-                        amount = min_cost / entry_hint
-                    amount = float(self.exchange.amount_to_precision(symbol, amount))
-                    if amount <= 0:
-                        continue
-                    # Final race check directly against exchange.
-                    latest = find_position(fetch_positions_safe(self.exchange), symbol)
-                    if latest:
-                        pos_map[symbol] = latest
-                        continue
-                    lock_seconds = max(300.0, float(risk.get("cooldown_minutes", 15)) * 60)
-                    self.entry_locks[symbol] = time.time() + lock_seconds
-                    set_entry_guard(self.user_id, symbol, time.time() + lock_seconds, closed_candle_ts, signal)
-                    order, sl_price, tp_price = place_entry_with_protection(
-                        self.exchange, symbol, signal, amount, lev, float(risk["stop_roe"]), float(risk["take_roe"])
+
+                    # Base amount -> contract count.
+                    base_amount = notional / entry_hint
+                    contracts = base_amount_to_contracts(
+                        self.exchange,
+                        symbol,
+                        base_amount,
                     )
+
+                    min_amt, min_cost, _ = market_limits(
+                        self.exchange,
+                        symbol,
+                    )
+
+                    if min_amt and contracts < min_amt:
+                        contracts = min_amt
+
+                    # min cost is quote notional. Convert it into contracts.
+                    if min_cost:
+                        current_quote = (
+                            contracts
+                            * contract_size(
+                                self.exchange,
+                                symbol,
+                            )
+                            * entry_hint
+                        )
+                        if current_quote < min_cost:
+                            contracts = (
+                                min_cost
+                                / entry_hint
+                                / contract_size(
+                                    self.exchange,
+                                    symbol,
+                                )
+                            )
+
+                    contracts = float(
+                        self.exchange.amount_to_precision(
+                            symbol,
+                            contracts,
+                        )
+                    )
+
+                    if contracts <= 0:
+                        continue
+
+                    # Durable lock BEFORE order.
+                    lock_seconds = max(
+                        300.0,
+                        float(
+                            risk.get(
+                                "cooldown_minutes",
+                                15,
+                            )
+                        ) * 60.0,
+                    )
+
+                    self.entry_locks[symbol] = (
+                        time.time() + lock_seconds
+                    )
+
+                    set_entry_guard(
+                        self.user_id,
+                        symbol,
+                        time.time() + lock_seconds,
+                        closed_candle_ts,
+                        signal,
+                    )
+
+                    order, sl_price, tp_price = (
+                        place_entry_with_protection(
+                            self.exchange,
+                            symbol,
+                            signal,
+                            contracts,
+                            lev,
+                            float(risk["stop_roe"]),
+                            float(risk["take_roe"]),
+                            self.user_id,
+                        )
+                    )
+
                     if order:
                         active_count += 1
-                        fresh = find_position(fetch_positions_safe(self.exchange), symbol)
+
+                        fresh = find_position(
+                            fetch_positions_safe(
+                                self.exchange
+                            ),
+                            symbol,
+                        )
+
                         if fresh:
                             pos_map[symbol] = fresh
-                        self.cooldowns[symbol] = time.time() + lock_seconds
-                        set_entry_guard(self.user_id, symbol, time.time() + lock_seconds, closed_candle_ts, signal)
-                        log_trade(self.user_id, symbol, tf, "ENTRY", signal, safe_float(order.get("average")) or entry_hint,
-                                  amount, str(order.get("id", "")), f"SL={sl_price};TP={tp_price}")
-                    else:
-                        retry_lock = max(30.0, float(risk.get("cooldown_minutes", 15)) * 60)
-                        self.cooldowns[symbol] = time.time() + retry_lock
-                        self.entry_locks[symbol] = time.time() + retry_lock
-                        set_entry_guard(self.user_id, symbol, time.time() + retry_lock, closed_candle_ts, signal)
-                except Exception as exc:
-                    fail_lock = 30.0
-                    self.cooldowns[symbol] = time.time() + fail_lock
-                    self.entry_locks[symbol] = time.time() + fail_lock
-                    set_entry_guard(self.user_id, symbol, time.time() + fail_lock, locals().get("closed_candle_ts", 0), locals().get("signal", ""))
-                    log.exception("Signal/order cycle failed user=%s tf=%s symbol=%s: %s", self.user_id, tf, symbol, exc)
 
-    def protect_open_positions(self, risk: Dict[str, Any]) -> None:
+                        self.cooldowns[symbol] = (
+                            time.time() + lock_seconds
+                        )
+
+                        set_entry_guard(
+                            self.user_id,
+                            symbol,
+                            time.time() + lock_seconds,
+                            closed_candle_ts,
+                            signal,
+                        )
+
+                        log_trade(
+                            self.user_id,
+                            symbol,
+                            tf,
+                            "ENTRY",
+                            signal,
+                            entry_hint,
+                            contracts,
+                            str(
+                                order.get("id", "")
+                            ),
+                            (
+                                f"SL={sl_price};"
+                                f"TP={tp_price};"
+                                f"LEV={lev};"
+                                f"CONTRACT_SIZE="
+                                f"{contract_size(self.exchange, symbol)}"
+                            ),
+                        )
+                    else:
+                        retry_lock = max(
+                            60.0,
+                            float(
+                                risk.get(
+                                    "cooldown_minutes",
+                                    15,
+                                )
+                            ) * 60.0,
+                        )
+                        self.cooldowns[symbol] = (
+                            time.time() + retry_lock
+                        )
+                        self.entry_locks[symbol] = (
+                            time.time() + retry_lock
+                        )
+
+                except Exception as exc:
+                    log.exception(
+                        "Signal/order failed user=%s tf=%s symbol=%s: %s",
+                        self.user_id,
+                        tf,
+                        symbol,
+                        exc,
+                    )
+
+            save_scanner_rows(
+                self.user_id,
+                scanner_rows,
+            )
+
+    def protect_open_positions( self, risk: Dict[str, Any], ) -> None:
         if not bool(risk["enable_roe"]):
             return
-        if time.time() - self.last_protection_check < POSITION_GUARD_SECONDS:
+
+        if (
+            time.time() - self.last_protection_check
+            < POSITION_GUARD_SECONDS
+        ):
             return
+
         self.last_protection_check = time.time()
-        for p in fetch_positions_safe(self.exchange):
+
+        positions = fetch_positions_safe(
+            self.exchange
+        )
+
+        for p in positions:
             amount = position_contracts(p)
             if amount <= 0:
                 continue
-            entry = safe_float(p.get("entryPrice"))
-            mark = safe_float(p.get("markPrice")) or safe_float(p.get("lastPrice"))
-            lev = safe_float(p.get("leverage"), 1)
-            if entry <= 0 or mark <= 0:
-                continue
-            raw_move = ((mark - entry) / entry) * 100 if is_long(p) else ((entry - mark) / entry) * 100
-            roe = raw_move * max(1, lev)
-            symbol = p.get("symbol", "")
-            reason = None
-            action = None
-            if roe <= -float(risk["stop_roe"]):
-                reason, action = f"ROE SL {roe:.2f}%", "SL"
-            elif roe >= float(risk["take_roe"]):
-                reason, action = f"ROE TP {roe:.2f}%", "TP"
-            if reason and close_position(self.exchange, p, reason):
-                guard_until = time.time() + float(risk["cooldown_minutes"]) * 60
-                self.cooldowns[symbol] = guard_until
-                self.entry_locks[symbol] = guard_until
-                set_entry_guard(self.user_id, symbol, guard_until, 0, action or "")
-                log_trade(self.user_id, symbol, "guard", action or "CLOSE", position_side(p), mark, amount, message=f"ROE={roe:.2f}%")
 
-    def loop(self, stop_event: threading.Event) -> None:
-        log.info("Worker started for user %s (%s)", self.user_id, self.user.get("email"))
+            symbol = p.get("symbol", "")
+            if not symbol:
+                continue
+
+            entry = safe_float(
+                p.get("entryPrice")
+            )
+            if entry <= 0:
+                continue
+
+            mark = (
+                safe_float(p.get("markPrice"))
+                or safe_float(p.get("lastPrice"))
+            )
+
+            lev = safe_float(
+                p.get("leverage"),
+                1.0,
+            )
+
+            if mark <= 0:
+                continue
+
+            raw_move = (
+                ((mark - entry) / entry) * 100
+                if is_long(p)
+                else ((entry - mark) / entry) * 100
+            )
+
+            roe = raw_move * max(1.0, lev)
+
+            # First: hard local ROE guard.
+            if roe <= -float(
+                risk["stop_roe"]
+            ):
+                if close_position(
+                    self.exchange,
+                    p,
+                    f"ROE SL {roe:.2f}%",
+                ):
+                    guard_until = (
+                        time.time()
+                        + float(
+                            risk["cooldown_minutes"]
+                        ) * 60
+                    )
+
+                    self.cooldowns[symbol] = (
+                        guard_until
+                    )
+                    self.entry_locks[symbol] = (
+                        guard_until
+                    )
+
+                    set_entry_guard(
+                        self.user_id,
+                        symbol,
+                        guard_until,
+                        0,
+                        "SL",
+                    )
+
+                    delete_protection_state(
+                        self.user_id,
+                        symbol,
+                    )
+
+                    log_trade(
+                        self.user_id,
+                        symbol,
+                        "guard",
+                        "SL",
+                        position_side(p),
+                        mark,
+                        amount,
+                        message=f"ROE={roe:.2f}%",
+                    )
+
+            elif roe >= float(
+                risk["take_roe"]
+            ):
+                if close_position(
+                    self.exchange,
+                    p,
+                    f"ROE TP {roe:.2f}%",
+                ):
+                    guard_until = (
+                        time.time()
+                        + float(
+                            risk["cooldown_minutes"]
+                        ) * 60
+                    )
+
+                    self.cooldowns[symbol] = (
+                        guard_until
+                    )
+                    self.entry_locks[symbol] = (
+                        guard_until
+                    )
+
+                    set_entry_guard(
+                        self.user_id,
+                        symbol,
+                        guard_until,
+                        0,
+                        "TP",
+                    )
+
+                    delete_protection_state(
+                        self.user_id,
+                        symbol,
+                    )
+
+                    log_trade(
+                        self.user_id,
+                        symbol,
+                        "guard",
+                        "TP",
+                        position_side(p),
+                        mark,
+                        amount,
+                        message=f"ROE={roe:.2f}%",
+                    )
+
+    def loop( self, stop_event: threading.Event, ) -> None:
+        log.info(
+            "Worker started user=%s email=%s exchange=%s",
+            self.user_id,
+            self.user.get("email"),
+            self.user.get("exchange"),
+        )
+
         while not stop_event.is_set():
             try:
                 self.run_once()
             except Exception:
-                log.exception("Worker top-level error for user %s", self.user_id)
-                risk_settings = get_user_risk_settings(self.user_id)
-            interval = float(risk_settings.get("scan_interval", 30))
-            stop_event.wait(interval)
-        log.info("Worker stopped for user %s", self.user_id)
+                log.exception(
+                    "Worker top-level error user=%s",
+                    self.user_id,
+                )
+
+            stop_event.wait(
+                WORKER_POLL_SECONDS
+            )
+
+        log.info(
+            "Worker stopped user=%s",
+            self.user_id,
+        )
 
 
 class WorkerManager:
     def __init__(self):
         self.lock = threading.Lock()
-        self.workers: Dict[int, Tuple[threading.Thread, threading.Event]] = {}
+        self.workers: Dict[
+            int,
+            Tuple[
+                threading.Thread,
+                threading.Event,
+            ],
+        ] = {}
 
     def reconcile(self) -> None:
-        users = {u["id"]: u for u in get_all_trading_users()}
-        active_ids = {uid for uid in users if load_active_bots(uid)}
+        users = {
+            u["id"]: u
+            for u in get_all_trading_users()
+        }
+
+        active_ids = {
+            uid
+            for uid in users
+            if load_active_bots(uid)
+        }
+
         with self.lock:
             for uid in active_ids:
-                if uid in self.workers and self.workers[uid][0].is_alive():
+                if (
+                    uid in self.workers
+                    and self.workers[uid][0].is_alive()
+                ):
                     continue
-                worker, event = UserWorker(users[uid]), threading.Event()
-                thread = threading.Thread(target=worker.loop, args=(event,), daemon=True, name=f"bot-user-{uid}")
-                self.workers[uid] = (thread, event)
+
+                worker = UserWorker(
+                    users[uid]
+                )
+                event = threading.Event()
+
+                thread = threading.Thread(
+                    target=worker.loop,
+                    args=(event,),
+                    daemon=True,
+                    name=f"bot-user-{uid}",
+                )
+
+                self.workers[uid] = (
+                    thread,
+                    event,
+                )
                 thread.start()
+
             for uid in list(self.workers):
                 if uid not in active_ids:
                     self.workers[uid][1].set()
@@ -1026,291 +1962,1339 @@ MANAGER = WorkerManager()
 
 def run_worker_mode() -> None:
     init_db()
-    log.info("Autonomous worker service started. Poll=%ss", WORKER_POLL_SECONDS)
+
+    log.info(
+        "Autonomous worker service started. poll=%ss",
+        WORKER_POLL_SECONDS,
+    )
+
     try:
         while True:
             MANAGER.reconcile()
-            time.sleep(max(2, WORKER_POLL_SECONDS))
+            time.sleep(
+                max(2, WORKER_POLL_SECONDS)
+            )
     except KeyboardInterrupt:
         MANAGER.stop_all()
         log.info("Worker service stopped")
 
+
 # ============================================================
 # STREAMLIT
 # ============================================================
+
 SESSION_DEFAULTS = {
-    "logged_in": False, "user_email": "", "is_admin": False, "user_id": None, "stripe_paid": False,
-    "session_start_time": datetime.now(), "lang": "Polski", "api_key": "", "secret_key": "", "passphrase": "",
-    "selected_exchange": "Bitget", "session_start_balance": 0.0, "session_baseline_locked": False,
-    "active_mtf_bots": {}, "_mtf_loaded_user_id": None,
+    "logged_in": False,
+    "user_email": "",
+    "is_admin": False,
+    "user_id": None,
+    "stripe_paid": False,
+    "session_start_time": datetime.now(),
+    "lang": "Polski",
+    "api_key": "",
+    "secret_key": "",
+    "passphrase": "",
+    "selected_exchange": "Bitget",
+    "session_start_balance": 0.0,
+    "session_baseline_locked": False,
+    "active_mtf_bots": {},
+    "_mtf_loaded_user_id": None,
 }
 
 
-def get_secret(name: str, default: str = "") -> str:
+def get_secret( name: str, default: str = "", ) -> str:
     value = os.getenv(name)
     if value:
         return value
+
     try:
-        return st.secrets.get(name, default)
+        return st.secrets.get(
+            name,
+            default,
+        )
     except Exception:
         return default
 
 
-def create_stripe_checkout_session(email: str, price_id: str) -> str:
-    secret = get_secret("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY)
-    if stripe is None or not secret or not price_id:
+def create_stripe_checkout_session( email: str, price_id: str, ) -> str:
+    secret = get_secret(
+        "STRIPE_SECRET_KEY",
+        STRIPE_SECRET_KEY,
+    )
+
+    if (
+        stripe is None
+        or not secret
+        or not price_id
+    ):
         return STRIPE_CHECKOUT_FALLBACK
+
     try:
         stripe.api_key = secret
-        session = stripe.checkout.Session.create(payment_method_types=["card"], line_items=[{"price": price_id, "quantity": 1}],
-                                                 mode="payment", success_url="https://bot-bitget.pl/?success=true",
-                                                 cancel_url="https://bot-bitget.pl/?success=false", customer_email=email)
-        return session.url if session and session.url else STRIPE_CHECKOUT_FALLBACK
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price": price_id,
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=(
+                "https://bot-bitget.pl/"
+                "?success=true"
+            ),
+            cancel_url=(
+                "https://bot-bitget.pl/"
+                "?success=false"
+            ),
+            customer_email=email,
+        )
+
+        return (
+            session.url
+            if session and session.url
+            else STRIPE_CHECKOUT_FALLBACK
+        )
     except Exception as exc:
-        log.warning("Stripe checkout error: %s", exc)
+        log.warning(
+            "Stripe checkout error: %s",
+            exc,
+        )
         return STRIPE_CHECKOUT_FALLBACK
 
 
 def apply_mtf_to_session(user_id: int) -> None:
-    if st.session_state.get("_mtf_loaded_user_id") == int(user_id):
+    if (
+        st.session_state.get(
+            "_mtf_loaded_user_id"
+        )
+        == int(user_id)
+    ):
         return
-    saved = load_mtf_settings(int(user_id))
+
+    saved = load_mtf_settings(
+        int(user_id)
+    )
+
     for tf in AVAILABLE_TIMEFRAMES:
         d = saved[tf]
-        st.session_state[f"radio_mode_{tf}"] = d.get("mode", "Automatyczny")
-        st.session_state[f"ema_f_{tf}"] = int(d.get("ema_fast", DEFAULT_TF_VALUES[tf]["ema_fast"]))
-        st.session_state[f"ema_s_{tf}"] = int(d.get("ema_slow", DEFAULT_TF_VALUES[tf]["ema_slow"]))
-        st.session_state[f"adx_{tf}"] = float(d.get("adx", DEFAULT_TF_VALUES[tf]["adx"]))
-        st.session_state[f"max_rsi_{tf}"] = float(d.get("max_rsi", DEFAULT_TF_VALUES[tf]["max_rsi"]))
-        st.session_state[f"min_rsi_{tf}"] = float(d.get("min_rsi", DEFAULT_TF_VALUES[tf]["min_rsi"]))
-        st.session_state[f"cap_mult_{tf}"] = float(d.get("cap_mult", DEFAULT_TF_VALUES[tf]["cap_mult"]))
-    st.session_state.active_mtf_bots = load_active_bots(int(user_id))
-    st.session_state["_mtf_loaded_user_id"] = int(user_id)
+
+        st.session_state[
+            f"radio_mode_{tf}"
+        ] = d.get(
+            "mode",
+            "Automatyczny",
+        )
+
+        st.session_state[
+            f"ema_f_{tf}"
+        ] = int(
+            d.get(
+                "ema_fast",
+                DEFAULT_TF_VALUES[tf][
+                    "ema_fast"
+                ],
+            )
+        )
+
+        st.session_state[
+            f"ema_s_{tf}"
+        ] = int(
+            d.get(
+                "ema_slow",
+                DEFAULT_TF_VALUES[tf][
+                    "ema_slow"
+                ],
+            )
+        )
+
+        st.session_state[
+            f"adx_{tf}"
+        ] = float(
+            d.get(
+                "adx",
+                DEFAULT_TF_VALUES[tf][
+                    "adx"
+                ],
+            )
+        )
+
+        st.session_state[
+            f"max_rsi_{tf}"
+        ] = float(
+            d.get(
+                "max_rsi",
+                DEFAULT_TF_VALUES[tf][
+                    "max_rsi"
+                ],
+            )
+        )
+
+        st.session_state[
+            f"min_rsi_{tf}"
+        ] = float(
+            d.get(
+                "min_rsi",
+                DEFAULT_TF_VALUES[tf][
+                    "min_rsi"
+                ],
+            )
+        )
+
+        st.session_state[
+            f"cap_mult_{tf}"
+        ] = float(
+            d.get(
+                "cap_mult",
+                DEFAULT_TF_VALUES[tf][
+                    "cap_mult"
+                ],
+            )
+        )
+
+    st.session_state.active_mtf_bots = (
+        load_active_bots(
+            int(user_id)
+        )
+    )
+
+    st.session_state[
+        "_mtf_loaded_user_id"
+    ] = int(user_id)
 
 
 def current_mtf_payload() -> Dict[str, Dict[str, Any]]:
-    return {tf: {"mode": st.session_state.get(f"radio_mode_{tf}", "Automatyczny"),
-                  "ema_fast": int(st.session_state.get(f"ema_f_{tf}", DEFAULT_TF_VALUES[tf]["ema_fast"])),
-                  "ema_slow": int(st.session_state.get(f"ema_s_{tf}", DEFAULT_TF_VALUES[tf]["ema_slow"])),
-                  "adx": float(st.session_state.get(f"adx_{tf}", DEFAULT_TF_VALUES[tf]["adx"])),
-                  "max_rsi": float(st.session_state.get(f"max_rsi_{tf}", DEFAULT_TF_VALUES[tf]["max_rsi"])),
-                  "min_rsi": float(st.session_state.get(f"min_rsi_{tf}", DEFAULT_TF_VALUES[tf]["min_rsi"])),
-                  "cap_mult": float(st.session_state.get(f"cap_mult_{tf}", DEFAULT_TF_VALUES[tf]["cap_mult"]))} for tf in AVAILABLE_TIMEFRAMES}
+    payload: Dict[str, Dict[str, Any]] = {}
+
+    for tf in AVAILABLE_TIMEFRAMES:
+        payload[tf] = {
+            "mode": st.session_state.get(
+                f"radio_mode_{tf}",
+                "Automatyczny",
+            ),
+            "ema_fast": int(
+                st.session_state.get(
+                    f"ema_f_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "ema_fast"
+                    ],
+                )
+            ),
+            "ema_slow": int(
+                st.session_state.get(
+                    f"ema_s_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "ema_slow"
+                    ],
+                )
+            ),
+            "adx": float(
+                st.session_state.get(
+                    f"adx_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "adx"
+                    ],
+                )
+            ),
+            "max_rsi": float(
+                st.session_state.get(
+                    f"max_rsi_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "max_rsi"
+                    ],
+                )
+            ),
+            "min_rsi": float(
+                st.session_state.get(
+                    f"min_rsi_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "min_rsi"
+                    ],
+                )
+            ),
+            "cap_mult": float(
+                st.session_state.get(
+                    f"cap_mult_{tf}",
+                    DEFAULT_TF_VALUES[tf][
+                        "cap_mult"
+                    ],
+                )
+            ),
+        }
+
+    return payload
 
 
 def is_user_admin() -> bool:
-    return str(st.session_state.get("user_email", "")).strip().lower() in [x.lower() for x in ADMIN_EMAILS] or bool(st.session_state.get("is_admin"))
+    email = str(
+        st.session_state.get(
+            "user_email",
+            "",
+        )
+    ).strip().lower()
+
+    return (
+        email in {
+            x.lower()
+            for x in ADMIN_EMAILS
+        }
+        or bool(
+            st.session_state.get(
+                "is_admin"
+            )
+        )
+    )
 
 
 def is_user_paid() -> bool:
-    return is_user_admin() or bool(st.session_state.get("stripe_paid"))
+    return (
+        is_user_admin()
+        or bool(
+            st.session_state.get(
+                "stripe_paid"
+            )
+        )
+    )
 
+
+# ============================================================
+# LOGIN
+# ============================================================
 
 def ui_login() -> None:
-    st.markdown(f"<div class='gold-panel hero'><div class='gold-title'>{t('title')}</div><div class='gold-subtitle'>{t('subtitle')}</div>", unsafe_allow_html=True)
-    tab_login, tab_register = st.tabs([t("login_tab"), t("register_tab")])
+    st.markdown(
+        """ <div style=" max-width:1000px; margin:30px auto; padding:35px; text-align:center; border:2px solid #d9ad4a; border-radius:18px; background:#0d0b09; box-shadow:0 0 35px rgba(0,0,0,.5); "> """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f""" <div style=" font-size:42px; font-weight:900; color:#f3d57a; letter-spacing:3px; "> {t("title")} </div> <div style=" color:#d4c5aa; margin-top:8px; letter-spacing:2px; "> {t("subtitle")} </div> """,
+        unsafe_allow_html=True,
+    )
+
+    tab_login, tab_register = st.tabs([
+        t("login_tab"),
+        t("register_tab"),
+    ])
+
     with tab_login:
-        email = st.text_input(t("email_label"), key="log_email")
-        password = st.text_input(t("pass_label"), type="password", key="log_pass")
-        if st.button(t("login_btn"), use_container_width=True):
+        email = st.text_input(
+            t("email_label"),
+            key="log_email",
+        )
+        password = st.text_input(
+            t("pass_label"),
+            type="password",
+            key="log_pass",
+        )
+
+        if st.button(
+            t("login_btn"),
+            use_container_width=True,
+        ):
             conn = db_connect()
-            row = conn.execute("SELECT id,email,password,is_admin,stripe_paid,api_key,secret_key,passphrase,selected_exchange FROM users WHERE LOWER(TRIM(email))=?", (email.strip().lower(),)).fetchone()
+            row = conn.execute(""" SELECT id,email,password,is_admin, stripe_paid,api_key,secret_key, passphrase,selected_exchange FROM users WHERE LOWER(TRIM(email))=? """, (
+                email.strip().lower(),
+            )).fetchone()
             conn.close()
-            if row and verify_password(password, row[2]):
-                st.session_state.logged_in = True; st.session_state.user_id = row[0]; st.session_state.user_email = row[1]
-                st.session_state.is_admin = bool(row[3]) or row[1].strip().lower() in [x.lower() for x in ADMIN_EMAILS]
-                st.session_state.stripe_paid = True if st.session_state.is_admin else bool(row[4])
-                st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase = row[5] or "", row[6] or "", row[7] or ""
-                st.session_state.selected_exchange = row[8] or "Bitget"
-                apply_mtf_to_session(row[0])
-                if not str(row[2]).startswith("sha256$"):
-                    conn = db_connect(); conn.execute("UPDATE users SET password=? WHERE id=?", (hash_password(password), row[0])); conn.commit(); conn.close()
-                st.success(t("login_success")); st.rerun()
+
+            if row and verify_password(
+                password,
+                row[2],
+            ):
+                st.session_state.logged_in = True
+                st.session_state.user_id = row[0]
+                st.session_state.user_email = row[1]
+                st.session_state.is_admin = (
+                    bool(row[3])
+                    or row[1].strip().lower()
+                    in {
+                        x.lower()
+                        for x in ADMIN_EMAILS
+                    }
+                )
+                st.session_state.stripe_paid = (
+                    True
+                    if st.session_state.is_admin
+                    else bool(row[4])
+                )
+                st.session_state.api_key = (
+                    row[5] or ""
+                )
+                st.session_state.secret_key = (
+                    row[6] or ""
+                )
+                st.session_state.passphrase = (
+                    row[7] or ""
+                )
+                st.session_state.selected_exchange = (
+                    row[8] or "Bitget"
+                )
+
+                apply_mtf_to_session(
+                    row[0]
+                )
+
+                if not str(row[2]).startswith(
+                    "sha256$"
+                ):
+                    conn = db_connect()
+                    conn.execute(
+                        "UPDATE users SET password=? WHERE id=?",
+                        (
+                            hash_password(
+                                password
+                            ),
+                            row[0],
+                        ),
+                    )
+                    conn.commit()
+                    conn.close()
+
+                st.success(
+                    t("login_success")
+                )
+                st.rerun()
             else:
-                st.error(t("login_error"))
+                st.error(
+                    t("login_error")
+                )
+
     with tab_register:
-        email = st.text_input(t("email_label"), key="reg_email")
-        password = st.text_input(t("pass_label"), type="password", key="reg_pass")
-        if st.button(t("register_btn"), use_container_width=True):
+        email = st.text_input(
+            t("email_label"),
+            key="reg_email",
+        )
+        password = st.text_input(
+            t("pass_label"),
+            type="password",
+            key="reg_pass",
+        )
+
+        if st.button(
+            t("register_btn"),
+            use_container_width=True,
+        ):
             if not email or not password:
-                st.error(t("reg_error_fill"))
+                st.error(
+                    t("reg_error_fill")
+                )
             else:
                 try:
-                    clean = email.strip().lower(); admin = 1 if clean in [x.lower() for x in ADMIN_EMAILS] else 0
-                    conn = db_connect(); conn.execute("INSERT INTO users(email,password,is_admin,stripe_paid) VALUES(?,?,?,?)", (clean, hash_password(password), admin, admin)); conn.commit(); conn.close()
-                    st.success(t("reg_success"))
-                except sqlite3.IntegrityError:
-                    st.error(t("reg_error_exists"))
-    st.markdown("</div><div class='gold-panel warning-box'>Handel Futures wiąże się z wysokim ryzykiem utraty kapitału. Oprogramowanie działa w formule As-Is i nie gwarantuje zysku.</div>", unsafe_allow_html=True)
+                    clean = email.strip().lower()
+                    admin = int(
+                        clean
+                        in {
+                            x.lower()
+                            for x in ADMIN_EMAILS
+                        }
+                    )
 
+                    conn = db_connect()
+                    conn.execute(""" INSERT INTO users( email,password,is_admin,stripe_paid ) VALUES(?,?,?,?) """, (
+                        clean,
+                        hash_password(
+                            password
+                        ),
+                        admin,
+                        admin,
+                    ))
+                    conn.commit()
+                    conn.close()
+
+                    st.success(
+                        t("reg_success")
+                    )
+                except sqlite3.IntegrityError:
+                    st.error(
+                        t("reg_error_exists")
+                    )
+
+    st.markdown(
+        """ </div> """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# REGULAMIN + INSTRUKCJA
+# ============================================================
+
+def render_rules_and_manual() -> None:
+    st.markdown("---")
+    st.header("📚 Regulamin, zasady bezpieczeństwa i instrukcja obsługi")
+
+    with st.expander(
+        "📜 REGULAMIN KORZYSTANIA Z SYSTEMU",
+        expanded=False,
+    ):
+        st.markdown(""" ### 1. Postanowienia ogólne 1. System jest oprogramowaniem wspomagającym i automatyzującym wykonywanie operacji na rachunku futures użytkownika za pośrednictwem interfejsów API giełd. 2. Użytkownik korzysta z systemu na własną odpowiedzialność i powinien przed uruchomieniem bota zapoznać się z zasadami działania wybranej giełdy, kontraktów futures, dźwigni oraz zleceń warunkowych. 3. System nie jest usługą gwarantującą zysk i nie stanowi indywidualnej porady inwestycyjnej, podatkowej ani prawnej. 4. Wyniki historyczne, symulacje, przykładowe sygnały ani informacje wyświetlane przez skaner nie stanowią obietnicy przyszłych wyników. ### 2. Ryzyko 1. Handel kontraktami futures z wykorzystaniem dźwigni finansowej wiąże się z wysokim ryzykiem utraty części lub całości kapitału. 2. W ekstremalnych warunkach rynkowych cena może przeskoczyć poziom SL, wystąpić poślizg, brak płynności, częściowe wykonanie lub czasowa niedostępność API. 3. Lokalny strażnik SL/TP jest dodatkową warstwą ochrony, a nie gwarancją wykonania po określonej cenie. 4. Użytkownik powinien używać wyłącznie środków, których utrata nie naruszy jego podstawowych potrzeb finansowych. ### 3. API i bezpieczeństwo 1. Klucze API powinny mieć wyłącznie uprawnienia konieczne do działania bota. 2. Nie należy nadawać kluczom API uprawnień do wypłat, jeżeli giełda umożliwia ich wyłączenie. 3. Użytkownik odpowiada za bezpieczeństwo swoich danych dostępowych i za konfigurację konta giełdowego. 4. W przypadku podejrzenia przejęcia klucza należy natychmiast unieważnić go na giełdzie. ### 4. Odpowiedzialność 1. Oprogramowanie jest udostępniane w formule „AS IS”, w zakresie dopuszczalnym przez obowiązujące prawo. 2. Dostawca nie gwarantuje ciągłości działania API giełd, serwerów, Internetu, Streamlit, CCXT ani innych usług zewnętrznych. 3. Użytkownik odpowiada za prawidłowe ustawienie limitów ryzyka, dźwigni, liczby pozycji i zakresu skanowania. 4. Przed użyciem produkcyjnym zaleca się test na koncie demo lub z minimalnym kapitałem. ### 5. Subskrypcja 1. Dostęp do funkcji płatnych zależy od aktualnego statusu konta. 2. Cena i zakres funkcji mogą być określone na stronie płatności lub w aktualnej ofercie. 3. Płatność nie stanowi gwarancji wyniku finansowego. 4. Szczegółowe zasady konsumenckie, reklamacyjne i odstąpienia od umowy powinny zostać dostosowane do właściwego modelu sprzedaży i obowiązującego prawa. ### 6. Postanowienia końcowe Regulamin jest informacyjnym szablonem przeznaczonym do wdrożenia w aplikacji. Przed publikacją komercyjną należy dostosować go do faktycznego operatora usługi, kraju sprzedaży, modelu subskrypcji, polityki prywatności, cookies, zasad reklamacji i obowiązków konsumenckich. """)
+
+    with st.expander(
+        "📖 PEŁNA INSTRUKCJA OBSŁUGI",
+        expanded=False,
+    ):
+        st.markdown(""" ### 1. Pierwsze uruchomienie 1. Załóż konto lub zaloguj się. 2. Wybierz giełdę: Bitget, Binance, Bybit albo OKX. 3. Wygeneruj na giełdzie klucz API przeznaczony do handlu futures. 4. Nie włączaj wypłat dla klucza API. 5. Wprowadź API Key, API Secret oraz — jeżeli giełda tego wymaga — Passphrase. 6. Kliknij **ZAPISZ MOJE KLUCZE**. 7. Sprawdź, czy system pokazuje prawidłowy portfel Futures. ### 2. Ustawienia ryzyka **Maksymalnie USDT na 1 pozycję** ogranicza bazową wartość pojedynczej pozycji. **Maksymalna liczba aktywnych pozycji** ogranicza liczbę jednocześnie otwartych pozycji. **SL ROE** określa poziom straty ROE, przy którym lokalny strażnik zamknie pozycję. **TP ROE** określa poziom zysku ROE, przy którym lokalny strażnik zamknie pozycję. **Czas oddechu po SL/TP** blokuje ponowne wejście na danym symbolu przez określony czas. ### 3. Dźwignia Tryb autonomiczny dobiera dźwignię w granicach ustawionego limitu, wykorzystując m.in. siłę trendu ADX. Tryb ręczny pozwala ustawić stałą dźwignię, ale rzeczywisty maksymalny poziom jest ograniczany przez limit dostępny dla danego kontraktu na giełdzie. ### 4. Skaner System najpierw pobiera dostępne rynki futures, wybiera aktywne liniowe kontrakty USDT i sortuje je według wolumenu 24h od najwyższego do najniższego. Nie ma tu sztucznego ograniczenia do kilku „wybranych” monet. Liczba par zależy od ustawienia **Liczba par Futures do skanowania** oraz od minimalnego wymogu płynności. Każdy aktywny interwał zapisuje własne wyniki skanowania do bazy danych. Dzięki temu tabela może być pokazana także wtedy, gdy pojedyncze odświeżenie interfejsu Streamlit nie wykonuje właśnie zapytań do giełdy. ### 5. MTF Każdy interwał działa niezależnie: - 1m - 5m - 15m - 30m - 1h - 4h - 1d Ustawienia EMA, ADX, RSI i CAP są zapisywane w bazie użytkownika. W trybie **Ręczny** system respektuje zapisane parametry. W trybie **Automatyczny** parametry są łączone z dynamiczną oceną zmienności rynku. Suwak wpływu parametrów bazowych pozwala ustalić, jak mocno ustawienia użytkownika wpływają na wynik automatycznej adaptacji. ### 6. Logika sygnału System analizuje zamknięte świece, a nie aktualnie formującą się świecę. Sygnał LONG wymaga potwierdzenia m.in.: - EMA szybka powyżej EMA wolnej, - zgodnego kierunku DI, - ADX powyżej ustalonego minimum, - dodatniego MACD histogramu, - ceny powyżej szybkiej EMA, - RSI w dopuszczalnym zakresie. Sygnał SHORT działa analogicznie w drugą stronę. System nie wymaga już świeżego przecięcia ceny z EMA na jednej konkretnej świecy. Był to zbyt restrykcyjny warunek, który mógł praktycznie wyeliminować transakcje. ### 7. Otwieranie pozycji Po wykryciu sygnału system: 1. sprawdza limit aktywnych pozycji, 2. sprawdza istniejącą pozycję na symbolu, 3. sprawdza blokadę antyduplikacyjną, 4. dobiera dźwignię, 5. oblicza wartość pozycji, 6. przelicza wartość bazową na liczbę kontraktów z uwzględnieniem `contractSize`, 7. zaokrągla ilość do precyzji giełdy, 8. ponownie sprawdza pozycję, 9. blokuje symbol przed ponownym wejściem, 10. wysyła zlecenie market. To przeliczenie kontraktów jest istotne dla futures: liczba kontraktów nie zawsze jest równa ilości bazowej kryptowaluty. ### 8. Stop Loss i Take Profit Po wykonaniu wejścia system pobiera rzeczywistą cenę wejścia z odpowiedzi zlecenia lub z pozycji na giełdzie. Dopiero na tej cenie wyliczane są poziomy SL i TP. System próbuje utworzyć ochronę giełdową poprzez mechanizm trigger/reduce-only. Dodatkowo działa lokalny strażnik ROE w workerze. Jeżeli natywne zlecenie ochronne giełdy nie jest obsługiwane w danym wariancie API, worker nadal monitoruje pozycję i może zamknąć ją rynkowo po osiągnięciu ustawionego poziomu ROE. ### 9. Worker na serwerze Na Hetznerze zalecany jest osobny proces: ```bash python app.py --worker ``` Proces ten nie zależy od otwartej karty przeglądarki. Worker sprawdza aktywne boty zapisane w SQLite, skanuje rynek, zapisuje wyniki i obsługuje pozycje. ### 10. Streamlit Uruchomienie panelu: ```bash streamlit run app.py ``` Panel służy do konfiguracji, podglądu i ręcznego sterowania. Silnik tradingowy może działać jako osobny proces `--worker`. ### 11. Kill Switch Przycisk **ZAMKNIJ WSZYSTKO** próbuje zamknąć wszystkie wykryte pozycje futures przez zlecenia market z `reduceOnly`. Następnie zatrzymuje aktywne boty użytkownika. Po użyciu Kill Switch należy sprawdzić pozycje bezpośrednio na giełdzie. ### 12. Co sprawdzić przed uruchomieniem produkcyjnym - poprawność API, - brak uprawnień do wypłat, - właściwy typ konta futures, - saldo USDT, - minimalną wartość kontraktu, - maksymalną dźwignię, - ustawienia SL/TP, - liczbę pozycji, - liczbę skanowanych par, - log `trading_bot.log`, - pozycje bezpośrednio na giełdzie. ### 13. Diagnostyka Jeżeli skaner nie pokazuje danych: 1. sprawdź, czy bot MTF jest aktywny, 2. sprawdź klucze API, 3. sprawdź saldo Futures, 4. sprawdź `trading_bot.log`, 5. sprawdź, czy giełda zwraca aktywne liniowe swapy USDT, 6. sprawdź, czy wolumen przekracza minimalny filtr. Jeżeli bot widzi sygnały, ale nie składa zleceń: 1. sprawdź liczbę aktywnych pozycji, 2. sprawdź saldo wolne, 3. sprawdź minimalny rozmiar kontraktu, 4. sprawdź `contractSize`, 5. sprawdź limit dźwigni, 6. sprawdź błędy API w logu. ### 14. Ważne Nigdy nie zakładaj, że sam fakt pojawienia się sygnału oznacza, że giełda zaakceptowała zlecenie. Ostatecznym źródłem prawdy dla pozycji, zlecenia i salda jest konto użytkownika na giełdzie. """)
+
+
+# ============================================================
+# GŁÓWNY INTERFEJS
+# ============================================================
 
 def run_streamlit_app() -> None:
-    st.set_page_config(page_title="Multi-Exchange Futures SaaS", layout="wide")
+    st.set_page_config(
+        page_title="Multi-Exchange Futures SaaS",
+        layout="wide",
+    )
+
     init_db()
-    for k, v in SESSION_DEFAULTS.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-    st.markdown("""<style> :root{--bg:#070605;--panel:#100d09;--panel2:#17120c;--gold:#d7ad4a;--gold2:#f3d57a;--gold3:#8f6a25;--green:#29c66b;--red:#e05252;--text:#f5f0e6;--muted:#aaa092} .stApp{background:radial-gradient(circle at 50% -10%,#2a2115 0%,#0a0806 38%,#050403 100%);color:var(--text)} .block-container{padding-top:1rem;max-width:1600px} h1,h2,h3,h4{color:var(--gold2)!important} .gold-panel,.section-card,.metric-card,.mtf-card{border:1.5px solid var(--gold)!important;border-radius:15px;background:linear-gradient(145deg,#1b150e,#0b0907);box-shadow:0 0 0 1px rgba(243,213,122,.10) inset,0 8px 28px rgba(0,0,0,.38);padding:16px;margin-bottom:16px} .hero{text-align:center;padding:28px}.gold-title{font-size:clamp(28px,5vw,52px);font-weight:900;letter-spacing:4px;color:var(--gold2);text-shadow:0 0 18px rgba(243,213,122,.2)}.gold-subtitle{margin-top:7px;color:#d6c6a7;letter-spacing:2px} .warning-box{font-size:11px;color:#d9c7a4;text-align:center} .section-card{padding:14px}.section-title{color:var(--gold2);font-weight:900;font-size:16px;letter-spacing:.8px;margin-bottom:10px} .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}.metric-card{min-height:120px}.metric-label{font-size:12px;color:var(--gold2);font-weight:800;text-transform:uppercase;letter-spacing:1px}.metric-value{font-size:25px;font-weight:900;color:#fff;margin-top:8px}.metric-sub{font-size:12px;color:var(--muted);margin-top:8px}.green{border-color:var(--green)!important}.red{border-color:var(--red)!important} .mtf-card{padding:11px}.mtf-card.active{border-color:var(--green)!important}.mtf-head{display:flex;justify-content:space-between;color:var(--gold2);font-weight:900}.status-pill{padding:4px 8px;border-radius:99px;font-size:10px}.status-pill.on{border:1px solid var(--green);color:#61e99a}.status-pill.off{border:1px solid var(--gold);color:var(--gold2)} .stButton>button{border:1.5px solid var(--gold)!important;background:linear-gradient(180deg,#251c10,#100c08)!important;color:#f7e8c4!important;border-radius:9px!important;font-weight:800!important;box-shadow:0 0 0 1px rgba(243,213,122,.08) inset!important}.stButton>button:hover{border-color:var(--gold2)!important;box-shadow:0 0 15px rgba(243,213,122,.22)!important} /* GOLD FRAME — all Streamlit input/control windows, not only cards */ [data-testid='stTextInput'],[data-testid='stNumberInput'],[data-testid='stSelectbox'],[data-testid='stMultiSelect'],[data-testid='stSlider'],[data-testid='stRadio'],[data-testid='stCheckbox'],[data-testid='stToggle'],[data-testid='stDateInput'],[data-testid='stTimeInput'],[data-testid='stTextArea'],[data-testid='stFileUploader'],[data-testid='stColorPicker'],[data-testid='stExpander'],[data-testid='stTabs'],[data-testid='stAlert'],[data-testid='stMetric'],[data-testid='stDataFrame'],[data-testid='stTable'],[data-testid='stStatusWidget'],[data-testid='stVerticalBlockBorderWrapper']{border:1.5px solid var(--gold)!important;border-radius:10px!important;box-shadow:0 0 0 1px rgba(243,213,122,.08) inset,0 4px 14px rgba(0,0,0,.22)!important;background:rgba(16,13,9,.35)} [data-testid='stTextInput']>div,[data-testid='stNumberInput']>div,[data-testid='stSelectbox']>div,[data-testid='stMultiSelect']>div,[data-testid='stTextArea']>div{border-color:var(--gold)!important} input,textarea,[data-baseweb='select']>div,[data-baseweb='input']>div{border:1.5px solid var(--gold)!important;border-radius:8px!important;background:#0d0a07!important;color:var(--text)!important} [data-baseweb='slider'] [role='slider']{border-color:var(--gold2)!important;box-shadow:0 0 8px rgba(243,213,122,.25)!important} [data-baseweb='tab-list']{border-bottom:1.5px solid var(--gold)!important} [data-baseweb='tab']{color:var(--gold2)!important} [data-testid='stExpander'] summary{color:var(--gold2)!important} .stDataFrame{border:1.5px solid var(--gold)!important;border-radius:10px;overflow:hidden} [data-testid='stAlert']{color:var(--text)!important} section[data-testid='stSidebar']{background:linear-gradient(180deg,#15110c,#080706);border-right:1.5px solid var(--gold)} section[data-testid='stSidebar'] [data-testid='stTextInput'],section[data-testid='stSidebar'] [data-testid='stNumberInput'],section[data-testid='stSidebar'] [data-testid='stSelectbox'],section[data-testid='stSidebar'] [data-testid='stSlider'],section[data-testid='stSidebar'] [data-testid='stRadio'],section[data-testid='stSidebar'] [data-testid='stCheckbox']{border:1.5px solid var(--gold)!important;border-radius:10px!important;padding:6px!important;margin-bottom:8px!important} @media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.metric-grid{grid-template-columns:1fr}} </style>""", unsafe_allow_html=True)
+
+    for key, value in SESSION_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    st.markdown(""" <style> :root { --bg:#080706; --panel:#11100e; --gold:#d9ad4a; --gold2:#f3d57a; --gold3:#8d6a27; --green:#1fc56b; --red:#e05252; --muted:#9d9487; --text:#f5f0e6; } .stApp { background: radial-gradient(circle at 50% -10%,#292015 0%,#0b0908 35%,#070605 100%); color:var(--text); } [data-testid="stHeader"] { background:rgba(0,0,0,0); } section[data-testid="stSidebar"] { background:linear-gradient(180deg,#15120f,#0b0908); border-right:2px solid var(--gold3); } .block-container { padding-top:1.2rem; max-width:1700px; } h1,h2,h3 { color:var(--gold2)!important; } .section-card { border:1px solid #765b2c; border-radius:15px; padding:15px 17px; background:linear-gradient(145deg,rgba(22,18,13,.96),rgba(10,9,8,.96)); margin:12px 0; box-shadow:0 7px 24px rgba(0,0,0,.28); } .section-title { color:var(--gold2); font-weight:900; font-size:16px; letter-spacing:.8px; margin-bottom:10px; } .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:8px 0 20px; } .metric-card { min-height:110px; border:1px solid var(--gold); border-radius:14px; padding:15px 17px; background:linear-gradient(145deg,#1a1510,#0e0c0a); } .metric-card.green { border-color:#27b968; } .metric-card.red { border-color:#b84b4b; } .metric-label { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--gold2); font-weight:800; } .metric-value { font-size:25px; font-weight:900; color:#fff; margin-top:8px; } .metric-sub { font-size:12px; color:#a9a092; margin-top:8px; } .mtf-card { border:1px solid var(--gold3); border-radius:13px; background:linear-gradient(180deg,#17120d,#0d0b09); padding:10px; min-height:100%; } .mtf-card.active { border-color:#25ba68; } @media(max-width:1100px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:650px) { .metric-grid { grid-template-columns:1fr; } } </style> """, unsafe_allow_html=True)
+
     if not st.session_state.logged_in:
-        ui_login(); st.stop()
-    apply_mtf_to_session(st.session_state.user_id)
+        ui_login()
+        st.stop()
 
-    st.sidebar.selectbox("🌐 Language / Język", ["Polski", "English"], index=0 if st.session_state.lang == "Polski" else 1, key="lang_selector")
-    st.session_state.lang = st.session_state.lang_selector
-    st.sidebar.markdown(f"### 👤 {st.session_state.user_email}")
-    st.sidebar.markdown(f"**{t('sidebar_role_admin') if is_user_admin() else t('sidebar_role_client')}**")
-    if st.sidebar.button(t("logout_btn"), use_container_width=True):
-        for k in ["logged_in","user_email","is_admin","user_id","stripe_paid","api_key","secret_key","passphrase"]: st.session_state[k] = SESSION_DEFAULTS[k]
-        st.session_state.active_mtf_bots = {}; st.session_state._mtf_loaded_user_id = None; st.rerun()
+    apply_mtf_to_session(
+        st.session_state.user_id
+    )
 
-    st.sidebar.header(t("exchange_settings"))
-    selected_exchange = st.sidebar.selectbox(t("select_exchange"), SUPPORTED_EXCHANGES,
-        index=SUPPORTED_EXCHANGES.index(st.session_state.selected_exchange) if st.session_state.selected_exchange in SUPPORTED_EXCHANGES else 0,
-        key="sidebar_selected_exchange")
-    st.session_state.selected_exchange = selected_exchange
-    api = st.sidebar.text_input(f"API Key ({selected_exchange})", value=st.session_state.api_key, type="password", key=f"api_{selected_exchange}")
-    secret = st.sidebar.text_input(f"API Secret ({selected_exchange})", value=st.session_state.secret_key, type="password", key=f"secret_{selected_exchange}")
-    passphrase = st.sidebar.text_input(f"Passphrase ({selected_exchange})", value=st.session_state.passphrase, type="password", key=f"pass_{selected_exchange}") if selected_exchange in {"Bitget","OKX"} else ""
-    if st.sidebar.button(t("save_keys_btn"), use_container_width=True):
-        if api and secret:
-            st.session_state.api_key, st.session_state.secret_key, st.session_state.passphrase = api, secret, passphrase
-            conn = db_connect(); conn.execute("UPDATE users SET api_key=?,secret_key=?,passphrase=?,selected_exchange=? WHERE id=?", (api,secret,passphrase,selected_exchange,st.session_state.user_id)); conn.commit(); conn.close()
-            st.success(f"{t('keys_saved')} {selected_exchange}"); st.rerun()
-        else: st.error(t("keys_error"))
+    # --------------------------------------------------------
+    # SIDEBAR
+    # --------------------------------------------------------
 
-    st.sidebar.markdown("---"); st.sidebar.markdown(f"### {t('sub_zone')}")
-    st.sidebar.success(t("sub_active") if is_user_paid() else t("sub_inactive"))
-    price_id = get_secret("STRIPE_PRICE_ID", STRIPE_PRICE_ID)
-    st.sidebar.link_button(t("pay_btn"), create_stripe_checkout_session(st.session_state.user_email, price_id), use_container_width=True)
-    if ALLOW_TEST_ACTIVATION and st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast"):
-        conn=db_connect(); conn.execute("UPDATE users SET stripe_paid=1 WHERE id=?",(st.session_state.user_id,)); conn.commit(); conn.close(); st.session_state.stripe_paid=True; st.rerun()
+    st.session_state.lang = st.sidebar.selectbox(
+        "🌐 Język / Language",
+        ["Polski", "English"],
+        index=(
+            0
+            if st.session_state.lang == "Polski"
+            else 1
+        ),
+        key="lang_selector",
+    )
 
-    saved = get_user_risk_settings(st.session_state.user_id)
-    st.sidebar.markdown("---"); st.sidebar.markdown(f"### {t('capital_risk')}")
-    max_single = st.sidebar.number_input(t("max_single"), 5.0, 5000.0, float(saved["max_single"]), 5.0, key="sb_max_single_trade")
-    max_pos = st.sidebar.slider(t("max_pos"), 1, 20, int(saved["max_positions"]), key="sb_max_active_pos")
-    st.sidebar.markdown("---"); st.sidebar.markdown(f"### {t('roe_guard')}")
-    enable_roe = st.sidebar.checkbox(t("enable_roe"), bool(saved["enable_roe"]), key="enable_roe_guard")
-    stop_roe = st.sidebar.slider(t("sl_roe"), .5, 50., float(saved["stop_roe"]), .5, key="custom_stop_loss_roe") if enable_roe else 999.
-    take_roe = st.sidebar.slider(t("tp_roe"), 1., 100., float(saved["take_roe"]), .5, key="custom_take_profit_roe") if enable_roe else 999.
-    cooldown = st.sidebar.slider("Cooldown after SL/TP (minutes)", 1, 120, int(saved["cooldown_minutes"]), key="sb_cooldown_sl_tp")
-    st.sidebar.markdown("---"); st.sidebar.markdown(f"### {t('leverage_mgmt')}")
-    lev_mode = st.sidebar.radio(t("lev_mode"), ["Autonomiczny (płynny w granicach limitu)","Ręczny"], index=0 if saved["leverage_mode"] != "Ręczny" else 1, key="sb_leverage_mode")
-    max_lev = st.sidebar.slider(t("max_allowed_lev"),1,50,int(saved["max_leverage"]),key="sb_max_allowed_leverage")
-    manual_lev = st.sidebar.slider(t("manual_lev"),1,50,int(saved["manual_leverage"]),key="sb_manual_leverage")
-    st.sidebar.markdown("---")
-    max_scan = st.sidebar.slider(t("max_pairs"),1,100,int(saved["max_scan_pairs"]),key="sb_max_fut_pairs")
-    scan_interval = st.sidebar.slider("Interwał skanowania (sekundy)", 5, 300, int(saved.get("scan_interval", 30)), 5, key="sb_scan_interval")
-    auto_influence = st.sidebar.slider("🎚️ Base slider influence in Auto mode (%)",0,100,int(saved["auto_base_influence"]),5,key="sb_auto_base_influence")
-    risk_now={"max_single":max_single,"max_positions":max_pos,"enable_roe":enable_roe,"stop_roe":stop_roe,"take_roe":take_roe,"max_leverage":max_lev,"manual_leverage":manual_lev,"leverage_mode":lev_mode,"max_scan_pairs":max_scan,"auto_base_influence":auto_influence,"cooldown_minutes":cooldown}
-    if risk_now != saved: save_user_risk_settings(st.session_state.user_id,risk_now)
+    st.sidebar.markdown(
+        f"### 👤 {st.session_state.user_email}"
+    )
 
-    st.markdown("<div class='section-card'><div class='section-title'>🤖 MTF — KONTROLA AUTONOMICZNYCH BOTÓW</div><div style='color:#aaa092;font-size:12px'>Każdy interwał działa niezależnie. Ustawienia są zapisywane w SQLite.</div></div>",unsafe_allow_html=True)
-    cols=st.columns(len(AVAILABLE_TIMEFRAMES))
-    for i,tf in enumerate(AVAILABLE_TIMEFRAMES):
-        with cols[i]:
-            active_tf=tf in st.session_state.active_mtf_bots
-            st.markdown(f"<div class='mtf-card {'active' if active_tf else ''}'><div class='mtf-head'><span>⏱ {tf}</span><span class='status-pill {'on' if active_tf else 'off'}'>{'● AKTYWNY' if active_tf else '○ GOTOWY'}</span></div>",unsafe_allow_html=True)
-            k_mode,k_f,k_s,k_adx,k_max,k_min,k_cap=[f"{p}_{tf}" for p in ["radio_mode","ema_f","ema_s","adx","max_rsi","min_rsi","cap_mult"]]
-            mode=st.radio(f"Tryb ({tf})",["Automatyczny","Ręczny"],key=k_mode)
-            f=st.number_input(f"EMA Szybka ({tf})",1,200,key=k_f); s=st.number_input(f"EMA Wolna ({tf})",2,300,key=k_s)
-            adx=st.slider(f"Min ADX ({tf})",10.,50.,key=k_adx); maxr=st.slider(f"Max RSI Long ({tf})",50.,95.,key=k_max); minr=st.slider(f"Min RSI Short ({tf})",5.,50.,key=k_min)
-            cap=st.number_input(f"CAP x ({tf})",.1,10.,float(st.session_state.get(k_cap,DEFAULT_TF_VALUES[tf]["cap_mult"])),.1,key=k_cap)
-            if f>=s: st.warning("Fast EMA must be lower than slow EMA")
-            cfg={"mode":mode,"ema_fast":min(int(f),int(s)-1),"ema_slow":max(int(s),int(f)+1),"min_adx":float(adx),"max_rsi":float(maxr),"min_rsi":float(minr),"capital_multiplier":float(cap),"tf":tf}
-            if active_tf:
-                st.success("🟢 ACTIVE")
-                if st.button(f"Stop {tf}",key=f"stop_{tf}",use_container_width=True):
-                    st.session_state.active_mtf_bots.pop(tf,None); save_active_bots(st.session_state.user_id,st.session_state.active_mtf_bots); MANAGER.reconcile(); st.rerun()
-            else:
-                if st.button(f"Start {tf}",key=f"start_{tf}",use_container_width=True):
-                    if not st.session_state.api_key or not st.session_state.secret_key: st.error("Save your API keys in the sidebar first.")
-                    elif not is_user_paid(): st.error("An active subscription is required.")
-                    else:
-                        st.session_state.active_mtf_bots[tf]=cfg; save_active_bots(st.session_state.user_id,st.session_state.active_mtf_bots); save_mtf_settings(st.session_state.user_id,current_mtf_payload()); MANAGER.reconcile(); st.rerun()
-            st.markdown("</div>",unsafe_allow_html=True)
-    save_mtf_settings(st.session_state.user_id,current_mtf_payload())
-    MANAGER.reconcile()
+    st.sidebar.markdown(
+        "**"
+        + (
+            t("sidebar_role_admin")
+            if is_user_admin()
+            else t("sidebar_role_client")
+        )
+        + "**"
+    )
 
-    if st.sidebar.button(t("kill_switch"),type="primary",use_container_width=True):
-        ex=get_exchange(st.session_state.api_key,st.session_state.secret_key,st.session_state.passphrase,st.session_state.selected_exchange)
-        if ex:
-            for p in fetch_positions_safe(ex): close_position(ex,p,"KILL SWITCH")
-        st.session_state.active_mtf_bots={}; save_active_bots(st.session_state.user_id,{}); MANAGER.reconcile(); st.success("🔴 KILL SWITCH EXECUTED."); st.rerun()
+    if st.sidebar.button(
+        t("logout_btn"),
+        use_container_width=True,
+    ):
+        for key in [
+            "logged_in",
+            "user_email",
+            "is_admin",
+            "user_id",
+            "stripe_paid",
+            "api_key",
+            "secret_key",
+            "passphrase",
+        ]:
+            st.session_state[key] = (
+                SESSION_DEFAULTS[key]
+            )
 
-    st.markdown(f"<div class='gold-panel'><b style='color:#f3d57a'>💠 FUTURES CONTROL CENTER</b> <span style='float:right'>👤 {st.session_state.user_email} · {st.session_state.selected_exchange}</span></div>",unsafe_allow_html=True)
-    ex=get_exchange(st.session_state.api_key,st.session_state.secret_key,st.session_state.passphrase,st.session_state.selected_exchange)
-    positions=[p for p in fetch_positions_safe(ex) if position_contracts(p)>0] if ex else []
-    total_unreal=sum(safe_float(p.get("unrealizedPnl")) for p in positions)
-    bal=fetch_usdt_balance(ex) if ex else {"total":0.,"used":0.,"free":0.}
-    if not st.session_state.session_baseline_locked and bal["total"]>0: st.session_state.session_start_balance=bal["total"]; st.session_state.session_baseline_locked=True
-    pnl_pct=((bal["total"]-st.session_state.session_start_balance)/st.session_state.session_start_balance*100) if st.session_state.session_start_balance>0 else 0
-    elapsed=max(0,int((datetime.now()-st.session_state.session_start_time).total_seconds())); h,rem=divmod(elapsed,3600); m,sx=divmod(rem,60)
-    st.markdown(f"<div class='metric-grid'><div class='metric-card'><div class='metric-label'>💰 {t('wallet_futures')}</div><div class='metric-value'>{bal['total']:.2f} USDT</div><div class='metric-sub'>Zajęte: {bal['used']:.2f} · {t('free_balance')}: {bal['free']:.2f}</div></div><div class='metric-card {'green' if pnl_pct>=0 else 'red'}'><div class='metric-label'>📈 {t('session_results')}</div><div class='metric-value'>{pnl_pct:+.2f}%</div><div class='metric-sub'>{t('pnl_usdt')}: {total_unreal:+.2f}</div></div><div class='metric-card'><div class='metric-label'>🎯 {t('slots_futures')}</div><div class='metric-value'>{len(positions)} / {max_pos}</div><div class='metric-sub'>Wolne sloty: {max(0,max_pos-len(positions))}</div></div><div class='metric-card'><div class='metric-label'>⚡ {t('session_time')}</div><div class='metric-value'>{h:02d}:{m:02d}:{sx:02d}</div><div class='metric-sub'>Aktywne boty: {len(st.session_state.active_mtf_bots)}</div></div></div>",unsafe_allow_html=True)
-
-    st.markdown(f"<div class='section-card'><div class='section-title'>{t('active_positions')}</div>",unsafe_allow_html=True)
-    if positions: st.dataframe(pd.DataFrame(positions),use_container_width=True)
-    else: st.info(t("no_positions"))
-    st.markdown("</div>",unsafe_allow_html=True)
-
-    st.markdown(f"<div class='section-card'><div class='section-title'>{t('trade_history')}</div>",unsafe_allow_html=True)
-    conn=db_connect()
-    try: hist=pd.read_sql_query("SELECT created_at,symbol,timeframe,action,side,price,amount,order_id,message FROM trade_log WHERE user_id=? ORDER BY id DESC LIMIT 100",conn,params=(st.session_state.user_id,))
-    except Exception: hist=pd.DataFrame()
-    finally: conn.close()
-    if not hist.empty: st.dataframe(hist,use_container_width=True)
-    else: st.info(t("no_history"))
-    st.markdown("</div>",unsafe_allow_html=True)
-
-    # Scanner: show every selected liquid pair. If an exchange rejects bulk ticker
-    # requests, the fallback fetches individual tickers instead of producing a blank table.
-    st.markdown(f"<div class='section-card'><div class='section-title'>{t('market_scanner_results')}</div>",unsafe_allow_html=True)
-    scan_now = st.button("🔎 RUN SCAN NOW / URUCHOM SKANOWANIE", use_container_width=True, key="run_scan_now")
-    scanner=[]
-    ranked=[]
-    if ex and st.session_state.active_mtf_bots:
-        try:
-            ranked = rank_usdt_linear_symbols(ex, max_scan)
-            if not ranked:
-                st.warning("Scanner found no liquid USDT perpetuals. Check exchange API permissions and market type.")
-            else:
-                for tf,cfg in st.session_state.active_mtf_bots.items():
-                    for sym,qv in ranked:
-                        try:
-                            data=ex.fetch_ohlcv(sym,tf,limit=min(180,max(100,int(cfg.get("ema_slow",21))+50)))
-                            if len(data)<3:
-                                scanner.append({"Timeframe":tf,"Pair":sym,"Price":None,"ADX":None,"RSI":None,"Signal":"NO DATA","24h Volume":qv,"Status":"Too little OHLCV data"})
-                                continue
-                            df=pd.DataFrame(data,columns=["timestamp","open","high","low","close","volume"])
-                            sig,vals=signal_from_closed_candle(df,{**cfg,"tf":tf},auto_influence/100)
-                            scanner.append({"Timeframe":tf,"Pair":sym,"Price":vals.get("price"),"ADX":round(vals.get("adx",0),2),"RSI":round(vals.get("rsi",0),2),"Signal":sig,"24h Volume":qv,"Status":"OK"})
-                        except Exception as exc:
-                            scanner.append({"Timeframe":tf,"Pair":sym,"Price":None,"ADX":None,"RSI":None,"Signal":"ERROR","24h Volume":qv,"Status":str(exc)[:160]})
-                            log.warning("Scanner %s %s failed: %s",tf,sym,exc)
-        except Exception as exc:
-            log.exception("Scanner failed: %s",exc)
-            st.error(f"Scanner error: {exc}")
-    else:
-        st.info("Start at least one MTF bot to activate the scanner.")
-    if scanner:
-        st.dataframe(pd.DataFrame(scanner),use_container_width=True,hide_index=True)
-        ok_count=sum(1 for r in scanner if r.get("Status")=="OK")
-        long_count=sum(1 for r in scanner if r.get("Signal")=="LONG")
-        short_count=sum(1 for r in scanner if r.get("Signal")=="SHORT")
-        st.caption(f"Scanned rows: {len(scanner)} · OK: {ok_count} · LONG: {long_count} · SHORT: {short_count} · selected pairs: {len(ranked) if ex and st.session_state.active_mtf_bots else 0}")
-    st.markdown("</div>",unsafe_allow_html=True)
-
-    # IMPORTANT: do not use HTML meta-refresh here. A full browser reload can create
-    # a new Streamlit session and make a logged-in user appear logged out.
-    # The autonomous trading worker runs independently, so the UI does not need
-    # to force-refresh the whole page. Use the sidebar refresh button instead.
-    if st.sidebar.button("🔄 Refresh view / Odśwież widok", use_container_width=True):
+        st.session_state.active_mtf_bots = {}
+        st.session_state._mtf_loaded_user_id = None
         st.rerun()
 
+    # --------------------------------------------------------
+    # API
+    # --------------------------------------------------------
+
+    st.sidebar.header(
+        t("exchange_settings")
+    )
+
+    selected_exchange = st.sidebar.selectbox(
+        t("select_exchange"),
+        SUPPORTED_EXCHANGES,
+        index=(
+            SUPPORTED_EXCHANGES.index(
+                st.session_state.selected_exchange
+            )
+            if st.session_state.selected_exchange
+            in SUPPORTED_EXCHANGES
+            else 0
+        ),
+        key="sidebar_selected_exchange",
+    )
+
+    st.session_state.selected_exchange = (
+        selected_exchange
+    )
+
+    api = st.sidebar.text_input(
+        f"API Key ({selected_exchange})",
+        value=st.session_state.api_key,
+        type="password",
+        key=f"api_{selected_exchange}",
+    )
+
+    secret = st.sidebar.text_input(
+        f"API Secret ({selected_exchange})",
+        value=st.session_state.secret_key,
+        type="password",
+        key=f"secret_{selected_exchange}",
+    )
+
+    passphrase = (
+        st.sidebar.text_input(
+            f"Passphrase ({selected_exchange})",
+            value=st.session_state.passphrase,
+            type="password",
+            key=f"pass_{selected_exchange}",
+        )
+        if selected_exchange in {"Bitget", "OKX"}
+        else ""
+    )
+
+    if st.sidebar.button(
+        t("save_keys_btn"),
+        use_container_width=True,
+    ):
+        if api and secret:
+            st.session_state.api_key = api
+            st.session_state.secret_key = secret
+            st.session_state.passphrase = (
+                passphrase
+            )
+
+            conn = db_connect()
+            conn.execute(""" UPDATE users SET api_key=?, secret_key=?, passphrase=?, selected_exchange=? WHERE id=? """, (
+                api,
+                secret,
+                passphrase,
+                selected_exchange,
+                st.session_state.user_id,
+            ))
+            conn.commit()
+            conn.close()
+
+            st.success(
+                f"{t('keys_saved')} "
+                f"{selected_exchange}"
+            )
+            st.rerun()
+        else:
+            st.error(
+                t("keys_error")
+            )
+
+    # --------------------------------------------------------
+    # SUBSCRIPTION
+    # --------------------------------------------------------
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"### {t('sub_zone')}"
+    )
+
+    if is_user_paid():
+        st.sidebar.success(
+            t("sub_active")
+        )
+    else:
+        st.sidebar.warning(
+            t("sub_inactive")
+        )
+
+    price_id = get_secret(
+        "STRIPE_PRICE_ID",
+        STRIPE_PRICE_ID,
+    )
+
+    st.sidebar.link_button(
+        t("pay_btn"),
+        create_stripe_checkout_session(
+            st.session_state.user_email,
+            price_id,
+        ),
+        use_container_width=True,
+    )
+
+    if (
+        ALLOW_TEST_ACTIVATION
+        and st.sidebar.button(
+            "⚡ [TEST] Aktywuj dostęp natychmiast"
+        )
+    ):
+        conn = db_connect()
+        conn.execute(
+            "UPDATE users SET stripe_paid=1 WHERE id=?",
+            (st.session_state.user_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        st.session_state.stripe_paid = True
+        st.rerun()
+
+    # --------------------------------------------------------
+    # RYZYKO
+    # --------------------------------------------------------
+
+    saved_risk = get_user_risk_settings(
+        st.session_state.user_id
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"### {t('capital_risk')}"
+    )
+
+    max_single = st.sidebar.number_input(
+        t("max_single"),
+        5.0,
+        5000.0,
+        float(saved_risk["max_single"]),
+        5.0,
+        key="sb_max_single_trade",
+    )
+
+    max_pos = st.sidebar.slider(
+        t("max_pos"),
+        1,
+        20,
+        int(saved_risk["max_positions"]),
+        key="sb_max_active_pos",
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"### {t('roe_guard')}"
+    )
+
+    enable_roe = st.sidebar.checkbox(
+        t("enable_roe"),
+        bool(saved_risk["enable_roe"]),
+        key="enable_roe_guard",
+    )
+
+    stop_roe = (
+        st.sidebar.slider(
+            t("sl_roe"),
+            0.5,
+            50.0,
+            float(saved_risk["stop_roe"]),
+            0.5,
+            key="custom_stop_loss_roe",
+        )
+        if enable_roe
+        else 999.0
+    )
+
+    take_roe = (
+        st.sidebar.slider(
+            t("tp_roe"),
+            1.0,
+            100.0,
+            float(saved_risk["take_roe"]),
+            0.5,
+            key="custom_take_profit_roe",
+        )
+        if enable_roe
+        else 999.0
+    )
+
+    cooldown = st.sidebar.slider(
+        "Czas oddechu po SL/TP (minuty)",
+        1,
+        120,
+        int(saved_risk["cooldown_minutes"]),
+        key="sb_cooldown_sl_tp",
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"### {t('leverage_mgmt')}"
+    )
+
+    lev_mode = st.sidebar.radio(
+        t("lev_mode"),
+        [
+            "Autonomiczny (płynny w granicach limitu)",
+            "Ręczny",
+        ],
+        index=(
+            0
+            if saved_risk["leverage_mode"]
+            != "Ręczny"
+            else 1
+        ),
+        key="sb_leverage_mode",
+    )
+
+    max_lev = st.sidebar.slider(
+        t("max_allowed_lev"),
+        1,
+        50,
+        int(saved_risk["max_leverage"]),
+        key="sb_max_allowed_leverage",
+    )
+
+    manual_lev = st.sidebar.slider(
+        t("manual_lev"),
+        1,
+        50,
+        int(saved_risk["manual_leverage"]),
+        key="sb_manual_leverage",
+    )
+
+    st.sidebar.markdown("---")
+
+    max_scan = st.sidebar.slider(
+        t("max_pairs"),
+        1,
+        100,
+        int(saved_risk["max_scan_pairs"]),
+        key="sb_max_fut_pairs",
+    )
+
+    auto_influence = st.sidebar.slider(
+        "🎚️ Wpływ ustawień bazowych Auto (%)",
+        0,
+        100,
+        int(saved_risk["auto_base_influence"]),
+        5,
+        key="sb_auto_base_influence",
+    )
+
+    refresh = st.sidebar.slider(
+        "Częstotliwość odświeżania widoku (sekundy)",
+        5,
+        60,
+        15,
+        key="sb_auto_refresh",
+    )
+
+    risk_now = {
+        "max_single": max_single,
+        "max_positions": max_pos,
+        "enable_roe": enable_roe,
+        "stop_roe": stop_roe,
+        "take_roe": take_roe,
+        "max_leverage": max_lev,
+        "manual_leverage": manual_lev,
+        "leverage_mode": lev_mode,
+        "max_scan_pairs": max_scan,
+        "auto_base_influence": auto_influence,
+        "cooldown_minutes": cooldown,
+    }
+
+    if risk_now != saved_risk:
+        save_user_risk_settings(
+            st.session_state.user_id,
+            risk_now,
+        )
+
+    # --------------------------------------------------------
+    # MTF
+    # --------------------------------------------------------
+
+    st.markdown(
+        """ <div class="section-card"> <div class="section-title"> 🤖 MTF — KONTROLA AUTONOMICZNYCH BOTÓW </div> <div style="color:#9d9487;font-size:12px"> Każdy interwał działa niezależnie. Ustawienia, aktywne boty i wyniki skanera są zapisywane w SQLite. </div> </div> """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(
+        len(AVAILABLE_TIMEFRAMES)
+    )
+
+    for i, tf in enumerate(
+        AVAILABLE_TIMEFRAMES
+    ):
+        with cols[i]:
+            active_tf = (
+                tf
+                in st.session_state.active_mtf_bots
+            )
+
+            st.markdown(
+                f""" <div class="mtf-card"> <b style="color:#f3d57a"> ⏱ {tf} </b> <br> <span style="color:{'#58e893' if active_tf else '#f07d7d'}"> {'● AKTYWNY' if active_tf else '○ GOTOWY'} </span> """,
+                unsafe_allow_html=True,
+            )
+
+            mode = st.radio(
+                f"Tryb ({tf})",
+                [
+                    "Automatyczny",
+                    "Ręczny",
+                ],
+                key=f"radio_mode_{tf}",
+            )
+
+            f = st.number_input(
+                f"EMA Szybka ({tf})",
+                1,
+                200,
+                key=f"ema_f_{tf}",
+            )
+
+            s = st.number_input(
+                f"EMA Wolna ({tf})",
+                2,
+                300,
+                key=f"ema_s_{tf}",
+            )
+
+            adx = st.slider(
+                f"Min ADX ({tf})",
+                10.0,
+                50.0,
+                key=f"adx_{tf}",
+            )
+
+            maxr = st.slider(
+                f"Max RSI Long ({tf})",
+                50.0,
+                95.0,
+                key=f"max_rsi_{tf}",
+            )
+
+            minr = st.slider(
+                f"Min RSI Short ({tf})",
+                5.0,
+                50.0,
+                key=f"min_rsi_{tf}",
+            )
+
+            cap = st.number_input(
+                f"CAP x ({tf})",
+                0.1,
+                10.0,
+                float(
+                    st.session_state.get(
+                        f"cap_mult_{tf}",
+                        DEFAULT_TF_VALUES[tf][
+                            "cap_mult"
+                        ],
+                    )
+                ),
+                0.1,
+                key=f"cap_mult_{tf}",
+            )
+
+            if f >= s:
+                st.warning(
+                    "EMA szybka musi być mniejsza od wolnej."
+                )
+
+            cfg = {
+                "mode": mode,
+                "ema_fast": min(
+                    int(f),
+                    int(s) - 1,
+                ),
+                "ema_slow": max(
+                    int(s),
+                    int(f) + 1,
+                ),
+                "min_adx": float(adx),
+                "max_rsi": float(maxr),
+                "min_rsi": float(minr),
+                "capital_multiplier": float(cap),
+                "tf": tf,
+            }
+
+            if active_tf:
+                st.success(
+                    "🟢 AKTYWNY"
+                )
+
+                if st.button(
+                    f"Zatrzymaj {tf}",
+                    key=f"stop_{tf}",
+                    use_container_width=True,
+                ):
+                    st.session_state.active_mtf_bots.pop(
+                        tf,
+                        None,
+                    )
+
+                    save_active_bots(
+                        st.session_state.user_id,
+                        st.session_state.active_mtf_bots,
+                    )
+
+                    st.rerun()
+            else:
+                if st.button(
+                    f"Uruchom {tf}",
+                    key=f"start_{tf}",
+                    use_container_width=True,
+                ):
+                    if (
+                        not st.session_state.api_key
+                        or not st.session_state.secret_key
+                    ):
+                        st.error(
+                            "Najpierw zapisz klucze API."
+                        )
+                    elif not is_user_paid():
+                        st.error(
+                            "Wymagana aktywna subskrypcja."
+                        )
+                    else:
+                        st.session_state.active_mtf_bots[
+                            tf
+                        ] = cfg
+
+                        save_active_bots(
+                            st.session_state.user_id,
+                            st.session_state.active_mtf_bots,
+                        )
+
+                        save_mtf_settings(
+                            st.session_state.user_id,
+                            current_mtf_payload(),
+                        )
+
+                        MANAGER.reconcile()
+                        st.rerun()
+
+            st.markdown(
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+    # Save only after widgets have resolved their values.
+    save_mtf_settings(
+        st.session_state.user_id,
+        current_mtf_payload(),
+    )
+
+    # Worker in Streamlit process.
+    MANAGER.reconcile()
+
+    # --------------------------------------------------------
+    # KILL SWITCH
+    # --------------------------------------------------------
+
+    if st.sidebar.button(
+        t("kill_switch"),
+        type="primary",
+        use_container_width=True,
+    ):
+        ex = get_exchange(
+            st.session_state.api_key,
+            st.session_state.secret_key,
+            st.session_state.passphrase,
+            st.session_state.selected_exchange,
+        )
+
+        if ex:
+            for p in fetch_positions_safe(ex):
+                close_position(
+                    ex,
+                    p,
+                    "KILL SWITCH",
+                )
+
+        st.session_state.active_mtf_bots = {}
+
+        save_active_bots(
+            st.session_state.user_id,
+            {},
+        )
+
+        MANAGER.reconcile()
+
+        st.success(
+            "🔴 KILL SWITCH WYKONANY. "
+            "Boty zatrzymane i pozycje zamknięte "
+            "w zakresie pozycji wykrytych przez API."
+        )
+
+        st.rerun()
+
+    # --------------------------------------------------------
+    # DASHBOARD
+    # --------------------------------------------------------
+
+    st.markdown(
+        f""" <div style=" display:flex; justify-content:space-between; background:#15110c; border:1px solid #8d6a27; border-radius:14px; padding:12px 16px; margin-bottom:14px; "> <b style="color:#f3d57a"> 💠 FUTURES CONTROL CENTER </b> <span> 👤 {st.session_state.user_email} · {st.session_state.selected_exchange} </span> </div> """,
+        unsafe_allow_html=True,
+    )
+
+    ex = get_exchange(
+        st.session_state.api_key,
+        st.session_state.secret_key,
+        st.session_state.passphrase,
+        st.session_state.selected_exchange,
+    )
+
+    positions = (
+        fetch_positions_safe(ex)
+        if ex
+        else []
+    )
+
+    positions = [
+        p
+        for p in positions
+        if position_contracts(p) > 0
+    ]
+
+    total_unreal = sum(
+        safe_float(
+            p.get("unrealizedPnl")
+        )
+        for p in positions
+    )
+
+    balance_snapshot = (
+        fetch_usdt_balance(ex)
+        if ex
+        else {
+            "total": 0.0,
+            "used": 0.0,
+            "free": 0.0,
+        }
+    )
+
+    balance = balance_snapshot["total"]
+    used = balance_snapshot["used"]
+    free = balance_snapshot["free"]
+
+    if (
+        not st.session_state.session_baseline_locked
+        and balance > 0
+    ):
+        st.session_state.session_start_balance = balance
+        st.session_state.session_baseline_locked = True
+
+    pnl_pct = (
+        (
+            balance
+            - st.session_state.session_start_balance
+        )
+        / st.session_state.session_start_balance
+        * 100
+        if st.session_state.session_start_balance > 0
+        else 0.0
+    )
+
+    elapsed = max(
+        0,
+        int(
+            (
+                datetime.now()
+                - st.session_state.session_start_time
+            ).total_seconds()
+        ),
+    )
+
+    h, rem = divmod(
+        elapsed,
+        3600,
+    )
+    m, sx = divmod(
+        rem,
+        60,
+    )
+
+    pnl_cls = (
+        "green"
+        if pnl_pct >= 0
+        else "red"
+    )
+
+    st.markdown(
+        f""" <div class="metric-grid"> <div class="metric-card"> <div class="metric-label"> 💰 {t('wallet_futures')} </div> <div class="metric-value"> {balance:.2f} USDT </div> <div class="metric-sub"> Zajęte: <b>{used:.2f}</b> · {t('free_balance')}: <b>{free:.2f}</b> </div> </div> <div class="metric-card {pnl_cls}"> <div class="metric-label"> 📈 {t('session_results')} </div> <div class="metric-value"> {pnl_pct:+.2f}% </div> <div class="metric-sub"> {t('pnl_usdt')}: <b> {total_unreal:+.2f} USDT</b> </div> </div> <div class="metric-card"> <div class="metric-label"> 🎯 {t('slots_futures')} </div> <div class="metric-value"> {len(positions)} / {max_pos} </div> <div class="metric-sub"> Wolne sloty: <b>{max(0,max_pos-len(positions))}</b> </div> </div> <div class="metric-card"> <div class="metric-label"> ⚡ {t('session_time')} </div> <div class="metric-value"> {h:02d}:{m:02d}:{sx:02d} </div> <div class="metric-sub"> Aktywne boty: <b>{len(st.session_state.active_mtf_bots)}</b> </div> </div> </div> """,
+        unsafe_allow_html=True,
+    )
+
+    # --------------------------------------------------------
+    # POZYCJE
+    # --------------------------------------------------------
+
+    st.markdown(
+        f""" <div class="section-card"> <div class="section-title"> 📈 {t('active_positions')} </div> """,
+        unsafe_allow_html=True,
+    )
+
+    if positions:
+        st.dataframe(
+            pd.DataFrame(positions),
+            use_container_width=True,
+        )
+    else:
+        st.info(
+            t("no_positions")
+        )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --------------------------------------------------------
+    # HISTORIA
+    # --------------------------------------------------------
+
+    st.markdown(
+        f""" <div class="section-card"> <div class="section-title"> 📜 {t('trade_history')} </div> """,
+        unsafe_allow_html=True,
+    )
+
+    conn = db_connect()
+
+    try:
+        hist = pd.read_sql_query(""" SELECT created_at, symbol, timeframe, action, side, price, amount, order_id, message FROM trade_log WHERE user_id=? ORDER BY id DESC LIMIT 200 """, conn, params=(
+            st.session_state.user_id,
+        ))
+    except Exception:
+        hist = pd.DataFrame()
+    finally:
+        conn.close()
+
+    if not hist.empty:
+        st.dataframe(
+            hist,
+            use_container_width=True,
+        )
+    else:
+        st.info(
+            t("no_history")
+        )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --------------------------------------------------------
+    # SKANER — CZYTA Z BAZY
+    # --------------------------------------------------------
+
+    st.markdown(
+        f""" <div class="section-card"> <div class="section-title"> 🔎 {t('market_scanner_results')} </div> <div style="color:#9d9487;font-size:12px"> Wyniki są pobierane z trwałego skanera workera, dzięki czemu tabela nie znika tylko dlatego, że Streamlit wykonał rerun. </div> """,
+        unsafe_allow_html=True,
+    )
+
+    scanner_df = read_scanner_rows(
+        st.session_state.user_id,
+        max(100, max_scan * max(
+            1,
+            len(
+                st.session_state.active_mtf_bots
+            ),
+        )),
+    )
+
+    if not scanner_df.empty:
+        scanner_df["Wolumen_24h"] = pd.to_numeric(
+            scanner_df["Wolumen_24h"],
+            errors="coerce",
+        ).fillna(0.0)
+
+        scanner_df["ADX"] = pd.to_numeric(
+            scanner_df["ADX"],
+            errors="coerce",
+        ).round(2)
+
+        scanner_df["RSI"] = pd.to_numeric(
+            scanner_df["RSI"],
+            errors="coerce",
+        ).round(2)
+
+        scanner_df = scanner_df.rename(columns={
+            "EMA_Szybka": "EMA szybka",
+            "EMA_Wolna": "EMA wolna",
+            "Wolumen_24h": "Wolumen 24h",
+        })
+
+        st.dataframe(
+            scanner_df,
+            use_container_width=True,
+        )
+    else:
+        st.info(
+            t("no_scanner")
+        )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --------------------------------------------------------
+    # ADMIN
+    # --------------------------------------------------------
+
+    if is_user_admin():
+        st.markdown(
+            f""" <div class="section-card"> <div class="section-title"> 👑 {t('admin_panel')} </div> """,
+            unsafe_allow_html=True,
+        )
+
+        conn = db_connect()
+        try:
+            users_df = pd.read_sql_query(""" SELECT id, email, is_admin, stripe_paid, selected_exchange FROM users ORDER BY id DESC """, conn)
+        finally:
+            conn.close()
+
+        st.dataframe(
+            users_df,
+            use_container_width=True,
+        )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # --------------------------------------------------------
+    # REGULAMIN I INSTRUKCJA
+    # --------------------------------------------------------
+
+    render_rules_and_manual()
+
+    gc.collect()
+
+    time.sleep(
+        int(refresh)
+    )
+
+    st.rerun()
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
-    parser=argparse.ArgumentParser()
-    parser.add_argument("--worker",action="store_true",help="Uruchom autonomiczny silnik tradingowy bez Streamlit")
-    args,_=parser.parse_known_args()
-    if args.worker: run_worker_mode()
-    else: run_streamlit_app()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help=(
+            "Uruchom autonomiczny silnik "
+            "tradingowy bez Streamlit"
+        ),
+    )
+
+    args, _ = parser.parse_known_args()
+
+    if args.worker:
+        run_worker_mode()
+    else:
+        run_streamlit_app()
