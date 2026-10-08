@@ -626,6 +626,17 @@ def exchange_max_leverage(exchange, symbol: str, fallback: int = 15) -> int:
     return max(1, int(fallback))
 
 
+def set_margin_mode_safe(exchange, symbol: str) -> bool:
+    try:
+        exchange.set_margin_mode("isolated", symbol)
+        return True
+    except Exception as exc:
+        # Already isolated / unsupported / open-position mode changes are not
+        # fatal. The leverage and order call below can still succeed.
+        log.debug("set_margin_mode isolated failed %s: %s", symbol, exc)
+        return False
+
+
 def set_leverage_safe(exchange, symbol: str, leverage: int) -> bool:
     try:
         exchange.set_leverage(
@@ -745,10 +756,22 @@ def calculate_indicators( df: pd.DataFrame, ema_fast: int, ema_slow: int, adx_pe
     df["adx"] = df["dx"].ewm(alpha=alpha, adjust=False).mean()
 
     delta = df["close"].diff()
-    gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(span=14, adjust=False).mean()
+    gain = delta.clip(lower=0).ewm(alpha=1.0 / 14.0, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / 14.0, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
-    df["rsi"] = 100 - 100 / (1 + rs)
+    rsi = 100 - 100 / (1 + rs)
+    # A permanently rising series has loss=0 and therefore RSI=100; a
+    # permanently falling series has gain=0 and RSI=0. The old code turned
+    # both cases into NaN, which later became 0 in the scanner.
+    rsi = rsi.where(loss > 0, 100.0)
+    rsi = rsi.where(~((gain <= 0) & (loss > 0)), 0.0)
+    rsi = rsi.where((gain > 0) | (loss > 0), 50.0)
+    df["rsi"] = rsi.clip(0.0, 100.0)
+
+    # Keep the indicator columns numeric. Only the warm-up area is allowed
+    # to be NaN; the closed candle used by the signal must be finite.
+    for col in ["plus_di", "minus_di", "adx", "macd_hist", "rsi"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
@@ -829,26 +852,22 @@ def blend_params( base: Dict[str, Any], opt: Dict[str, Any], base_weight: float 
 
 
 def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_influence: float = 0.5, ) -> Tuple[str, Dict[str, float]]:
-    if len(df) < 60:
+    """Return a signal from the last fully closed candle. The 1D problem in the previous version came from two things: too little daily history and NaN RSI values being converted to zero. This function therefore validates the actual indicator row instead of silently turning missing values into a fake numeric signal. """
+    if df is None or len(df) < 70:
         return "NEUTRALNY", {}
 
-    fast = int(cfg.get("ema_fast", 9))
-    slow = int(cfg.get("ema_slow", 21))
-
+    fast = max(1, int(cfg.get("ema_fast", 9)))
+    slow = max(2, int(cfg.get("ema_slow", 21)))
     if fast >= slow:
         fast, slow = slow, fast
 
     params = {
         "ema_fast": fast,
         "ema_slow": slow,
-        "min_adx": float(
-            cfg.get("min_adx", cfg.get("adx", 28.0))
-        ),
+        "min_adx": float(cfg.get("min_adx", cfg.get("adx", 28.0))),
         "max_rsi": float(cfg.get("max_rsi", 75.0)),
         "min_rsi": float(cfg.get("min_rsi", 25.0)),
-        "capital_multiplier": float(
-            cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))
-        ),
+        "capital_multiplier": float(cfg.get("capital_multiplier", cfg.get("cap_mult", 1.0))),
     }
 
     if cfg.get("mode") == "Automatyczny":
@@ -858,44 +877,38 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
             auto_base_influence,
         )
         if params["ema_fast"] >= params["ema_slow"]:
-            params["ema_fast"], params["ema_slow"] = (
-                params["ema_slow"],
-                params["ema_fast"],
-            )
+            params["ema_fast"], params["ema_slow"] = params["ema_slow"], params["ema_fast"]
 
-    ind = calculate_indicators(
-        df,
-        int(params["ema_fast"]),
-        int(params["ema_slow"]),
-        14,
-    )
-
-    if len(ind) < max(55, int(params["ema_slow"]) + 10):
+    ind = calculate_indicators(df, int(params["ema_fast"]), int(params["ema_slow"]), 14)
+    if len(ind) < max(70, int(params["ema_slow"]) + 20):
         return "NEUTRALNY", {}
 
-    # Closed candles only. -1 may still be forming.
+    # -1 is the currently forming candle. Use only closed candles.
     last = ind.iloc[-2]
     prev = ind.iloc[-3]
     older = ind.iloc[-4]
 
-    values = {
-        "price": safe_float(last["close"]),
-        "adx": safe_float(last["adx"]),
-        "rsi": safe_float(last["rsi"], 50.0),
-        "plus_di": safe_float(last["plus_di"]),
-        "minus_di": safe_float(last["minus_di"]),
-        "ema_fast": safe_float(last["ema_fast"]),
-        "ema_slow": safe_float(last["ema_slow"]),
-        "macd_hist": safe_float(last["macd_hist"]),
-        "prev_ema_fast": safe_float(prev["ema_fast"]),
-        "prev_ema_slow": safe_float(prev["ema_slow"]),
-    }
+    required = [
+        last["close"], last["adx"], last["rsi"], last["plus_di"],
+        last["minus_di"], last["ema_fast"], last["ema_slow"],
+        last["macd_hist"], prev["ema_fast"], prev["ema_slow"],
+        prev["plus_di"], prev["minus_di"], prev["macd_hist"],
+    ]
+    if not all(np.isfinite(safe_float(x, np.nan)) for x in required):
+        return "NEUTRALNY", {}
 
-    # IMPORTANT FIX:
-    # The old version demanded a fresh close crossing EMA on exactly one candle.
-    # That is far too restrictive and can result in virtually no trades.
-    # Now we require confirmed trend alignment on the closed candle and one
-    # additional confirmation candle, while RSI/ADX still filter weak setups.
+    values = {
+        "price": float(last["close"]),
+        "adx": float(last["adx"]),
+        "rsi": float(last["rsi"]),
+        "plus_di": float(last["plus_di"]),
+        "minus_di": float(last["minus_di"]),
+        "ema_fast": float(last["ema_fast"]),
+        "ema_slow": float(last["ema_slow"]),
+        "macd_hist": float(last["macd_hist"]),
+        "prev_ema_fast": float(prev["ema_fast"]),
+        "prev_ema_slow": float(prev["ema_slow"]),
+    }
 
     long_alignment = (
         last["ema_fast"] > last["ema_slow"]
@@ -905,7 +918,6 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
         and last["macd_hist"] > 0
         and prev["macd_hist"] >= 0
     )
-
     short_alignment = (
         last["ema_fast"] < last["ema_slow"]
         and prev["ema_fast"] < prev["ema_slow"]
@@ -915,36 +927,24 @@ def signal_from_closed_candle( df: pd.DataFrame, cfg: Dict[str, Any], auto_base_
         and prev["macd_hist"] <= 0
     )
 
-    # Price must also be on the trend side of the fast EMA.
-    long_price_ok = last["close"] > last["ema_fast"]
-    short_price_ok = last["close"] < last["ema_fast"]
-
     long_ok = (
         long_alignment
-        and long_price_ok
+        and last["close"] > last["ema_fast"]
         and values["adx"] >= params["min_adx"]
-        and values["rsi"] < params["max_rsi"]
-        and values["rsi"] > 50.0
+        and 50.0 < values["rsi"] < params["max_rsi"]
     )
-
     short_ok = (
         short_alignment
-        and short_price_ok
+        and last["close"] < last["ema_fast"]
         and values["adx"] >= params["min_adx"]
-        and values["rsi"] > params["min_rsi"]
-        and values["rsi"] < 50.0
+        and params["min_rsi"] < values["rsi"] < 50.0
     )
 
-    # Do not demand crossover, but give a slight preference to fresh
-    # transitions. The returned signal is still a normal trend signal.
-    _fresh_long = (
-        older["ema_fast"] <= older["ema_slow"]
-        and prev["ema_fast"] > prev["ema_slow"]
-    )
-    _fresh_short = (
-        older["ema_fast"] >= older["ema_slow"]
-        and prev["ema_fast"] < prev["ema_slow"]
-    )
+    # Keep these calculations for diagnostics without making a fresh crossover
+    # mandatory. A trend can remain valid for many candles.
+    _fresh_long = older["ema_fast"] <= older["ema_slow"] and prev["ema_fast"] > prev["ema_slow"]
+    _fresh_short = older["ema_fast"] >= older["ema_slow"] and prev["ema_fast"] < prev["ema_slow"]
+    _ = (_fresh_long, _fresh_short)
 
     signal = "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY"
     return signal, {**values, **params}
@@ -994,62 +994,50 @@ def normalize_price(exchange, symbol: str, price: float) -> float:
 
 
 def create_trigger_order( exchange, symbol: str, side: str, amount: float, trigger_price: float, kind: str, ) -> Optional[Dict[str, Any]]:
-    """ First try CCXT's unified trigger parameters. Then try the common stopPrice form used by several derivatives exchanges. Exchange-specific params are intentionally kept isolated here because CCXT documents that custom order parameters are exchange-specific. """
+    """Create a reduce-only market trigger using current CCXT semantics."""
     trigger_price = normalize_price(exchange, symbol, trigger_price)
+    amount = float(exchange.amount_to_precision(symbol, amount))
+    if amount <= 0 or trigger_price <= 0:
+        return None
 
-    attempts = []
-
+    # Prefer the current unified trigger API. Do not send stopLossPrice and
+    # takeProfitPrice together with triggerPrice on the same attempt because
+    # some exchanges reject the mixed parameter set.
+    params = {"triggerPrice": trigger_price, "reduceOnly": True}
     if kind == "stop":
-        attempts.append({
-            "triggerPrice": trigger_price,
-            "stopLossPrice": trigger_price,
-            "reduceOnly": True,
-        })
-        attempts.append({
-            "triggerPrice": trigger_price,
-            "reduceOnly": True,
-        })
-        attempts.append({
-            "stopPrice": trigger_price,
-            "reduceOnly": True,
-        })
+        params["stopLossPrice"] = trigger_price
     else:
-        attempts.append({
-            "triggerPrice": trigger_price,
-            "takeProfitPrice": trigger_price,
-            "reduceOnly": True,
-        })
-        attempts.append({
-            "triggerPrice": trigger_price,
-            "reduceOnly": True,
-        })
-        attempts.append({
-            "stopPrice": trigger_price,
-            "reduceOnly": True,
-        })
+        params["takeProfitPrice"] = trigger_price
 
-    for params in attempts:
+    attempts = [params, {"triggerPrice": trigger_price, "reduceOnly": True},
+                {"stopPrice": trigger_price, "reduceOnly": True}]
+
+    for p in attempts:
         try:
             order = exchange.create_order(
-                symbol,
-                "market",
-                side,
-                amount,
-                None,
-                params,
+                symbol, "market", side, amount, None, p
             )
             if order:
                 return order
         except Exception as exc:
-            log.debug(
-                "Trigger %s failed %s params=%s: %s",
-                kind, symbol, params, exc
-            )
+            log.warning("Protection %s failed %s params=%s: %s", kind, symbol, p, exc)
 
-    log.warning(
-        "All native %s protection attempts failed for %s",
-        kind, symbol,
-    )
+    # Some CCXT versions expose dedicated helpers.
+    try:
+        if kind == "stop" and getattr(exchange, "has", {}).get("createStopLossOrder"):
+            return exchange.create_stop_loss_order(
+                symbol, "market", side, amount, None,
+                trigger_price, {"reduceOnly": True}
+            )
+        if kind == "take" and getattr(exchange, "has", {}).get("createTakeProfitOrder"):
+            return exchange.create_take_profit_order(
+                symbol, "market", side, amount, None,
+                trigger_price, {"reduceOnly": True}
+            )
+    except Exception as exc:
+        log.warning("Dedicated protection %s failed %s: %s", kind, symbol, exc)
+
+    log.error("No working native %s protection for %s", kind, symbol)
     return None
 
 
@@ -1063,14 +1051,20 @@ def place_entry_with_protection( exchange, symbol: str, signal: str, contracts: 
         if contracts <= 0:
             raise ValueError("contracts <= 0")
 
-        order = exchange.create_order(
-            symbol,
-            "market",
-            side,
-            contracts,
-            None,
-            {},
-        )
+        set_margin_mode_safe(exchange, symbol)
+        try:
+            order = exchange.create_order(
+                symbol, "market", side, contracts, None, {}
+            )
+        except (ccxt.InvalidOrder, ccxt.BadRequest) as first_exc:
+            # Hedge-mode accounts on some derivatives venues require posSide.
+            # Retry only on an order-validation rejection, never on an unknown
+            # network/API error that could have created the order already.
+            hedge_params = {"posSide": "long" if signal == "LONG" else "short"}
+            log.warning("Retrying hedge-mode entry %s with %s: %s", symbol, hedge_params, first_exc)
+            order = exchange.create_order(
+                symbol, "market", side, contracts, None, hedge_params
+            )
     except Exception as exc:
         log.error(
             "ENTRY failed %s %s contracts=%s: %s",
@@ -1084,11 +1078,10 @@ def place_entry_with_protection( exchange, symbol: str, signal: str, contracts: 
     )
 
     if entry <= 0:
-        time.sleep(0.25)
-        p = find_position(
-            fetch_positions_safe(exchange),
-            symbol,
-        )
+        # The order response can omit average/price on some venues. One short
+        # position lookup is enough; do not poll the whole account repeatedly.
+        time.sleep(0.15)
+        p = find_position(fetch_positions_safe(exchange), symbol)
         if p:
             entry = safe_float(p.get("entryPrice"))
 
@@ -1140,12 +1133,7 @@ def place_entry_with_protection( exchange, symbol: str, signal: str, contracts: 
     save_protection_state(
         user_id=user_id,
         symbol=symbol,
-        side=position_side(
-            find_position(
-                fetch_positions_safe(exchange),
-                symbol,
-            ) or {"side": signal.lower()}
-        ),
+        side=("long" if signal == "LONG" else "short"),
         amount=contracts,
         entry_price=entry,
         leverage=leverage,
@@ -1303,6 +1291,10 @@ class UserWorker:
         self.last_protection_check = 0.0
         self.last_scan_by_tf: Dict[str, float] = {}
         self.markets_loaded = False
+        self.last_tickers_at = 0.0
+        self.cached_tickers: Dict[str, Any] = {}
+        self.last_ranked_at = 0.0
+        self.cached_ranked: List[Tuple[str, float]] = []
 
     def run_once(self) -> None:
         if self.exchange is None:
@@ -1319,15 +1311,16 @@ class UserWorker:
                 return
             self.markets_loaded = True
 
-        try:
-            tickers = self.exchange.fetch_tickers()
-        except Exception as exc:
-            log.warning(
-                "Ticker fetch failed user=%s: %s",
-                self.user_id,
-                exc,
-            )
-            return
+        now = time.time()
+        if now - self.last_tickers_at >= 60.0 or not self.cached_tickers:
+            try:
+                self.cached_tickers = self.exchange.fetch_tickers()
+                self.last_tickers_at = now
+            except Exception as exc:
+                log.warning("Ticker fetch failed user=%s: %s", self.user_id, exc)
+                if not self.cached_tickers:
+                    return
+        tickers = self.cached_tickers
 
         # Protection ALWAYS comes before new entries.
         self.protect_open_positions(risk)
@@ -1344,11 +1337,15 @@ class UserWorker:
         balance_snapshot = fetch_usdt_balance(self.exchange)
         free_balance = balance_snapshot["free"]
 
-        ranked = rank_liquid_symbols(
-            self.exchange,
-            tickers,
-            int(risk["max_scan_pairs"]),
-        )
+        if now - self.last_ranked_at >= 60.0 or not self.cached_ranked:
+            self.cached_ranked = rank_liquid_symbols(
+                self.exchange, tickers, int(risk["max_scan_pairs"])
+            )
+            self.last_ranked_at = now
+        else:
+            # The user can change max_scan_pairs without waiting a minute.
+            self.cached_ranked = self.cached_ranked[:max(1, int(risk["max_scan_pairs"]))]
+        ranked = self.cached_ranked
 
         if not ranked:
             log.warning(
@@ -1378,13 +1375,10 @@ class UserWorker:
 
             for symbol, qv in ranked:
                 try:
-                    limit = min(
-                        250,
-                        max(
-                            100,
-                            int(cfg.get("ema_slow", 21)) + 60,
-                        ),
-                    )
+                    # Daily candles need substantially more history than the
+                    # intraday timeframes. 180 keeps indicators stable without
+                    # retaining huge DataFrames in memory.
+                    limit = 180 if tf == "1d" else min(180, max(100, int(cfg.get("ema_slow", 21)) + 60))
 
                     ohlcv = fetch_ohlcv_safe(
                         self.exchange,
@@ -1393,7 +1387,8 @@ class UserWorker:
                         limit,
                     )
 
-                    if len(ohlcv) < 60:
+                    min_bars = 70 if tf == "1d" else 60
+                    if len(ohlcv) < min_bars:
                         continue
 
                     closed_candle_ts = int(
@@ -1420,25 +1415,20 @@ class UserWorker:
                         ) / 100.0,
                     )
 
+                    # Never write a fake zero just because the signal is
+                    # neutral. The scanner must still show the last closed
+                    # price and the indicators when a setup is simply not
+                    # strong enough to trade.
+                    fallback_price = safe_float(ohlcv[-2][4]) if len(ohlcv) >= 2 else 0.0
                     scanner_rows.append({
                         "timeframe": tf,
                         "symbol": symbol,
                         "quote_volume": qv,
-                        "price": safe_float(
-                            vals.get("price")
-                        ),
-                        "adx": safe_float(
-                            vals.get("adx")
-                        ),
-                        "rsi": safe_float(
-                            vals.get("rsi")
-                        ),
-                        "ema_fast": safe_float(
-                            vals.get("ema_fast")
-                        ),
-                        "ema_slow": safe_float(
-                            vals.get("ema_slow")
-                        ),
+                        "price": safe_float(vals.get("price"), fallback_price),
+                        "adx": safe_float(vals.get("adx"), 0.0),
+                        "rsi": safe_float(vals.get("rsi"), 50.0),
+                        "ema_fast": safe_float(vals.get("ema_fast"), fallback_price),
+                        "ema_slow": safe_float(vals.get("ema_slow"), fallback_price),
                         "signal": signal,
                         "candle_ts": closed_candle_ts,
                     })
@@ -1468,17 +1458,10 @@ class UserWorker:
                     ):
                         continue
 
-                    # Re-check position immediately before order.
-                    latest_positions = fetch_positions_safe(
-                        self.exchange
-                    )
-                    latest_position = find_position(
-                        latest_positions,
-                        symbol,
-                    )
-
-                    if latest_position:
-                        pos_map[symbol] = latest_position
+                    # pos_map was fetched once immediately before the scan.
+                    # Re-fetching the entire account for every candidate was a
+                    # major source of latency/rate-limit pressure.
+                    if symbol in pos_map:
                         continue
 
                     max_ex = exchange_max_leverage(
@@ -1652,15 +1635,14 @@ class UserWorker:
                     if order:
                         active_count += 1
 
-                        fresh = find_position(
-                            fetch_positions_safe(
-                                self.exchange
-                            ),
-                            symbol,
-                        )
-
-                        if fresh:
-                            pos_map[symbol] = fresh
+                        # The entry order was accepted. Mark the symbol as
+                        # occupied locally; the next worker cycle will reconcile
+                        # against the exchange positions.
+                        pos_map[symbol] = {
+                            "symbol": symbol,
+                            "contracts": contracts,
+                            "side": "long" if signal == "LONG" else "short",
+                        }
 
                         self.cooldowns[symbol] = (
                             time.time() + lock_seconds
@@ -2441,6 +2423,25 @@ def render_rules_and_manual() -> None:
 # GŁÓWNY INTERFEJS
 # ============================================================
 
+@st.cache_resource(show_spinner=False)
+def get_streamlit_worker_service():
+    """Start one non-blocking worker coordinator per Streamlit process. A separate `python app.py --worker` service is still the preferred server deployment. This fallback makes the app actually trade when the user launches only Streamlit, while keeping the UI thread free. """
+    stop_event = threading.Event()
+
+    def coordinator():
+        log.info("Embedded worker coordinator started")
+        while not stop_event.is_set():
+            try:
+                MANAGER.reconcile()
+            except Exception:
+                log.exception("Embedded worker reconcile failed")
+            stop_event.wait(max(5, WORKER_POLL_SECONDS))
+
+    thread = threading.Thread(target=coordinator, daemon=True, name="embedded-bot-manager")
+    thread.start()
+    return stop_event, thread
+
+
 def run_streamlit_app() -> None:
     st.set_page_config(
         page_title="Multi-Exchange Futures SaaS",
@@ -2448,6 +2449,9 @@ def run_streamlit_app() -> None:
     )
 
     init_db()
+    # Non-blocking background trading. No sleep/rerun is performed on the
+    # Streamlit request thread.
+    get_streamlit_worker_service()
 
     for key, value in SESSION_DEFAULTS.items():
         if key not in st.session_state:
@@ -3267,13 +3271,9 @@ def run_streamlit_app() -> None:
 
     render_rules_and_manual()
 
-    gc.collect()
-
-    time.sleep(
-        int(refresh)
-    )
-
-    st.rerun()
+    # Do not sleep or call st.rerun() here. That blocks a Streamlit request
+    # and causes unnecessary memory/CPU churn. The trading engine is a
+    # background worker; the dashboard reads its persistent SQLite results.
 
 
 # ============================================================
