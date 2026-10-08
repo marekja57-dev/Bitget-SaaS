@@ -518,47 +518,58 @@ def create_stripe_checkout_session(user_email, price_id):
 
 
 def _standard_ema(series: pd.Series, period: int) -> pd.Series:
-    """EMA z klasycznym seedem SMA, zgodnym z typowymi wykresami giełdowymi."""
+    """ Liczy rzeczywistą EMA z cen ZAMKNIĘCIA. Nie zwracamy tutaj okresu EMA ani żadnej ceny z tickera. Wynik jest wartością średniej wykładniczej dla każdej świecy. Używamy klasycznej definicji EMA: alpha = 2 / (N + 1), z seedem SMA dla pierwszych N poprawnych zamknięć. """
     period = max(1, int(period))
     values = pd.to_numeric(series, errors="coerce").astype(float)
-    if len(values) < period:
+    result = pd.Series(np.nan, index=values.index, dtype=float)
+
+    valid_positions = np.flatnonzero(values.notna().to_numpy())
+    if len(valid_positions) == 0:
+        return result
+
+    if len(valid_positions) < period:
+        # Nie ma jeszcze wystarczającej liczby świec na pełny seed SMA.
+        # Nie podstawiamy ceny ani okresu EMA; zwracamy wyłącznie EMA
+        # wyliczoną przez standardowy wzór.
         return values.ewm(span=period, adjust=False, min_periods=1).mean()
 
     alpha = 2.0 / (period + 1.0)
-    result = pd.Series(np.nan, index=values.index, dtype=float)
-    first_valid = values.first_valid_index()
-    if first_valid is None:
-        return result
-
-    start_pos = values.index.get_loc(first_valid)
-    valid = values.iloc[start_pos:]
-    if len(valid) < period:
-        return values.ewm(span=period, adjust=False, min_periods=1).mean()
-
-    seed_pos = start_pos + period - 1
-    seed = float(values.iloc[start_pos:seed_pos + 1].mean())
+    first_pos = int(valid_positions[0])
+    seed_pos = int(valid_positions[period - 1])
+    seed = float(values.iloc[first_pos:seed_pos + 1].mean())
     result.iloc[seed_pos] = seed
 
-    prev = seed
+    previous = seed
     for pos in range(seed_pos + 1, len(values)):
-        x = values.iloc[pos]
-        if not np.isfinite(x):
-            result.iloc[pos] = np.nan
+        value = values.iloc[pos]
+        if not np.isfinite(value):
             continue
-        prev = (x - prev) * alpha + prev
-        result.iloc[pos] = prev
+        previous = previous + alpha * (float(value) - previous)
+        result.iloc[pos] = previous
 
     return result
 
 
 def calculate_indicators(df, ema_fast=9, ema_slow=21, adx_period=14):
+    """ Oblicza wskaźniki wyłącznie z OHLCV przekazanego dla jednej pary i jednego interwału. `ema_fast` i `ema_slow` są OKRESAMI, a `df['ema_fast']` / `df['ema_slow']` zawierają rzeczywiste wartości EMA. """
     df = df.copy()
+
+    # Zawsze pracujemy chronologicznie na rzeczywistych cenach close.
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df = (
+        df.dropna(subset=["timestamp", "close"])
+        .sort_values("timestamp")
+        .drop_duplicates(subset=["timestamp"], keep="last")
+        .reset_index(drop=True)
+    )
 
     ema_fast = max(1, int(ema_fast))
     ema_slow = max(2, int(ema_slow))
     if ema_fast >= ema_slow:
         ema_fast = max(1, ema_slow - 1)
 
+    # To są WARTOŚCI EMA, nie okresy i nie ceny z fetch_tickers().
     df["ema_fast"] = _standard_ema(df["close"], ema_fast)
     df["ema_slow"] = _standard_ema(df["close"], ema_slow)
 
