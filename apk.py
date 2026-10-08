@@ -1245,29 +1245,46 @@ def save_user_risk_settings( user_id: int, settings: Dict[str, Any], ) -> None:
 # TRWAŁY SKANER
 # ============================================================
 
-def save_scanner_rows( user_id: int, rows: List[Dict[str, Any]], ) -> None:
-    if not rows:
-        return
+def clear_scanner_rows(user_id: int, timeframe: Optional[str] = None) -> None:
+    """Delete old scanner rows so the UI never mixes scan generations."""
+    conn = db_connect()
+    try:
+        if timeframe:
+            conn.execute(
+                "DELETE FROM scanner_results WHERE user_id=? AND timeframe=?",
+                (int(user_id), str(timeframe)),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM scanner_results WHERE user_id=?",
+                (int(user_id),),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
+
+def save_scanner_rows(user_id: int, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
 
     conn = db_connect()
     try:
+        now = utc_now()
         for row in rows:
             conn.execute(""" INSERT INTO scanner_results( user_id,timeframe,symbol,quote_volume,price,adx,rsi, ema_fast,ema_slow,signal,candle_ts,updated_at ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,timeframe,symbol) DO UPDATE SET quote_volume=excluded.quote_volume, price=excluded.price, adx=excluded.adx, rsi=excluded.rsi, ema_fast=excluded.ema_fast, ema_slow=excluded.ema_slow, signal=excluded.signal, candle_ts=excluded.candle_ts, updated_at=excluded.updated_at """, (
-                user_id,
+                int(user_id),
                 row["timeframe"],
                 row["symbol"],
-                row["quote_volume"],
-                row["price"],
-                row["adx"],
-                row["rsi"],
-                row["ema_fast"],
-                row["ema_slow"],
+                float(row["quote_volume"]),
+                float(row["price"]),
+                float(row["adx"]),
+                float(row["rsi"]),
+                float(row["ema_fast"]),
+                float(row["ema_slow"]),
                 row["signal"],
-                row["candle_ts"],
-                utc_now(),
+                int(row["candle_ts"]),
+                now,
             ))
         conn.commit()
     finally:
@@ -1403,6 +1420,12 @@ class UserWorker:
         cursor = int(self.scan_cursor_by_tf.get(tf, 0))
         if cursor >= len(ranked):
             cursor = 0
+
+        # Start a fresh generation for this timeframe. Old symbols are removed
+        # before new rows are written, so the table cannot contain stale data.
+        if cursor == 0:
+            clear_scanner_rows(self.user_id, tf)
+
         batch = ranked[cursor:cursor + SCAN_BATCH_SIZE]
         if not batch:
             cursor = 0
@@ -1449,28 +1472,29 @@ class UserWorker:
                     float(risk["auto_base_influence"]) / 100.0,
                 )
 
-                fallback_price = safe_float(
-                    ohlcv[-2][4] if len(ohlcv) >= 2 else 0.0
-                )
-                  # Obliczenie wartości EMA dla zamkniętej świecy
-                ema_f_period = int(cfg.get("ema_fast", 14))
-                ema_s_period = int(cfg.get("ema_slow", 30))
-                
-                fast_vals = df["close"].ewm(span=ema_f_period, adjust=False).mean()
-                slow_vals = df["close"].ewm(span=ema_s_period, adjust=False).mean()
-                
-                current_ema_fast = fast_vals.iloc[-2] if len(fast_vals) >= 2 else 0.0
-                current_ema_slow = slow_vals.iloc[-2] if len(slow_vals) >= 2 else 0.0
+                required = ("price", "adx", "rsi", "ema_fast", "ema_slow")
+                if not vals or any(
+                    not np.isfinite(safe_float(vals.get(k), np.nan))
+                    for k in required
+                ):
+                    # Never turn missing indicator data into fake values.
+                    # The old fallbacks produced exactly the screenshot pattern:
+                    # ADX=0, RSI=50 and EMA values equal to price.
+                    log.warning(
+                        "Skipping invalid scanner row user=%s tf=%s symbol=%s vals=%s",
+                        self.user_id, tf, symbol, vals,
+                    )
+                    continue
 
                 scanner_rows.append({
                     "timeframe": tf,
                     "symbol": symbol,
                     "quote_volume": qv,
-                    "price": safe_float(vals.get("price"), fallback_price),
-                    "adx": safe_float(vals.get("adx"), 0.0),
-                    "rsi": safe_float(vals.get("rsi"), 50.0),
-                    "ema_fast": safe_float(current_ema_fast, fallback_price),
-                    "ema_slow": safe_float(current_ema_slow, fallback_price),
+                    "price": float(vals["price"]),
+                    "adx": float(vals["adx"]),
+                    "rsi": float(vals["rsi"]),
+                    "ema_fast": float(vals["ema_fast"]),
+                    "ema_slow": float(vals["ema_slow"]),
                     "signal": signal,
                     "candle_ts": closed_candle_ts,
                 })
@@ -1548,11 +1572,16 @@ class UserWorker:
                         )),
                     )
 
-                set_leverage_safe(
+                if not set_leverage_safe(
                     self.exchange,
                     symbol,
                     lev,
-                )
+                ):
+                    log.warning(
+                        "Skipping entry: leverage setup failed user=%s symbol=%s lev=%s",
+                        self.user_id, symbol, lev,
+                    )
+                    continue
 
                 entry_hint = (
                     safe_float(
@@ -1638,28 +1667,14 @@ class UserWorker:
                 if contracts <= 0:
                     continue
 
-                # Durable lock BEFORE order.
+                # Only a short in-memory lock is set while the exchange
+                # request is in flight. A durable guard is created ONLY after
+                # an entry order is actually accepted.
                 lock_seconds = max(
                     300.0,
-                    float(
-                        risk.get(
-                            "cooldown_minutes",
-                            15,
-                        )
-                    ) * 60.0,
+                    float(risk.get("cooldown_minutes", 15)) * 60.0,
                 )
-
-                self.entry_locks[symbol] = (
-                    time.time() + lock_seconds
-                )
-
-                set_entry_guard(
-                    self.user_id,
-                    symbol,
-                    time.time() + lock_seconds,
-                    closed_candle_ts,
-                    signal,
-                )
+                self.entry_locks[symbol] = time.time() + 30.0
 
                 order, sl_price, tp_price = (
                     place_entry_with_protection(
@@ -1718,20 +1733,24 @@ class UserWorker:
                         ),
                     )
                 else:
+                    # Order was not accepted: do not create the same durable
+                    # candle guard that is used after a real position entry.
                     retry_lock = max(
                         60.0,
-                        float(
-                            risk.get(
-                                "cooldown_minutes",
-                                15,
-                            )
-                        ) * 60.0,
+                        min(300.0, float(risk.get("cooldown_minutes", 15)) * 60.0),
                     )
-                    self.cooldowns[symbol] = (
-                        time.time() + retry_lock
-                    )
-                    self.entry_locks[symbol] = (
-                        time.time() + retry_lock
+                    self.cooldowns[symbol] = time.time() + retry_lock
+                    self.entry_locks[symbol] = time.time() + retry_lock
+                    log_trade(
+                        self.user_id,
+                        symbol,
+                        tf,
+                        "ENTRY_ERROR",
+                        signal,
+                        entry_hint,
+                        contracts,
+                        "",
+                        "Entry order rejected or failed before acceptance",
                     )
 
             except Exception as exc:
@@ -3052,10 +3071,25 @@ def run_streamlit_app() -> None:
             )
 
     # Save only after widgets have resolved their values.
-    save_mtf_settings(
-        st.session_state.user_id,
-        current_mtf_payload(),
-    )
+    # If a bot is already active, update its runtime configuration too.
+    # Previously active_mtf_bots kept the values captured at START time, so
+    # changing EMA/ADX/RSI in the UI did not reach the worker.
+    mtf_payload = current_mtf_payload()
+    save_mtf_settings(st.session_state.user_id, mtf_payload)
+
+    active_changed = False
+    for active_tf in list(st.session_state.active_mtf_bots):
+        if active_tf in mtf_payload:
+            runtime_cfg = dict(mtf_payload[active_tf])
+            runtime_cfg["tf"] = active_tf
+            if runtime_cfg != st.session_state.active_mtf_bots.get(active_tf):
+                st.session_state.active_mtf_bots[active_tf] = runtime_cfg
+                active_changed = True
+    if active_changed:
+        save_active_bots(
+            st.session_state.user_id,
+            st.session_state.active_mtf_bots,
+        )
 
     # Worker in Streamlit process.
     MANAGER.reconcile()
@@ -3264,7 +3298,7 @@ def run_streamlit_app() -> None:
     # versions simply render the same persistent SQLite data once per app
     # rerun, so the trading worker is never dependent on fragment support.
     if callable(getattr(st, "fragment", None)):
-        @st.fragment(run_every=f"{refresh}s")
+@st.fragment(run_every=f"{refresh}s")
         def _live_scanner():
             render_scanner_live(
                 st.session_state.user_id,
