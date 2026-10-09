@@ -309,9 +309,20 @@ def load_mtf_settings(user_id):
 
 
 def save_mtf_settings(user_id, settings=None):
-    """Zapisuje pełny zestaw ustawień, zachowując niezależność każdego TF."""
+    """Zapisuje pełny zestaw ustawień per użytkownik i interwał. Zabezpieczenie: nie wolno zapisać wartości domyślnych z nowej sesji, zanim ustawienia tego użytkownika zostaną odczytane z bazy. """
     if not user_id:
         return False
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+    # Zwykły zapis z widżetów wymaga wcześniejszego wczytania ustawień
+    # tego samego użytkownika. Chroni to przed nadpisaniem ich wartościami
+    # startowymi po reconnect/rerun/login.
+    if settings is None and st.session_state.get("_mtf_loaded_user_id") != uid:
+        return False
+
     conn = None
     try:
         # Najpierw zachowujemy zapisane ustawienia, żeby brakujący klucz w session_state
@@ -426,8 +437,20 @@ def apply_mtf_to_session(user_id, force=False):
 
 def _save_mtf_callback():
     uid = st.session_state.get("user_id")
-    if uid:
-        save_mtf_settings(int(uid))
+    if not uid:
+        return
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return
+
+    # Jeśli użytkownik zmienił się lub sesja nie zdążyła wczytać ustawień,
+    # najpierw odtwórz zapis z bazy. Nie zapisuj wtedy domyślnych wartości.
+    if st.session_state.get("_mtf_loaded_user_id") != uid:
+        apply_mtf_to_session(uid, force=True)
+        return
+
+    save_mtf_settings(uid)
 
 
 for tf in AVAILABLE_TIMEFRAMES:
