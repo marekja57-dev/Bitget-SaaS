@@ -71,10 +71,11 @@ CSS = '''
     border: 1px solid #164a80;
     border-radius: 14px;
     padding: 16px 18px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .metric-label { font-size: 12px; color: #90b8e6; text-transform: uppercase; letter-spacing: 1px; }
-.metric-value { font-size: 25px; font-weight: 800; color: #f1f7ff; margin-top: 5px; }
-.muted { color: #83a7d0; font-size: 12px; }
+.metric-value { font-size: 24px; font-weight: 800; color: #f1f7ff; margin-top: 5px; }
+.muted { color: #83a7d0; font-size: 12px; margin-top: 4px; }
 div.stButton>button {
     border: 1px solid #278be8;
     border-radius: 8px;
@@ -167,16 +168,23 @@ def signal_for_symbol(cfg, symbol, tf):
         tf_cfg = cfg.get('tf_settings', {}).get(tf, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
         raw = get_candles(cfg['exchange'], cfg['market_type'], symbol, tf, cfg['candle_limit'])
         d = indicators(raw.iloc[:-1].copy(), tf_cfg['ema_fast'], tf_cfg['ema_slow'])
-        if len(d) < max(tf_cfg['ema_slow'] + 5, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'WAIT', 'reason': 'Za mało świec'}
+        if len(d) < max(tf_cfg['ema_slow'] + 5, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'NEUTRALNY', 'reason': 'Za mało świec'}
         r = d.iloc[-1]
         trend_up = r.ema_fast > r.ema_slow
         trend_down = r.ema_fast < r.ema_slow
         long_ok = cfg['allow_long'] and trend_up and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close > r.ema_fast
         short_ok = cfg['allow_short'] and trend_down and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close < r.ema_fast
-        sig = 'LONG' if long_ok else ('SHORT' if short_ok else 'WAIT')
+        
+        if long_ok:
+            sig = 'LONG'
+        elif short_ok:
+            sig = 'SHORT'
+        else:
+            sig = 'NEUTRALNY'
+            
         return {'symbol': symbol, 'tf': tf, 'signal': sig, 'price': float(r.close), 'adx': float(r.adx), 'rsi': float(r.rsi), 'reason': 'OK'}
     except Exception as e:
-        return {'symbol': symbol, 'tf': tf, 'signal': 'ERROR', 'reason': str(e)[:100]}
+        return {'symbol': symbol, 'tf': tf, 'signal': 'BŁĄD', 'reason': str(e)[:100]}
 
 def market_order(ex, symbol, side, qty, reduce_only=False):
     qty = float(ex.amount_to_precision(symbol, qty))
@@ -333,6 +341,25 @@ if page == 'Automatyczny Skaner i Auto-Handel':
 elif page == 'Ustawienia Strategii':
     st.subheader('Niezależne ustawienia strategii dla każdego interwału i zarządzanie ryzykiem')
     
+    if 'tf_settings' not in cfg:
+        cfg['tf_settings'] = DEFAULTS['tf_settings']
+        
+    if 'selected_tf_edit' not in st.session_state:
+        st.session_state['selected_tf_edit'] = '15m'
+
+    def update_tf_selection():
+        st.session_state['selected_tf_edit'] = st.session_state['tf_selectbox_key']
+
+    selected_tf_tab = st.selectbox(
+        'Wybierz interwał do edycji parametrów', 
+        TF_OPTIONS, 
+        index=TF_OPTIONS.index(st.session_state['selected_tf_edit']) if st.session_state['selected_tf_edit'] in TF_OPTIONS else 3,
+        key='tf_selectbox_key',
+        on_change=update_tf_selection
+    )
+
+    current_tf_cfg = cfg['tf_settings'].get(selected_tf_tab, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
+
     with st.form('cfgform'):
         a, b = st.columns(2)
         with a:
@@ -350,13 +377,7 @@ elif page == 'Ustawienia Strategii':
             cfg['allow_short'] = st.checkbox('Pozwól na SHORT', cfg['allow_short'])
         
         st.markdown('---')
-        st.markdown('### Konfiguracja wskaźników osobno dla każdego interwału')
-        
-        if 'tf_settings' not in cfg:
-            cfg['tf_settings'] = DEFAULTS['tf_settings']
-            
-        selected_tf_tab = st.selectbox('Wybierz interwał do edycji parametrów', TF_OPTIONS, index=TF_OPTIONS.index('15m'))
-        current_tf_cfg = cfg['tf_settings'].get(selected_tf_tab, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
+        st.markdown(f'### Konfiguracja wskaźników dla interwału: {selected_tf_tab}')
         
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1: f_fast = st.number_input(f'EMA szybka ({selected_tf_tab})', 2, 100, int(current_tf_cfg.get('ema_fast', 9)))
@@ -365,11 +386,11 @@ elif page == 'Ustawienia Strategii':
         with c4: f_rmin = st.number_input(f'RSI min ({selected_tf_tab})', 0.0, 100.0, float(current_tf_cfg.get('rsi_min', 25.0)))
         with c5: f_rmax = st.number_input(f'RSI max ({selected_tf_tab})', 0.0, 100.0, float(current_tf_cfg.get('rsi_max', 75.0)))
             
-        submitted = st.form_submit_button('ZAPISZ WSZYSTKIE USTAWIENIA', use_container_width=True)
+        submitted = st.form_submit_button(f'ZAPISZ USTAWIENIA DLA {selected_tf_tab}', use_container_width=True)
     if submitted:
         cfg['tf_settings'][selected_tf_tab] = {'ema_fast': f_fast, 'ema_slow': f_slow, 'adx_threshold': f_adx, 'rsi_min': f_rmin, 'rsi_max': f_rmax}
         save_cfg(cfg)
-        st.success(f'Zapisano parametry dla interwału {selected_tf_tab}!')
+        st.success(f'Zapisano parametry dla interwału {selected_tf_tab} oraz ustawienia ogólne!')
         st.rerun()
 
 elif page == 'Połączenie API':
@@ -406,26 +427,59 @@ else:
     st.subheader('Panel Sesji i Analiza Kapitału')
     st.write('Statystyki Twoich środków, slotów oraz wynik finansowy bieżącej sesji handlowej.')
     
-    free_bal, total_bal, active_slots, session_pnl = 1000.0, 1000.0, 0, 0.0
+    total_bal, free_bal, active_slots, session_pnl, used_margin = 1000.0, 1000.0, 0, 0.0, 0.0
     try:
         if key and secret:
             ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
-            free_bal, total_bal = balance_usdt(ex)
+            _, total_bal = balance_usdt(ex)
             positions = ex.fetch_positions()
-            active_slots = sum(1 for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0)
-            session_pnl = sum(float(p.get('unrealizedPnl') or 0) for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0)
+            active_pos = [p for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0]
+            active_slots = len(active_pos)
+            session_pnl = sum(float(p.get('unrealizedPnl') or 0) for p in active_pos)
+            used_margin = sum(float(p.get('initialMargin') or p.get('margin') or 0) for p in active_pos)
+            free_bal = max(0.0, total_bal - used_margin)
     except Exception:
         pass
 
     max_slots = int(cfg['max_positions'])
     free_slots = max(0, max_slots - active_slots)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric('Kapitał / Saldo Całkowite', f'{total_bal:.2f} USDT', f'Wolne: {free_bal:.2f} USDT')
-    c2.metric('Sloty Pozycji (Aktywne / Max)', f'{active_slots} / {max_slots}', f'Wolne sloty: {free_slots}')
-    c3.metric('Wynik Sesji (PnL)', f'{session_pnl:+.2f} USDT', 'Niezrealizowany PnL' if active_slots > 0 else 'Brak pozycji')
-    c4.metric('Status Autopilota', 'WŁĄCZONY' if cfg['auto_trade'] else 'WYŁĄCZONY', 'PAPER' if cfg['paper_mode'] else 'LIVE')
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f'''
+        <div class="panel">
+            <div class="metric-label">Kapitał / Saldo Całkowite</div>
+            <div class="metric-value">{total_bal:.2f} USDT</div>
+            <div class="muted">Wolne: {free_bal:.2f} USDT</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'''
+        <div class="panel">
+            <div class="metric-label">Sloty Pozycji</div>
+            <div class="metric-value">{active_slots} / {max_slots}</div>
+            <div class="muted">Wolne sloty: {free_slots}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    with col3:
+        pnl_color = "#28a8ff" if session_pnl >= 0 else "#ff4d4d"
+        st.markdown(f'''
+        <div class="panel">
+            <div class="metric-label">Wynik Sesji (PnL)</div>
+            <div class="metric-value" style="color: {pnl_color};">{session_pnl:+.2f} USDT</div>
+            <div class="muted">Niezrealizowany PnL</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    with col4:
+        st.markdown(f'''
+        <div class="panel">
+            <div class="metric-label">Status Autopilota</div>
+            <div class="metric-value">{"WŁĄCZONY" if cfg["auto_trade"] else "WYŁĄCZONY"}</div>
+            <div class="muted">Tryb: {"PAPER" if cfg["paper_mode"] else "LIVE"}</div>
+        </div>
+        ''', unsafe_allow_html=True)
 
+    st.write('')
     st.divider()
     st.markdown('### Bieżące aktywne pozycje na giełdzie')
     try:
