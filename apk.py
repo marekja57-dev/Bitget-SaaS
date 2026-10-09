@@ -39,7 +39,7 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# POPRAWIONA KONFIGURACJA STRIPE (Z Twoich zdjęć)
+# POPRAWIONY LINK STRIPE Z TWOJEGO PANELU
 # ========================================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
@@ -737,4 +737,3 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
-
