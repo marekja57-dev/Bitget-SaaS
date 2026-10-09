@@ -40,13 +40,13 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# KONFIGURACJA STRIPE (Zaktualizowany link z panelu)
+# KONFIGURACJA STRIPE (Zaktualizowana ze zdjęć)
 # ========================================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "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")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_live_51UCp3eKe18kT9JGHZVz9RGb1VSUvyuaKfQ49DDvXymKf8IDjIgHy04wfpaDnqSWQKvGbXcQ2yhnPJx2id608wLa800mN6pFhEA")
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
     "STRIPE_CHECKOUT_FALLBACK",
-    "https://buy.stripe.com/00w0kecL1sfbck0c13oA00",
+    "https://buy.stripe.com/8x2dra4CbdaXfSAF6V3oA03"
 )
 
 try:
@@ -66,7 +66,7 @@ if STRIPE_SECRET_KEY:
 def create_stripe_checkout_session(email, price_id=None):
     if STRIPE_CHECKOUT_FALLBACK:
         return f"{STRIPE_CHECKOUT_FALLBACK}?client_reference_id={email}"
-    return f"https://buy.stripe.com/00w0kecL1sfbck0c13oA00?client_reference_id={email}"
+    return f"https://buy.stripe.com/8x2dra4CbdaXfSAF6V3oA03?client_reference_id={email}"
 
 CSS = '''
 <style>
@@ -283,9 +283,6 @@ if 'authenticated' not in st.session_state:
     st.session_state['user_email'] = ''
     st.session_state['logged_in'] = False
 
-# ========================================================
-# AKTYWACJA POWROTU ZE STRIPE
-# ========================================================
 if st.query_params.get("success") == "true":
     if st.session_state.get("logged_in") and st.session_state.get("user_id"):
         st.session_state.stripe_paid = True
@@ -347,7 +344,6 @@ if not st.session_state['authenticated']:
                     except sqlite3.IntegrityError:
                         st.error("Taki użytkownik już istnieje.")
     st.stop()
-
 cfg = load_cfg()
 creds = load_creds()
 ex_id, key, secret, password = creds
@@ -639,7 +635,7 @@ else:
         <div class="panel">
         <div class="metric-label">Wynik Sesji (PnL)</div>
         <div class="metric-value" style="color: {pnl_color};">{session_pnl:+.2f} USDT</div>
-        <div class="muted">Niezrealizowany PnL</div>
+        <div class="muted">Użyty Margin: {used_margin:.2f} USDT</div>
         </div>
         ''', unsafe_allow_html=True)
     with col4:
@@ -696,7 +692,6 @@ else:
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
         
-    # Automatyczne odświeżanie widoku kapitału co 30 sekund
     placeholder = st.empty()
     for seconds in range(30, 0, -1):
         placeholder.markdown(f"<small style='color: #7da9d8;'>Odświeżenie danych za {seconds} s...</small>", unsafe_allow_html=True)
