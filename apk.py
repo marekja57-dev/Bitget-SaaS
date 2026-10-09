@@ -37,7 +37,6 @@ DEFAULTS = {
 }
 
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
-ALLOW_TEST_ACTIVATION = True
 STRIPE_PRICE_ID_VAL = "price_1M_49pln_placeholder"
 
 CSS = '''
@@ -263,9 +262,6 @@ if 'authenticated' not in st.session_state:
     st.session_state['user_email'] = ''
     st.session_state['logged_in'] = False
 
-# ========================================================
-# OBSŁUGA POWROTU ZE STRIPE (z Twoich zdjęć)
-# ========================================================
 if st.query_params.get("success") == "true":
     if st.session_state.get("logged_in") and st.session_state.get("user_id"):
         st.session_state.stripe_paid = True
@@ -353,19 +349,6 @@ with st.sidebar:
         st.sidebar.warning("Subskrypcja nieopłacona")
         checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID_VAL)
         st.sidebar.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
-    
-    if ALLOW_TEST_ACTIVATION and not is_user_admin():
-        if st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast", use_container_width=True):
-            st.session_state['stripe_paid'] = 1
-            try:
-                with db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.user_id,))
-                    conn.commit()
-            except Exception:
-                pass
-            st.success("Subskrypcja aktywowana testowo!")
-            st.rerun()
             
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
@@ -533,7 +516,7 @@ elif page == 'Dziennik':
 
 else:
     st.subheader('Panel Sesji i Analiza Kapitału')
-    st.write('Statystyki Twoich środków, slotów oraz wynik finansowy bieżącej sesji handlowej.')
+    st.write('Statystyki Twoich środków, slotów oraz wynik finansowy bieżącej sesji handlowej (automatyczne odświeżanie co 30 sekund).')
     
     total_bal, free_bal, active_slots, session_pnl, used_margin = 1000.0, 1000.0, 0, 0.0, 0.0
     try:
@@ -631,4 +614,12 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
+
+    # Automatyczne odświeżanie widoku kapitału co 30 sekund
+    placeholder = st.empty()
+    for seconds in range(30, 0, -1):
+        placeholder.markdown(f"<small style='color: #7da9d8;'>Odświeżenie danych za {seconds} s...</small>", unsafe_allow_html=True)
+        time.sleep(1)
+    placeholder.empty()
+    st.rerun()
 
