@@ -40,14 +40,14 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# KONFIGURACJA STRIPE (Zaktualizowana ze zdjęć)
+# KONFIGURACJA STRIPE (Zaktualizowany link z panelu)
 # ========================================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "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")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_live_51UCp3eKe18kT9JGHZVz9RGb1VSUvyuaKfQ49DDvXymKf8IDjIgHy04wfpaDnqSWQKvGbXcQ2yhnPJx2id608wLa800mN6pFhEA")
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
     "STRIPE_CHECKOUT_FALLBACK",
-    "https://buy.stripe.com/00w0kecL1sfbck0c13oA00",)
-
+    "https://buy.stripe.com/00w0kecL1sfbck0c13oA00",
+)
 
 try:
     STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY)
@@ -703,4 +703,3 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
-
