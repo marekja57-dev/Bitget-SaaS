@@ -20,7 +20,7 @@ DEFAULTS = {
     'refresh_seconds': 30, 'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0,
     'risk_usdt': 10.0, 'max_positions': 3, 'leverage': 2, 'sl_roe': 20.0, 'tp_roe': 40.0, 'enable_roe': True,
     'mtf_enabled': True, 'timeframes': ['5m', '15m', '1h'], 'auto_refresh': False, 'auto_trade': False, 'paper_mode': True,
-    'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 15
+    'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 20
 }
 
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
@@ -213,7 +213,7 @@ def balance_usdt(ex):
     row = b.get('USDT') or {}
     return float(row.get('free') or 0), float(row.get('total') or 0)
 
-# --- PANEL LOGOWANIA I REJESTRACJI ---
+# --- PANEL LOGOWANIA I REJESTRACJI (STYL RETRO) ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['username'] = ''
@@ -267,7 +267,7 @@ ex_id, key, secret, password = creds
 
 with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
-    page = st.radio('NAWIGACJA', ['Trading', 'Skaner Regulowany i Auto-Handel', 'Skaner MTF', 'Ustawienia', 'Połączenie API', 'Dziennik'])
+    page = st.radio('NAWIGACJA', ['Automatyczny Skaner Giełdy', 'Trading', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
         st.session_state['authenticated'] = False
@@ -279,41 +279,90 @@ with st.sidebar:
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-if page == 'Ustawienia':
-    st.subheader('Strategia, MTF i zarządzanie ryzykiem')
+if page == 'Automatyczny Skaner Giełdy':
+    st.subheader('Automatyczny Skaner Giełdy i Wielointerwałowy Auto-Handel')
+    st.write('System samodzielnie pobiera listę par z giełdy i skanuje wybrane przez Ciebie interwały oraz liczbę par w jednym cyklu.')
+    
+    with st.form('control_form'):
+        auto = st.checkbox('Włącz automatyczny handel (Auto-Trade)', value=bool(cfg['auto_trade']))
+        paper = st.checkbox('Tryb symulacji PAPER (brak zleceń na żywo)', value=bool(cfg['paper_mode']))
+        submit_ctrl = st.form_submit_button('ZAPISZ TRYB PRACY')
+        if submit_ctrl:
+            cfg['auto_trade'] = auto
+            cfg['paper_mode'] = paper
+            save_cfg(cfg)
+            st.success('Zapisano tryb pracy bota.')
+
+    if st.button('URUCHOM SKANOWANIE RYNKU TERAZ', type='primary'):
+        try:
+            ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
+            markets = ex.load_markets()
+            
+            all_symbols = [s for s, m in markets.items() if m.get('quote') == 'USDT' and m.get('active') and m.get('linear')]
+            target_symbols = all_symbols[:int(cfg.get('scan_limit_count', 20))]
+            target_tfs = cfg.get('timeframes', ['15m'])
+            
+            st.info(f'Przeszukiwanie {len(target_symbols)} par na interwałach: {", ".join(target_tfs)}...')
+            
+            results = []
+            free, _ = balance_usdt(ex) if not cfg['paper_mode'] else (1000.0, 1000.0)
+            
+            for symbol in target_symbols:
+                for tf in target_tfs:
+                    res = signal_for_symbol(cfg, symbol, tf)
+                    results.append(res)
+                    
+                    sig = res['signal']
+                    if sig in ('LONG', 'SHORT'):
+                        event('INFO', f'Skaner: Sygnał {sig} na {symbol} [{tf}] (ADX: {res["adx"]:.1f}, RSI: {res["rsi"]:.1f})')
+                        
+                        if cfg['auto_trade']:
+                            if cfg['paper_mode']:
+                                event('TRADE', f'[PAPER] Automatyczne otwarcie {sig} na {symbol} [{tf}]')
+                            else:
+                                lev = int(cfg['leverage'])
+                                stop_fraction = (float(cfg['sl_roe']) / 100.0) / lev
+                                qty, notional = calc_qty(ex, symbol, free, res['price'], cfg, stop_fraction)
+                                try:
+                                    ex.set_leverage(lev, symbol)
+                                except Exception:
+                                    pass
+                                side = 'buy' if sig == 'LONG' else 'sell'
+                                order = market_order(ex, symbol, side, qty, False)
+                                event('TRADE', f'AUTOMATYCZNIE OTWARTO {sig} {symbol} [{tf}] qty={qty} id={order.get("id")}')
+            
+            st.success('Skanowanie wielointerwałowe zakończone pomyślnie!')
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            
+        except Exception as e:
+            st.error(f'Błąd podczas skanowania giełdy: {e}')
+
+elif page == 'Ustawienia Strategii':
+    st.subheader('Indywidualne ustawienia strategii i zarządzania ryzykiem')
     with st.form('cfgform'):
         a, b, c = st.columns(3)
         with a:
             cfg['exchange'] = st.selectbox('Giełda', ['bitget', 'binanceusdm', 'bybit', 'okx'], index=['bitget', 'binanceusdm', 'bybit', 'okx'].index(cfg['exchange']) if cfg['exchange'] in ['bitget', 'binanceusdm', 'bybit', 'okx'] else 0)
             cfg['market_type'] = st.selectbox('Rynek', ['swap', 'future'], index=0 if cfg['market_type'] == 'swap' else 1)
-            cfg['symbol'] = st.text_input('Symbol CCXT', cfg['symbol'])
-            cfg['timeframe'] = st.selectbox('Główny interwał', TF_OPTIONS, index=TF_OPTIONS.index(cfg['timeframe']) if cfg['timeframe'] in TF_OPTIONS else 3)
-            cfg['timeframes'] = st.multiselect('Interwały MTF do potwierdzenia', TF_OPTIONS, default=[x for x in cfg['timeframes'] if x in TF_OPTIONS] or ['5m', '15m', '1h'])
-            cfg['mtf_enabled'] = st.checkbox('Wymagaj zgodności MTF', cfg['mtf_enabled'])
+            cfg['scan_limit_count'] = st.slider('Suwak limitu skanowanych par z giełdy', 5, 50, int(cfg.get('scan_limit_count', 20)))
+            cfg['timeframes'] = st.multiselect('Interwały do skanowania w tle', TF_OPTIONS, default=[x for x in cfg.get('timeframes', ['15m']) if x in TF_OPTIONS] or ['15m'])
         with b:
             cfg['ema_fast'] = st.number_input('EMA szybka', 2, 100, int(cfg['ema_fast']))
             cfg['ema_slow'] = st.number_input('EMA wolna', 3, 300, int(cfg['ema_slow']))
             cfg['adx_threshold'] = st.number_input('Minimalny ADX', 0.0, 100.0, float(cfg['adx_threshold']))
             cfg['rsi_min'] = st.number_input('RSI minimum', 0.0, 100.0, float(cfg['rsi_min']))
             cfg['rsi_max'] = st.number_input('RSI maksimum', 0.0, 100.0, float(cfg['rsi_max']))
-            cfg['candle_limit'] = st.select_slider('Świece na interwał', options=[80, 100, 150, 180, 240], value=cfg['candle_limit'] if cfg['candle_limit'] in [80, 100, 150, 180, 240] else 180)
         with c:
             cfg['risk_usdt'] = st.number_input('Maks. ryzyko na pozycję (USDT)', 1.0, 10000.0, float(cfg['risk_usdt']))
-            cfg['max_notional_usdt'] = st.number_input('Limit wartości pozycji (USDT)', 5.0, 100000.0, float(cfg['max_notional_usdt']))
             cfg['max_positions'] = st.number_input('Maks. otwarte pozycje', 1, 20, int(cfg['max_positions']))
             cfg['leverage'] = st.number_input('Dźwignia', 1, 50, int(cfg['leverage']))
-            cfg['sl_roe'] = st.number_input('Stop-loss ROE (%)', 1.0, 95.0, float(cfg['sl_roe']))
-            cfg['tp_roe'] = st.number_input('Take-profit ROE (%)', 1.0, 500.0, float(cfg['tp_roe']))
-            cfg['enable_roe'] = st.checkbox('Monitoruj SL/TP ROE', cfg['enable_roe'])
             cfg['allow_long'] = st.checkbox('Pozwól na LONG', cfg['allow_long'])
             cfg['allow_short'] = st.checkbox('Pozwól na SHORT', cfg['allow_short'])
-            cfg['refresh_seconds'] = st.number_input('Odstęp cyklu (sek.)', 10, 300, int(cfg['refresh_seconds']))
-            cfg['cooldown_seconds'] = st.number_input('Przerwa po zleceniu (sek.)', 0, 86400, int(cfg['cooldown_seconds']))
+        
         submitted = st.form_submit_button('ZAPISZ USTAWIENIA', use_container_width=True)
     if submitted:
         save_cfg(cfg)
-        get_candles.clear()
-        st.success('Zapisano trwale w SQLite.')
+        st.success('Zapisano ustawienia strategii.')
         st.rerun()
 
 elif page == 'Połączenie API':
@@ -340,82 +389,14 @@ elif page == 'Połączenie API':
         except Exception as e:
             st.error(f'Błąd API: {e}')
 
-elif page == 'Skaner MTF':
-    st.subheader('Skaner strategii EMA / ADX / RSI (Wielointerwałowy)')
-    tfs = cfg['timeframes'] if cfg['mtf_enabled'] else [cfg['timeframe']]
-    if st.button('Skanuj teraz', type='primary'):
-        rows = []
-        for tf in dict.fromkeys(tfs):
-            try: rows.append(signal_for(cfg, tf))
-            except Exception as e: rows.append({'tf': tf, 'signal': 'ERROR', 'reason': str(e)[:250]})
-        st.session_state['scan_results'] = rows
-    rows = st.session_state.get('scan_results', [])
-    if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    else: st.info('Kliknij „Skanuj teraz”, aby pobrać zamknięte świece i policzyć wskaźniki.')
-
-elif page == 'Skaner Regulowany i Auto-Handel':
-    st.subheader('Skaner kontraktów regulowany suwakiem i Auto-Trade')
-    st.write('Sam decydujesz, ile par giełdowych ma być pobranych i przeskanowanych w jednym cyklu przez bot.')
-    
-    with st.form('scanner_config_form'):
-        cfg['scan_limit_count'] = st.slider('Liczba par do przeskanowania z giełdy', 5, 50, int(cfg.get('scan_limit_count', 15)))
-        cfg['auto_trade'] = st.checkbox('Włącz automatyczne składanie zleceń', value=bool(cfg['auto_trade']))
-        cfg['paper_mode'] = st.checkbox('Tryb symulacji PAPER', value=bool(cfg['paper_mode']))
-        submit_scan_cfg = st.form_submit_button('ZAPISZ USTAWIENIA SKANERA', use_container_width=True)
-        if submit_scan_cfg:
-            save_cfg(cfg)
-            st.success('Zapisano ustawienia skanera.')
-
-    if st.button('URUCHOM SKANOWANIE I AUTOMATYCZNY HANDEL', type='primary'):
-        try:
-            ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
-            markets = ex.load_markets()
-            
-            all_symbols = [s for s, m in markets.items() if m.get('quote') == 'USDT' and m.get('active') and m.get('linear')]
-            target_symbols = all_symbols[:int(cfg['scan_limit_count'])]
-            
-            st.info(f'Pobrano {len(target_symbols)} par z giełdy do skanowania.')
-            
-            results = []
-            free, _ = balance_usdt(ex) if not cfg['paper_mode'] else (1000.0, 1000.0)
-            
-            for symbol in target_symbols:
-                res = signal_for_symbol(cfg, symbol, cfg['timeframe'])
-                results.append(res)
-                
-                sig = res['signal']
-                if sig in ('LONG', 'SHORT'):
-                    event('INFO', f'Skaner: Wykryto {sig} na {symbol} (ADX: {res["adx"]:.1f}, RSI: {res["rsi"]:.1f})')
-                    
-                    if cfg['auto_trade']:
-                        if cfg['paper_mode']:
-                            event('TRADE', f'[PAPER] Symulowane otwarcie {sig} na {symbol}')
-                        else:
-                            lev = int(cfg['leverage'])
-                            stop_fraction = (float(cfg['sl_roe']) / 100.0) / lev
-                            qty, notional = calc_qty(ex, symbol, free, res['price'], cfg, stop_fraction)
-                            try:
-                                ex.set_leverage(lev, symbol)
-                            except Exception:
-                                pass
-                            side = 'buy' if sig == 'LONG' else 'sell'
-                            order = market_order(ex, symbol, side, qty, False)
-                            event('TRADE', f'AUTOMATYCZNIE OTWARTO {sig} {symbol} qty={qty} id={order.get("id")}')
-            
-            st.success('Skanowanie zakończone!')
-            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-            
-        except Exception as e:
-            st.error(f'Błąd podczas skanowania: {e}')
-
 elif page == 'Dziennik':
-    st.subheader('Zdarzenia i zlecenia')
+    st.subheader('Zdarzenia i zlecenia bota')
     with db() as con: rows = con.execute('SELECT ts,level,message FROM events ORDER BY id DESC LIMIT 200').fetchall()
     if rows: st.dataframe(pd.DataFrame(rows, columns=['UTC', 'Poziom', 'Wiadomość']), use_container_width=True, hide_index=True)
     else: st.info('Brak zdarzeń.')
 
 else:
-    st.subheader('Panel tradingowy')
+    st.subheader('Panel tradingowy i analiza pojedynczej pary')
     a, b, c, d = st.columns(4)
     for col, title, value, sub in [(a, 'GIEŁDA', cfg['exchange'].upper(), cfg['market_type']), (b, 'PARA', cfg['symbol'], cfg['timeframe']), (c, 'STRATEGIA', f"EMA {cfg['ema_fast']}/{cfg['ema_slow']}", f"ADX ≥ {cfg['adx_threshold']:g}"), (d, 'RYZYKO / POZYCJĘ', f"{cfg['risk_usdt']:g} USDT", f"limit {cfg['max_positions']} pozycji")]:
         col.markdown(f'<div class="panel"><div class="metric-label">{title}</div><div class="metric-value">{value}</div><div class="muted">{sub}</div></div>', unsafe_allow_html=True)
@@ -514,3 +495,4 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
+
