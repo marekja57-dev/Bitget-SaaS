@@ -254,64 +254,129 @@ def _mtf_default_settings():
 
 
 def load_mtf_settings(user_id):
+    """Wczytuje ustawienia osobno dla każdego interwału, bez wspólnych wartości."""
     data = _mtf_default_settings()
+    if not user_id:
+        return data
+    conn = None
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=30000")
         row = conn.execute(
             "SELECT settings_json FROM user_mtf_settings WHERE user_id=?",
             (int(user_id),),
         ).fetchone()
-        conn.close()
         if not row or not row[0]:
             return data
         saved = json.loads(row[0])
         if not isinstance(saved, dict):
             return data
+
+        # Każdy interwał jest pobierany wyłącznie spod własnego klucza (np. "5m").
+        # Obsługujemy też starsze nazwy pól, aby nie zgubić wcześniej zapisanych danych.
         for tf in AVAILABLE_TIMEFRAMES:
-            src = saved.get(tf, {})
+            src = saved.get(tf)
             if not isinstance(src, dict):
                 continue
             dst = data[tf]
             mode = str(src.get("mode", dst["mode"]))
             dst["mode"] = "Ręczny" if mode == "Ręczny" else "Automatyczny"
-            dst["ema_fast"] = max(1, min(200, int(float(src.get("ema_fast", dst["ema_fast"])))) )
-            dst["ema_slow"] = max(2, min(300, int(float(src.get("ema_slow", dst["ema_slow"])))) )
-            if dst["ema_fast"] >= dst["ema_slow"]:
-                dst["ema_fast"], dst["ema_slow"] = dst["ema_slow"] - 1, dst["ema_slow"]
-            dst["min_adx"] = max(10.0, min(50.0, float(src.get("min_adx", src.get("adx", dst["min_adx"])))) )
-            dst["max_rsi"] = max(50.0, min(95.0, float(src.get("max_rsi", dst["max_rsi"]))))
-            dst["min_rsi"] = max(5.0, min(50.0, float(src.get("min_rsi", dst["min_rsi"]))))
-            dst["capital_multiplier"] = max(0.1, min(20.0, float(src.get("capital_multiplier", src.get("cap_mult", dst["capital_multiplier"])))) )
-    except Exception:
+            try:
+                fast = int(float(src.get("ema_fast", src.get("ema_f", dst["ema_fast"]))))
+                slow = int(float(src.get("ema_slow", src.get("ema_s", dst["ema_slow"]))))
+                fast = max(1, min(200, fast))
+                slow = max(2, min(300, slow))
+                # Nie przestawiaj obu wartości na domyślne; koryguj tylko konflikt fast >= slow.
+                if fast >= slow:
+                    if slow < 300:
+                        slow = fast + 1
+                    else:
+                        fast = slow - 1
+                dst["ema_fast"], dst["ema_slow"] = fast, slow
+                dst["min_adx"] = max(10.0, min(50.0, float(src.get("min_adx", src.get("adx", dst["min_adx"])))) )
+                dst["max_rsi"] = max(50.0, min(95.0, float(src.get("max_rsi", dst["max_rsi"]))))
+                dst["min_rsi"] = max(5.0, min(50.0, float(src.get("min_rsi", dst["min_rsi"]))))
+                dst["capital_multiplier"] = max(0.1, min(20.0, float(src.get("capital_multiplier", src.get("cap_mult", dst["capital_multiplier"])))) )
+            except (TypeError, ValueError, OverflowError):
+                # Wadliwy pojedynczy wpis nie nadpisuje ustawień innych interwałów.
+                continue
+    except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError):
         pass
+    finally:
+        if conn is not None:
+            conn.close()
     return data
 
 
 def save_mtf_settings(user_id, settings=None):
+    """Zapisuje pełny zestaw ustawień, zachowując niezależność każdego TF."""
+    if not user_id:
+        return False
+    conn = None
     try:
-        if settings is None:
-            settings = {}
+        # Najpierw zachowujemy zapisane ustawienia, żeby brakujący klucz w session_state
+        # nie zamienił się przypadkowo w wartość domyślną dla danego interwału.
+        payload = load_mtf_settings(int(user_id))
+        if isinstance(settings, dict):
             for tf in AVAILABLE_TIMEFRAMES:
-                settings[tf] = {
-                    "mode": st.session_state.get(f"radio_mode_{tf}", "Automatyczny"),
-                    "ema_fast": int(st.session_state.get(f"ema_f_{tf}", DEFAULT_TF_VALUES[tf]["ema_fast"])),
-                    "ema_slow": int(st.session_state.get(f"ema_s_{tf}", DEFAULT_TF_VALUES[tf]["ema_slow"])),
-                    "min_adx": float(st.session_state.get(f"adx_{tf}", DEFAULT_TF_VALUES[tf]["adx"])),
-                    "max_rsi": float(st.session_state.get(f"max_rsi_{tf}", DEFAULT_TF_VALUES[tf]["max_rsi"])),
-                    "min_rsi": float(st.session_state.get(f"min_rsi_{tf}", DEFAULT_TF_VALUES[tf]["min_rsi"])),
-                    "capital_multiplier": float(st.session_state.get(f"cap_mult_{tf}", DEFAULT_TF_VALUES[tf]["cap_mult"])),
+                incoming = settings.get(tf)
+                if isinstance(incoming, dict):
+                    payload[tf].update(incoming)
+        else:
+            for tf in AVAILABLE_TIMEFRAMES:
+                defaults = DEFAULT_TF_VALUES[tf]
+                # Osobne klucze Streamlit dla każdego TF; nie używaj wartości z innego interwału.
+                values = {
+                    "mode": st.session_state.get(f"radio_mode_{tf}", payload[tf]["mode"]),
+                    "ema_fast": st.session_state.get(f"ema_f_{tf}", payload[tf]["ema_fast"]),
+                    "ema_slow": st.session_state.get(f"ema_s_{tf}", payload[tf]["ema_slow"]),
+                    "min_adx": st.session_state.get(f"adx_{tf}", payload[tf]["min_adx"]),
+                    "max_rsi": st.session_state.get(f"max_rsi_{tf}", payload[tf]["max_rsi"]),
+                    "min_rsi": st.session_state.get(f"min_rsi_{tf}", payload[tf]["min_rsi"]),
+                    "capital_multiplier": st.session_state.get(f"cap_mult_{tf}", payload[tf]["capital_multiplier"]),
                     "tf": tf,
                 }
-        payload = {tf: dict(settings.get(tf, {})) for tf in AVAILABLE_TIMEFRAMES}
+                # Zapisuj tylko wartości prawidłowe, bez cichego resetowania pozostałych TF.
+                try:
+                    values["ema_fast"] = max(1, min(200, int(values["ema_fast"])))
+                    values["ema_slow"] = max(2, min(300, int(values["ema_slow"])))
+                    if values["ema_fast"] >= values["ema_slow"]:
+                        values["ema_slow"] = min(300, values["ema_fast"] + 1)
+                        if values["ema_fast"] >= values["ema_slow"]:
+                            values["ema_fast"] = values["ema_slow"] - 1
+                    values["min_adx"] = max(10.0, min(50.0, float(values["min_adx"])))
+                    values["max_rsi"] = max(50.0, min(95.0, float(values["max_rsi"])))
+                    values["min_rsi"] = max(5.0, min(50.0, float(values["min_rsi"])))
+                    values["capital_multiplier"] = max(0.1, min(20.0, float(values["capital_multiplier"])))
+                    values["mode"] = "Ręczny" if values["mode"] == "Ręczny" else "Automatyczny"
+                    payload[tf] = values
+                except (TypeError, ValueError, OverflowError):
+                    continue
+
+        # Normalizacja pól i wymuszenie prawidłowej etykiety TF.
+        normalized = {}
+        for tf in AVAILABLE_TIMEFRAMES:
+            src = payload.get(tf, {})
+            base = _mtf_default_settings()[tf]
+            item = dict(base)
+            if isinstance(src, dict):
+                item.update(src)
+            item["tf"] = tf
+            normalized[tf] = item
+
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute(
             """INSERT INTO user_mtf_settings(user_id,settings_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json, updated_at=excluded.updated_at""",
-            (int(user_id), json.dumps(payload, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")),
+            (int(user_id), json.dumps(normalized, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")),
         )
         conn.commit()
-        conn.close()
-    except Exception:
-        pass
+        return True
+    except (sqlite3.Error, TypeError, ValueError, OverflowError):
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def load_active_bots(user_id):
@@ -2432,12 +2497,11 @@ if futures_ex:
                             "Interwał": tf,
                             "Para": symbol,
                             "Cena": market_price,
-                            # W TABELI pokazujemy RZECZYWISTE, DYNAMICZNIE
-                            # OBLICZONE wartości EMA z zamkniętej świecy.
-                            # e_fast/e_slow są tylko okresami (np. 9/21);
-                            # nie wolno ich wyświetlać zamiast wartości wskaźnika.
-                            "EMA Szybka": round(ema_fast_value, 8),
-                            "EMA Wolna": round(ema_slow_value, 8),
+                            # W tabeli pokazujemy odchylenie EMA od ceny rynkowej
+                            # w procentach, a nie wartości EMA w jednostkach ceny.
+                            # 0% oznacza, że EMA jest dokładnie na poziomie ceny.
+                            "EMA Szybka (%)": round(((ema_fast_value / market_price) - 1.0) * 100.0, 4),
+                            "EMA Wolna (%)": round(((ema_slow_value / market_price) - 1.0) * 100.0, 4),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -3054,8 +3118,8 @@ if scan_results:
         "Interwał",
         "Para",
         "Cena",
-        "EMA Szybka",
-        "EMA Wolna",
+        "EMA Szybka (%)",
+        "EMA Wolna (%)",
         "ADX",
         "RSI",
         "Sygnał",
@@ -3070,8 +3134,8 @@ if scan_results:
         hide_index=True,
         column_config={
             "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
-            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka", format="%.8f"),
-            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna", format="%.8f"),
+            "EMA Szybka (%)": st.column_config.NumberColumn("EMA Szybka (%)", format="%.4f%%"),
+            "EMA Wolna (%)": st.column_config.NumberColumn("EMA Wolna (%)", format="%.4f%%"),
             "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
             "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
             "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
