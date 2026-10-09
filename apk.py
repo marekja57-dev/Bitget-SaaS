@@ -2523,8 +2523,10 @@ if futures_ex:
                             # W tabeli pokazujemy odchylenie EMA od ceny rynkowej
                             # w procentach, a nie wartości EMA w jednostkach ceny.
                             # 0% oznacza, że EMA jest dokładnie na poziomie ceny.
-                            "EMA Szybka (%)": round(((ema_fast_value / market_price) - 1.0) * 100.0, 4),
-                            "EMA Wolna (%)": round(((ema_slow_value / market_price) - 1.0) * 100.0, 4),
+                            # Pokazujemy rzeczywistą wartość EMA wyliczoną z cen zamknięcia
+                            # z okresami ustawionymi na suwakach dla tego interwału.
+                            "EMA Szybka": round(ema_fast_value, 8),
+                            "EMA Wolna": round(ema_slow_value, 8),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -3133,16 +3135,15 @@ st.subheader(
 )
 
 if scan_results:
-    # Jedna tabela skanera. EMA Szybka/Wolna pokazują RZECZYWISTE
-    # wartości EMA z zamkniętej świecy dla konkretnej pary i interwału.
-    # Okresy (np. 9/21 albo 15/34) są tylko parametrami obliczenia i
-    # NIGDY nie są wpisywane do kolumn EMA.
+    # Jedna tabela skanera. EMA Szybka/Wolna pokazują rzeczywiste
+    # wartości EMA z zamkniętej świecy, liczone okresami ustawionymi
+    # na suwakach dla danego interwału (nie procentowe odchylenie).
     scanner_columns = [
         "Interwał",
         "Para",
         "Cena",
-        "EMA Szybka (%)",
-        "EMA Wolna (%)",
+        "EMA Szybka",
+        "EMA Wolna",
         "ADX",
         "RSI",
         "Sygnał",
