@@ -32,7 +32,7 @@ DEFAULTS = {
     },
     'auto_refresh': True, 'refresh_seconds': 30, 'auto_trade': False, 'paper_mode': True,
     'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 20,
-    'indicator_multiplier': 100 # procentowy suwak adaptacji wskaźników
+    'indicator_multiplier': 100
 }
 
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
@@ -167,14 +167,12 @@ def indicators(df, fast, slow):
 def get_effective_tf_cfg(cfg, tf):
     base_tf_cfg = cfg.get('tf_settings', {}).get(tf, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
     mult = float(cfg.get('indicator_multiplier', 100)) / 100.0
-    
-    # Skalowanie automatyczne przez suwak procentowy
     return {
         'ema_fast': max(2, int(round(base_tf_cfg['ema_fast'] * mult))),
         'ema_slow': max(3, int(round(base_tf_cfg['ema_slow'] * mult))),
-        'adx_threshold': max(5.0, min(90.0, base_tf_cfg['adx_threshold'] * mult)),
-        'rsi_min': max(5.0, min(45.0, base_tf_cfg['rsi_min'] * mult)),
-        'rsi_max': max(55.0, min(95.0, base_tf_cfg['rsi_max'] * mult))
+        'adx_threshold': max(2.0, min(90.0, base_tf_cfg['adx_threshold'] * mult)),
+        'rsi_min': max(2.0, min(45.0, base_tf_cfg['rsi_min'] * mult)),
+        'rsi_max': max(55.0, min(98.0, base_tf_cfg['rsi_max'] * mult))
     }
 
 def signal_for_symbol(cfg, symbol, tf):
@@ -384,7 +382,7 @@ elif page == 'Ustawienia Strategii':
             cfg['market_type'] = st.selectbox('Rynek', ['swap', 'future'], index=0 if cfg['market_type'] == 'swap' else 1)
             cfg['scan_limit_count'] = st.slider('Suwak limitu skanowanych par z giełdy', 5, 50, int(cfg.get('scan_limit_count', 20)))
             cfg['timeframes'] = st.multiselect('Interwały do skanowania w tle', TF_OPTIONS, default=[x for x in cfg.get('timeframes', ['15m']) if x in TF_OPTIONS] or ['15m'])
-            cfg['indicator_multiplier'] = st.slider('Automatyczny multiplikator wskaźników (%)', 50, 200, int(cfg.get('indicator_multiplier', 100)), help="Globalnie skaluje bazowe ustawienia EMA, RSI i ADX dla wszystkich interwałów.")
+            cfg['indicator_multiplier'] = st.slider('Automatyczny multiplikator wskaźników (%)', 0, 100, int(cfg.get('indicator_multiplier', 60)), help="Skala od 0 do 100% określająca stopień automatycznego dostrajania wskaźników przez bota.")
         with b:
             cfg['risk_usdt'] = st.number_input('Maks. ryzyko na pozycję (USDT)', 1.0, 10000.0, float(cfg['risk_usdt']))
             cfg['max_positions'] = st.number_input('Maks. otwarte pozycje (sloty)', 1, 20, int(cfg['max_positions']))
@@ -395,7 +393,7 @@ elif page == 'Ustawienia Strategii':
             cfg['allow_short'] = st.checkbox('Pozwól na SHORT', cfg['allow_short'])
         
         st.markdown('---')
-        st.markdown(f'### Bazowa konfiguracja dla interwału: {selected_tf_tab} (przed skalowaniem multiplikatorem)')
+        st.markdown(f'### Bazowa konfiguracja dla interwału: {selected_tf_tab}')
         
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1: f_fast = st.number_input(f'EMA szybka ({selected_tf_tab})', 2, 100, int(base_tf_cfg.get('ema_fast', 9)))
@@ -408,7 +406,7 @@ elif page == 'Ustawienia Strategii':
     if submitted:
         cfg['tf_settings'][selected_tf_tab] = {'ema_fast': f_fast, 'ema_slow': f_slow, 'adx_threshold': f_adx, 'rsi_min': f_rmin, 'rsi_max': f_rmax}
         save_cfg(cfg)
-        st.success(f'Zapisano parametry dla interwału {selected_tf_tab} oraz multiplikator automatyczny!')
+        st.success(f'Zapisano parametry dla interwału {selected_tf_tab}!')
         st.rerun()
 
 elif page == 'Połączenie API':
@@ -541,4 +539,3 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
-
