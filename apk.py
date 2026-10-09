@@ -11,6 +11,7 @@ except ImportError:
 
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv('BITGET_SAAS_DB', APP_DIR / 'bitget_saas.db'))
+DB_FILE = DB_PATH
 LOG_PATH = APP_DIR / 'trading.log'
 
 logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -260,6 +261,30 @@ if 'authenticated' not in st.session_state:
     st.session_state['user_id'] = None
     st.session_state['stripe_paid'] = 0
     st.session_state['user_email'] = ''
+    st.session_state['logged_in'] = False
+
+# ========================================================
+# OBSŁUGA POWROTU ZE STRIPE (z Twoich zdjęć)
+# ========================================================
+if st.query_params.get("success") == "true":
+    if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+        st.session_state.stripe_paid = True
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
+            cursor = conn.cursor()
+            cursor.execute(
+                """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
+                (st.session_state.user_id,),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        st.success(
+            "🎉 Płatność zakończona sukcesem! "
+            "Twoja subskrypcja została aktywowana."
+        )
+        st.query_params.clear()
 
 if not st.session_state['authenticated']:
     st.markdown('<div class="brand-retro">Bitget-SaaS</div><div class="subbrand-retro">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
@@ -277,6 +302,7 @@ if not st.session_state['authenticated']:
                     row = c.execute("SELECT id, password, stripe_paid, email, username FROM users WHERE username=? OR email=?", (l_user, l_user)).fetchone()
                 if row and row[1] == l_pass:
                     st.session_state['authenticated'] = True
+                    st.session_state['logged_in'] = True
                     st.session_state['user_id'] = row[0]
                     st.session_state['password'] = row[1]
                     st.session_state['stripe_paid'] = row[2]
@@ -344,6 +370,7 @@ with st.sidebar:
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
         st.session_state['authenticated'] = False
+        st.session_state['logged_in'] = False
         st.session_state['username'] = ''
         st.rerun()
     if st.button('Wyczyść cache danych', use_container_width=True):
