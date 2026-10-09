@@ -31,12 +31,10 @@ LOG_PATH = APP_DIR / "trading.log"
 logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-# Produkcyjny Payment Link skopiowany z panelu Stripe ze zdj\u0119cia.
-# Mo\u017cna go nadpisa\u0107 zmienn\u0105 \u015brodowiskow\u0105 STRIPE_CHECKOUT_FALLBACK.
-STRIPE_CHECKOUT_FALLBACK = os.getenv(
-    "STRIPE_CHECKOUT_FALLBACK",
-    ",https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
-)
+# Produkcyjny Stripe Payment Link podany przez użytkownika.
+# Celowo nie pobieramy go ze zmiennej środowiskowej: stara lub pusta
+# wartość STRIPE_CHECKOUT_FALLBACK na serwerze nadpisywała poprawny adres.
+STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
@@ -651,4 +649,3 @@ elif page == "Panel Sesji i Kapita\u0142u":
             st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
         except Exception as exc:
             st.error(f"Kill switch nie powi\u00f3d\u0142 si\u0119: {exc}")
-
