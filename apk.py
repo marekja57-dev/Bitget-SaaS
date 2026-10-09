@@ -18,7 +18,7 @@ logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s %
 DEFAULTS = {
     'exchange': 'bitget', 'market_type': 'swap', 'candle_limit': 180,
     'refresh_seconds': 30, 'risk_usdt': 10.0, 'max_positions': 3, 'max_leverage': 10, 'sl_roe': 20.0, 'tp_roe': 40.0, 'enable_roe': True,
-    'timeframes': ['15m', '1h', '4h', '1d'],
+    'timeframes': ['4h', '1d'],
     'tf_settings': {
         '1m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
         '3m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
@@ -101,26 +101,25 @@ def db():
     c.execute('CREATE TABLE IF NOT EXISTS credentials (k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
     
-    # Automatyczne dodanie brakujących kolumn w starszych bazach danych
     cursor = c.cursor()
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'email' not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
-    if 'stripe_paid' not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN stripe_paid INTEGER DEFAULT 0")
-    c.commit()
-    return c
-    c = sqlite3.connect(DB_PATH, timeout=15)
-    c.execute('PRAGMA journal_mode=WAL')
-    c.execute('PRAGMA busy_timeout=15000')
-    c.execute('CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
-    c.execute('CREATE TABLE IF NOT EXISTS credentials (k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    table_exists = cursor.fetchone()
+    
+    if not table_exists:
+        c.execute('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
+    else:
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'id' not in columns:
+            cursor.execute("DROP TABLE users")
+            c.commit()
+            c.execute('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
+        else:
+            if 'email' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            if 'stripe_paid' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN stripe_paid INTEGER DEFAULT 0")
     c.commit()
     return c
 
@@ -244,11 +243,13 @@ def balance_usdt(ex):
     row = b.get('USDT') or {}
     return float(row.get('free') or 0), float(row.get('total') or 0)
 
-def is_user_paid():
-    return bool(st.session_state.get('stripe_paid', 0))
-
 def is_user_admin():
-    return st.session_state.get('username') == 'admin'
+    email = str(st.session_state.get('user_email', '')).strip().lower()
+    uname = str(st.session_state.get('username', '')).strip().lower()
+    return email == 'marekja57@wp.pl' or uname == 'admin'
+
+def is_user_paid():
+    return bool(st.session_state.get('stripe_paid', 0)) or is_user_admin()
 
 def create_stripe_checkout_session(email, price_id):
     return f"https://checkout.stripe.com/pay/{price_id}?client_reference_id={email}"
@@ -268,18 +269,19 @@ if not st.session_state['authenticated']:
     with tab_login:
         st.subheader("Logowanie do systemu")
         with st.form("login_form"):
-            l_user = st.text_input("Nazwa użytkownika")
+            l_user = st.text_input("Nazwa użytkownika / E-mail")
             l_pass = st.text_input("Hasło", type="password")
             submit_login = st.form_submit_button("ZALOGUJ SIĘ", use_container_width=True)
             if submit_login:
                 with db() as c:
-                    row = c.execute("SELECT id, password, stripe_paid, email FROM users WHERE username=?", (l_user,)).fetchone()
+                    row = c.execute("SELECT id, password, stripe_paid, email, username FROM users WHERE username=? OR email=?", (l_user, l_user)).fetchone()
                 if row and row[1] == l_pass:
                     st.session_state['authenticated'] = True
-                    st.session_state['username'] = l_user
                     st.session_state['user_id'] = row[0]
+                    st.session_state['password'] = row[1]
                     st.session_state['stripe_paid'] = row[2]
-                    st.session_state['user_email'] = row[3] or f"{l_user}@bitget-saas.local"
+                    st.session_state['user_email'] = row[3] or f"{l_user}@wp.pl"
+                    st.session_state['username'] = row[4]
                     st.success("Zalogowano pomyślnie!")
                     st.rerun()
                 else:
@@ -289,7 +291,7 @@ if not st.session_state['authenticated']:
         st.subheader("Rejestracja użytkownika i subskrypcja (49 PLN / mies.)")
         with st.form("reg_form"):
             r_user = st.text_input("Nazwa użytkownika")
-            r_email = st.text_input("Adres E-mail", value="user@example.com")
+            r_email = st.text_input("Adres E-mail", value="marekja57@wp.pl")
             r_pass = st.text_input("Hasło", type="password")
             r_sub = st.selectbox("Wybierz subskrypcję", ["Pro Trader (49 PLN / miesiąc)", "VIP SaaS (Roczny)"])
             submit_reg = st.form_submit_button("ZAREJESTRUJ SIĘ", use_container_width=True)
@@ -314,40 +316,25 @@ with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
     page = st.radio('NAWIGACJA', ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
     
-    # ========================================================
-    # SUBSKRYPCJA / STRIPE (z Twojego kodu źródłowego)
-    # ========================================================
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Status Subskrypcji (49 PLN)")
     
-    if is_user_admin() or is_user_paid():
+    if is_user_admin():
+        st.sidebar.success("Administrator (Pełny Dostęp)")
+    elif is_user_paid():
         st.sidebar.success("Subskrypcja aktywna (Pro)")
     else:
         st.sidebar.warning("Subskrypcja nieopłacona")
-        
-    checkout_url = create_stripe_checkout_session(
-        st.session_state.get("user_email", "user@bitget.local"),
-        STRIPE_PRICE_ID_VAL,
-    )
-    st.sidebar.link_button(
-        "OPŁAĆ SUBSKRYPCJĘ (49 PLN)",
-        checkout_url,
-        use_container_width=True,
-    )
+        checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID_VAL)
+        st.sidebar.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
     
-    if ALLOW_TEST_ACTIVATION:
-        if st.sidebar.button(
-            "⚡ [TEST] Aktywuj dostęp natychmiast",
-            use_container_width=True,
-        ):
+    if ALLOW_TEST_ACTIVATION and not is_user_admin():
+        if st.sidebar.button("⚡ [TEST] Aktywuj dostęp natychmiast", use_container_width=True):
             st.session_state['stripe_paid'] = 1
             try:
                 with db() as conn:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE users SET stripe_paid = 1 WHERE id = ?",
-                        (st.session_state.user_id,),
-                    )
+                    cursor.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (st.session_state.user_id,))
                     conn.commit()
             except Exception:
                 pass
@@ -617,3 +604,4 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
+
