@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 import streamlit as st
+
 try:
     import ccxt
 except ImportError:
@@ -39,18 +40,18 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# KONFIGURACJA STRIPE (Zgodna ze zdjęciami)
+# KONFIGURACJA STRIPE (Zaktualizowana ze zdjęć)
 # ========================================================
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "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")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_live_51UCp3eKe18kT9JGHZVz9RGb1VSUvyuaKfQ49DDvXymKf8IDjIgHy04wfpaDnqSWQKvGbXcQ2yhnPJx2id608wLa800mN6pFhEA")
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
     "STRIPE_CHECKOUT_FALLBACK",
-    "https://buy.stripe.com/8x2dRa4CbdaXfSAF6V3oA03",
-)
+    "https://buy.stripe.com/00w0kecL1sfbck0c13oA00",)
+
 
 try:
     STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY)
-    STRIPE_PRICE_ID = st.secrets.get("STRIPE_PRICE_ID", STRIPE_PRICE_ID)
+    STRIPE_PUBLISHABLE_KEY = st.secrets.get("STRIPE_PUBLISHABLE_KEY", STRIPE_PUBLISHABLE_KEY)
     STRIPE_CHECKOUT_FALLBACK = st.secrets.get("STRIPE_CHECKOUT_FALLBACK", STRIPE_CHECKOUT_FALLBACK)
 except Exception:
     pass
@@ -62,10 +63,10 @@ if STRIPE_SECRET_KEY:
     except ImportError:
         pass
 
-def create_stripe_checkout_session(email, price_id):
+def create_stripe_checkout_session(email, price_id=None):
     if STRIPE_CHECKOUT_FALLBACK:
         return f"{STRIPE_CHECKOUT_FALLBACK}?client_reference_id={email}"
-    return f"https://checkout.stripe.com/pay/{price_id}?client_reference_id={email}"
+    return f"https://buy.stripe.com/00w0kecL1sfbck0c13oA00?client_reference_id={email}"
 
 CSS = '''
 <style>
@@ -74,7 +75,6 @@ CSS = '''
 [data-testid="stHeader"] { background: rgba(3,12,29,.85); }
 [data-testid="stSidebar"] { background: linear-gradient(180deg, #06152d, #081f42); border-right: 1px solid #164a84; }
 .block-container { padding-top: 1.2rem; max-width: 1600px; }
-
 .brand-retro {
     font-weight: 900;
     font-size: 38px;
@@ -93,7 +93,6 @@ CSS = '''
     text-align: center;
     margin-bottom: 20px;
 }
-
 .brand { font-weight: 900; letter-spacing: -1px; font-size: 29px; color: #eaf5ff; }
 .brand span { color: #28a8ff; }
 .subbrand { color: #7da9d8; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
@@ -129,11 +128,11 @@ def db():
     c.execute('CREATE TABLE IF NOT EXISTS credentials (k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
-    
+
     cursor = c.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
     table_exists = cursor.fetchone()
-    
+
     if not table_exists:
         c.execute('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
     else:
@@ -148,16 +147,16 @@ def db():
                 cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
             if 'stripe_paid' not in columns:
                 cursor.execute("ALTER TABLE users ADD COLUMN stripe_paid INTEGER DEFAULT 0")
-    c.commit()
+            c.commit()
     return c
 
 def load_cfg():
     out = DEFAULTS.copy()
     with db() as c:
         r = c.execute('SELECT v FROM settings WHERE k="main"').fetchone()
-    if r:
-        try: out.update(json.loads(r[0]))
-        except Exception: pass
+        if r:
+            try: out.update(json.loads(r[0]))
+            except Exception: pass
     return out
 
 def save_cfg(cfg):
@@ -235,13 +234,10 @@ def signal_for_symbol(cfg, symbol, tf):
         long_ok = cfg['allow_long'] and trend_up and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close > r.ema_fast
         short_ok = cfg['allow_short'] and trend_down and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close < r.ema_fast
         
-        if long_ok:
-            sig = 'LONG'
-        elif short_ok:
-            sig = 'SHORT'
-        else:
-            sig = 'NEUTRALNY'
-            
+        if long_ok: sig = 'LONG'
+        elif short_ok: sig = 'SHORT'
+        else: sig = 'NEUTRALNY'
+        
         return {'symbol': symbol, 'tf': tf, 'signal': sig, 'price': float(r.close), 'adx': float(r.adx), 'rsi': float(r.rsi), 'reason': 'OK'}
     except Exception as e:
         return {'symbol': symbol, 'tf': tf, 'signal': 'BŁĄD', 'reason': str(e)[:100]}
@@ -296,19 +292,13 @@ if st.query_params.get("success") == "true":
         try:
             conn = sqlite3.connect(DB_FILE, timeout=30.0)
             cursor = conn.cursor()
-            cursor.execute(
-                """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
-                (st.session_state.user_id,),
-            )
+            cursor.execute(""" UPDATE users SET stripe_paid = 1 WHERE id = ? """, (st.session_state.user_id,))
             conn.commit()
             conn.close()
         except Exception:
             pass
-        st.success(
-            "🎉 Płatność zakończona sukcesem! "
-            "Twoja subskrypcja została aktywowana."
-        )
-        st.query_params.clear()
+    st.success("🎉 Płatność zakończona sukcesem! Twoja subskrypcja została aktywowana.")
+    st.query_params.clear()
 
 if not st.session_state['authenticated']:
     st.markdown('<div class="brand-retro">Bitget-SaaS</div><div class="subbrand-retro">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
@@ -324,19 +314,19 @@ if not st.session_state['authenticated']:
             if submit_login:
                 with db() as c:
                     row = c.execute("SELECT id, password, stripe_paid, email, username FROM users WHERE username=? OR email=?", (l_user, l_user)).fetchone()
-                if row and row[1] == l_pass:
-                    st.session_state['authenticated'] = True
-                    st.session_state['logged_in'] = True
-                    st.session_state['user_id'] = row[0]
-                    st.session_state['password'] = row[1]
-                    st.session_state['stripe_paid'] = row[2]
-                    st.session_state['user_email'] = row[3] or f"{l_user}@wp.pl"
-                    st.session_state['username'] = row[4]
-                    st.success("Zalogowano pomyślnie!")
-                    st.rerun()
-                else:
-                    st.error("Nieprawidłowy login lub hasło.")
-
+                    if row and row[1] == l_pass:
+                        st.session_state['authenticated'] = True
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_id'] = row[0]
+                        st.session_state['password'] = row[1]
+                        st.session_state['stripe_paid'] = row[2]
+                        st.session_state['user_email'] = row[3] or f"{l_user}@wp.pl"
+                        st.session_state['username'] = row[4]
+                        st.success("Zalogowano pomyślnie!")
+                        st.rerun()
+                    else:
+                        st.error("Nieprawidłowy login lub hasło.")
+                        
     with tab_reg:
         st.subheader("Rejestracja użytkownika i subskrypcja (49 PLN / mies.)")
         with st.form("reg_form"):
@@ -380,9 +370,9 @@ with st.sidebar:
         st.sidebar.success("Subskrypcja aktywna (Pro)")
     else:
         st.sidebar.warning("Subskrypcja nieopłacona")
-        checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID)
+        checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"))
         st.sidebar.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
-            
+        
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
         st.session_state['authenticated'] = False
@@ -409,7 +399,7 @@ if page == 'Automatyczny Skaner i Auto-Handel':
             save_cfg(cfg)
             st.success('Zapisano tryb pracy bota.')
             st.rerun()
-
+            
     st.markdown('---')
     st.markdown('### Status i uruchomienie skanowania')
     
@@ -448,13 +438,13 @@ if page == 'Automatyczny Skaner i Auto-Handel':
                             side = 'buy' if sig == 'LONG' else 'sell'
                             order = market_order(ex, symbol, side, qty, False)
                             event('TRADE', f'AUTOMATYCZNIE OTWARTO {sig} {symbol} [{tf}] qty={qty} id={order.get("id")}')
-        
+                            
         st.success('Cykl skanowania zakończony pomyślnie!')
         st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
         
     except Exception as e:
         st.error(f'Błąd podczas skanowania giełdy: {e}')
-
+        
     if cfg.get('auto_refresh') and cfg.get('auto_trade'):
         sec = int(cfg.get('refresh_seconds', 30))
         st.warning(f'Bot działa w pętli automatycznej. Kolejny skan za {sec} sekund...')
@@ -469,20 +459,19 @@ elif page == 'Ustawienia Strategii':
         
     if 'selected_tf_edit' not in st.session_state:
         st.session_state['selected_tf_edit'] = '1d'
-
+        
     def update_tf_selection():
         st.session_state['selected_tf_edit'] = st.session_state['tf_selectbox_key']
-
+        
     selected_tf_tab = st.selectbox(
-        'Wybierz interwał do edycji parametrów bazowych', 
-        TF_OPTIONS, 
+        'Wybierz interwał do edycji parametrów bazowych',
+        TF_OPTIONS,
         index=TF_OPTIONS.index(st.session_state['selected_tf_edit']) if st.session_state['selected_tf_edit'] in TF_OPTIONS else 8,
         key='tf_selectbox_key',
         on_change=update_tf_selection
     )
-
     base_tf_cfg = cfg['tf_settings'].get(selected_tf_tab, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
-
+    
     with st.form('cfgform'):
         a, b = st.columns(2)
         with a:
@@ -499,7 +488,7 @@ elif page == 'Ustawienia Strategii':
             cfg['tp_roe'] = st.number_input('Take-profit ROE (%)', 1.0, 500.0, float(cfg['tp_roe']))
             cfg['allow_long'] = st.checkbox('Pozwól na LONG', cfg['allow_long'])
             cfg['allow_short'] = st.checkbox('Pozwól na SHORT', cfg['allow_short'])
-        
+            
         st.markdown('---')
         st.markdown(f'### Bazowa konfiguracja dla interwału: {selected_tf_tab}')
         
@@ -509,13 +498,13 @@ elif page == 'Ustawienia Strategii':
         with c3: f_adx = st.number_input(f'Min. ADX ({selected_tf_tab})', 0.0, 100.0, float(base_tf_cfg.get('adx_threshold', 25.0)))
         with c4: f_rmin = st.number_input(f'RSI min ({selected_tf_tab})', 0.0, 100.0, float(base_tf_cfg.get('rsi_min', 25.0)))
         with c5: f_rmax = st.number_input(f'RSI max ({selected_tf_tab})', 0.0, 100.0, float(base_tf_cfg.get('rsi_max', 75.0)))
-            
+        
         submitted = st.form_submit_button(f'ZAPISZ USTAWIENIA DLA {selected_tf_tab}', use_container_width=True)
-    if submitted:
-        cfg['tf_settings'][selected_tf_tab] = {'ema_fast': f_fast, 'ema_slow': f_slow, 'adx_threshold': f_adx, 'rsi_min': f_rmin, 'rsi_max': f_rmax}
-        save_cfg(cfg)
-        st.success(f'Zapisano parametry dla interwału {selected_tf_tab}!')
-        st.rerun()
+        if submitted:
+            cfg['tf_settings'][selected_tf_tab] = {'ema_fast': f_fast, 'ema_slow': f_slow, 'adx_threshold': f_adx, 'rsi_min': f_rmin, 'rsi_max': f_rmax}
+            save_cfg(cfg)
+            st.success(f'Zapisano parametry dla interwału {selected_tf_tab}!')
+            st.rerun()
 
 elif page == 'Połączenie API':
     st.subheader('Połączenie giełdowe')
@@ -525,11 +514,12 @@ elif page == 'Połączenie API':
         s = st.text_input('API Secret', value=secret, type='password')
         pw = st.text_input('Passphrase (Bitget/OKX)', value=password, type='password')
         save = st.form_submit_button('ZAPISZ DANE API')
-    if save:
-        save_creds(ex, k.strip(), s.strip(), pw.strip())
-        exchange_client.clear()
-        st.success('Dane zapisane.')
-        st.rerun()
+        if save:
+            save_creds(ex, k.strip(), s.strip(), pw.strip())
+            exchange_client.clear()
+            st.success('Dane zapisane.')
+            st.rerun()
+            
     if st.button('Testuj API / pobierz saldo'):
         try:
             ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
@@ -549,53 +539,30 @@ elif page == 'Dziennik':
 
 elif page == 'Regulamin & Instrukcja Obsługi':
     st.subheader('Regulamin Serwisu SaaS oraz Instrukcja Obsługi')
-    
     tab_instrukcja, tab_regulamin = st.tabs(["📖 Instrukcja Obsługi (Krok po Kroku)", "📜 Regulamin i Warunki Świadczenia Usług"])
     
     with tab_instrukcja:
         st.markdown("""
         ### Jak w pełni skonfigurować i uruchomić Bitget-SaaS?
-
-        1. **Założenie konta i Subskrypcja:**
+        1. Założenie konta i Subskrypcja:
            - Zarejestruj się w systemie podając swój unikalny login i e-mail.
-           - Opłacaj subskrypcję (49 PLN/miesięcznie), aby aktywować pełny dostęp do automatycznego skanera giełdowego i auto-handlu.
-        
-        2. **Konfiguracja API na giełdzie (np. Bitget / Bybit):**
-           - Zaloguj się na swoje konto giełdowe i przejdź do zakładki **API Management**.
-           - Utwórz nowy klucz API z uprawnieniami do **handlu futures (Futures Trading)** oraz **odczytu danych (Read-only)**. Pamiętaj, aby **wyłączyć uprawnienia do wypłat (Withdrawals)** dla bezpieczeństwa!
-           - Skopiuj `API Key`, `Secret Key` oraz `Passphrase` (jeśli dotyczy) i wklej je w zakładce **Połączenie API** w aplikacji, a następnie kliknij *Zapisz dane API*.
-        
-        3. **Ustawienie parametrów ryzyka:**
-           - Przejdź do zakładki **Ustawienia Strategii**, gdzie możesz dostosować wielkość pozycji, dźwignię, limity oraz wskaźniki (EMA, RSI, ADX) dla poszczególnych interwałów czasowych.
-        
-        4. **Testowanie i Uruchomienie Auto-Handlu:**
-           - Na początku zaleca się uruchomienie bota w **trybie symulacji (PAPER MODE)** w zakładce *Automatyczny Skaner i Auto-Handel*, aby sprawdzić sygnały generowane przez algorytm bez ryzykowania realnych środków.
-           - Gdy upewnisz się, że wszystko działa prawidłowo, wyłącz tryb Paper, włącz Auto-Trade i pozwól botowi zarządzać portfelem w tle!
+           - Opłać subskrypcję (49 PLN/miesięcznie) poprzez przycisk w panelu bocznym, aby aktywować pełny dostęp do automatycznego skanera giełdowego i auto-handlu.
+        2. Konfiguracja API na giełdzie (np. Bitget / Bybit):
+           - Utwórz nowy klucz API z uprawnieniami do handlu futures (Futures Trading) oraz odczytu.
+           - Skopiuj `API Key`, `Secret Key` oraz `Passphrase` i wklej je w zakładce Połączenie API.
+        3. Ustawienie parametrów ryzyka i Uruchomienie Auto-Handlu.
         """)
-
     with tab_regulamin:
         st.markdown("""
         ### REGULAMIN KORZYSTANIA Z SERWISU BITGET-SAAS FUTURES
-
-        **§ 1. Postanowienia ogólne**
-        1. Niniejszy Regulamin określa zasady korzystania z platformy programowej Bitget-SaaS Futures (zwanej dalej „Serwisem”).
-        2. Korzystanie z Serwisu jest możliwe po uprzedniej rejestracji, utworzeniu konta użytkownika oraz opłaceniu abonamentu w wysokości 49 PLN miesięcznie (lub odpowiednika rocznego).
-        3. Właściciel Serwisu zastrzega sobie prawo do zablokowania lub usunięcia kont użytkowników naruszających niniejszy Regulamin lub próbujących uzyskać nielicencjonowany dostęp do zasobów (np. ominięcie płatności subskrypcji).
-
-        **§ 2. Charakter usług i Ostrzeżenie o ryzyku (Disclaimer)**
-        1. Serwis dostarcza oprogramowanie narzędziowe (bot transakcyjny) działające w oparciu o interfejsy API zewnętrznych giełd kryptowalut.
-        2. Oprogramowanie ma charakter wyłącznie ankietowy, informacyjny i automatyzujący. **Właściciel Serwisu nie świadczy doradztwa finansowego, inwestycyjnego ani podatkowego.**
-        3. Handel instrumentami pochodnymi (Futures) z użyciem dźwigni finansowej wiąże się z bardzo wysokim ryzykiem utraty kapitału. Użytkownik korzysta z bota na własną wyłączną odpowiedzialność i ryzyko. Właściciel Serwisu nie ponosi żadnej odpowiedzialności za straty finansowe poniesione na giełdach kryptowalut.
-
-        **§ 3. Subskrypcje i Płatności**
-        1. Dostęp do pełnej funkcjonalności autohandlu wymaga aktywnej i opłaconej subskrypcji.
-        2. Płatności realizowane są za pośrednictwem zewnętrznych operatorów płatności (np. Stripe).
-        3. W przypadku braku opłacenia subskrypcji dostęp do funkcji automatycznego handlu zostanie wstrzymany do momentu uregulowania płatności.
+        § 1. Postanowienia ogólne
+        1. Niniejszy Regulamin określa zasady korzystania z platformy programowej Bitget-SaaS Futures.
+        2. Korzystanie z Serwisu wymaga rejestracji oraz opłacenia abonamentu w wysokości 49 PLN miesięcznie.
         """)
 
 elif page == 'Panel Administratora (Subskrybenci)':
     st.subheader('Panel Zarządzania Użytkownikami i Subskrypcjami')
-    st.write('Lista wszystkich zarejestrowanych osób w systemie. Możesz kontrolować status subskrypcji oraz blokować dostęp.')
+    st.write('Lista wszystkich zarejestrowanych osób w systemie.')
     
     with db() as conn:
         users_rows = conn.execute("SELECT id, username, email, subscription, stripe_paid FROM users").fetchall()
@@ -608,7 +575,7 @@ elif page == 'Panel Administratora (Subskrybenci)':
         with st.form("admin_manage_form"):
             selected_user_id = st.selectbox("Wybierz ID użytkownika do edycji", df_users['ID'].tolist())
             action = st.selectbox("Akcja", ["Nadaj/Włącz subskrypcję PRO (stripe_paid = 1)", "Zablokuj/Odbierz subskrypcję (stripe_paid = 0)", "Usuń całkowicie użytkownika z bazy"])
-            submit_admin_action = st.form_submit_button("WYKONaj AKCJĘ", use_container_width=True)
+            submit_admin_action = st.form_submit_button("WYKONAJ AKCJĘ", use_container_width=True)
             
             if submit_admin_action:
                 with db() as conn:
@@ -625,7 +592,7 @@ elif page == 'Panel Administratora (Subskrybenci)':
                         cur.execute("DELETE FROM users WHERE id = ?", (selected_user_id,))
                         conn.commit()
                         st.error(f"Usunięto użytkownika ID {selected_user_id} z bazy.")
-                st.rerun()
+                    st.rerun()
     else:
         st.info('Brak zarejestrowanych użytkowników w bazie.')
 
@@ -646,45 +613,44 @@ else:
             free_bal = max(0.0, total_bal - used_margin)
     except Exception:
         pass
-
+        
     max_slots = int(cfg['max_positions'])
     free_slots = max(0, max_slots - active_slots)
-
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown(f'''
         <div class="panel">
-            <div class="metric-label">Kapitał / Saldo Całkowite</div>
-            <div class="metric-value">{total_bal:.2f} USDT</div>
-            <div class="muted">Wolne: {free_bal:.2f} USDT</div>
+        <div class="metric-label">Kapitał / Saldo Całkowite</div>
+        <div class="metric-value">{total_bal:.2f} USDT</div>
+        <div class="muted">Wolne: {free_bal:.2f} USDT</div>
         </div>
         ''', unsafe_allow_html=True)
     with col2:
         st.markdown(f'''
         <div class="panel">
-            <div class="metric-label">Sloty Pozycji</div>
-            <div class="metric-value">{active_slots} / {max_slots}</div>
-            <div class="muted">Wolne sloty: {free_slots}</div>
+        <div class="metric-label">Sloty Pozycji</div>
+        <div class="metric-value">{active_slots} / {max_slots}</div>
+        <div class="muted">Wolne sloty: {free_slots}</div>
         </div>
         ''', unsafe_allow_html=True)
     with col3:
         pnl_color = "#28a8ff" if session_pnl >= 0 else "#ff4d4d"
         st.markdown(f'''
         <div class="panel">
-            <div class="metric-label">Wynik Sesji (PnL)</div>
-            <div class="metric-value" style="color: {pnl_color};">{session_pnl:+.2f} USDT</div>
-            <div class="muted">Niezrealizowany PnL</div>
+        <div class="metric-label">Wynik Sesji (PnL)</div>
+        <div class="metric-value" style="color: {pnl_color};">{session_pnl:+.2f} USDT</div>
+        <div class="muted">Niezrealizowany PnL</div>
         </div>
         ''', unsafe_allow_html=True)
     with col4:
         st.markdown(f'''
         <div class="panel">
-            <div class="metric-label">Status Autopilota</div>
-            <div class="metric-value">{"WŁĄCZONY" if cfg["auto_trade"] else "WYŁĄCZONY"}</div>
-            <div class="muted">Tryb: {"PAPER" if cfg["paper_mode"] else "LIVE"}</div>
+        <div class="metric-label">Status Autopilota</div>
+        <div class="metric-value">{"WŁĄCZONY" if cfg["auto_trade"] else "WYŁĄCZONY"}</div>
+        <div class="muted">Tryb: {"PAPER" if cfg["paper_mode"] else "LIVE"}</div>
         </div>
         ''', unsafe_allow_html=True)
-
+        
     st.write('')
     st.divider()
     st.markdown('### Bieżące aktywne pozycje na giełdzie')
@@ -707,7 +673,7 @@ else:
             st.info('Skonfiguruj dane API, aby podglądać aktywne pozycje na żywo.')
     except Exception as e:
         st.warning(f'Nie udało się pobrać pozycji z giełdy: {e}')
-
+        
     st.divider()
     st.markdown('### Awaryjne zamknięcie wszystkich pozycji (Kill Switch)')
     if st.button('ZAMKNIJ WSZYSTKIE POZYCJE RYNKOWO', type='secondary'):
@@ -729,7 +695,7 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
-
+        
     # Automatyczne odświeżanie widoku kapitału co 30 sekund
     placeholder = st.empty()
     for seconds in range(30, 0, -1):
