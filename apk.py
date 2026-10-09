@@ -24,12 +24,7 @@ st.set_page_config(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Na Hetznerze można wskazać trwały wolumen przez APP_DATA_DIR lub pełną ścieżkę DB_FILE.
-# Domyślnie zachowujemy dotychczasowe położenie users.db, aby nie tworzyć pustej bazy obok starej.
-DATA_DIR = os.getenv("APP_DATA_DIR", BASE_DIR)
-os.makedirs(DATA_DIR, exist_ok=True)
-DB_FILE = os.getenv("DB_FILE", os.path.join(DATA_DIR, "users.db"))
-os.makedirs(os.path.dirname(os.path.abspath(DB_FILE)), exist_ok=True)
+DB_FILE = os.getenv("DB_FILE", os.path.join(BASE_DIR, "users.db"))
 ALLOW_TEST_ACTIVATION = os.getenv("ALLOW_TEST_ACTIVATION", "0") == "1"
 
 # WAŻNE:
@@ -223,7 +218,6 @@ SESSION_DEFAULTS = {
     "session_baseline_locked": False,
     "active_mtf_bots": {},
     "_mtf_loaded_user_id": None,
-    "_app_settings_loaded_user_id": None,
 }
 
 for key, default_value in SESSION_DEFAULTS.items():
@@ -396,114 +390,6 @@ def save_mtf_settings(user_id, settings=None):
             conn.close()
 
 
-
-# Ustawienia panelu, które mają wracać po odświeżeniu, ponownym logowaniu
-# i restarcie procesu Streamlit. Kluczy API nie zapisujemy tutaj — są w tabeli users.
-APP_PREFERENCE_KEYS = (
-    "lang_selector",
-    "sidebar_selected_exchange_sb",
-    "sb_max_single_trade",
-    "sb_max_active_pos",
-    "enable_roe_guard",
-    "custom_stop_loss_roe",
-    "custom_take_profit_roe",
-    "sb_cooldown_sl_tp",
-    "sb_leverage_mode",
-    "sb_max_allowed_leverage",
-    "sb_manual_leverage",
-    "sb_max_fut_pairs",
-    "sb_auto_base_influence",
-    "sb_auto_refresh",
-)
-
-
-def load_app_settings(user_id):
-    """Zwraca zapisane preferencje użytkownika; błąd odczytu nie kasuje danych."""
-    if not user_id:
-        return {}
-    conn = None
-    try:
-        conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
-        row = conn.execute(
-            "SELECT settings_json FROM user_app_settings WHERE user_id=?",
-            (int(user_id),),
-        ).fetchone()
-        if not row or not row[0]:
-            return {}
-        data = json.loads(row[0])
-        return data if isinstance(data, dict) else {}
-    except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError):
-        return {}
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def apply_app_settings(user_id, force=False):
-    """Wczytuje preferencje przed widgetami; odtwarza też pola ukryte przez Streamlit."""
-    if not user_id:
-        return
-    uid = int(user_id)
-    same_user = st.session_state.get("_app_settings_loaded_user_id") == uid
-    saved = load_app_settings(uid)
-    for key in APP_PREFERENCE_KEYS:
-        if key in saved and (force or not same_user or key not in st.session_state):
-            st.session_state[key] = saved[key]
-    if saved.get("lang_selector") in ("Polski", "English"):
-        if force or not same_user or "lang" not in st.session_state:
-            st.session_state["lang"] = saved["lang_selector"]
-    exchange = saved.get("sidebar_selected_exchange_sb")
-    if exchange in ("Bitget", "Binance", "Bybit", "OKX"):
-        if force or not same_user or "selected_exchange" not in st.session_state:
-            st.session_state["selected_exchange"] = exchange
-    st.session_state["_app_settings_loaded_user_id"] = uid
-
-
-def save_app_settings(user_id=None):
-    """Zapisuje tylko znane preferencje, zachowując brakujące pola z bazy."""
-    uid = user_id or st.session_state.get("user_id")
-    if not uid:
-        return False
-    try:
-        uid = int(uid)
-    except (TypeError, ValueError):
-        return False
-    if st.session_state.get("_app_settings_loaded_user_id") != uid:
-        # Nigdy nie zapisuj wartości startowych, zanim nie spróbujesz odczytu.
-        apply_app_settings(uid, force=True)
-        return False
-
-    conn = None
-    try:
-        payload = load_app_settings(uid)
-        for key in APP_PREFERENCE_KEYS:
-            if key in st.session_state:
-                payload[key] = st.session_state[key]
-        # Synchronizuj język i giełdę z ich kluczami sesji używanymi przez resztę aplikacji.
-        if payload.get("lang_selector") in ("Polski", "English"):
-            st.session_state["lang"] = payload["lang_selector"]
-        if payload.get("sidebar_selected_exchange_sb") in ("Bitget", "Binance", "Bybit", "OKX"):
-            st.session_state["selected_exchange"] = payload["sidebar_selected_exchange_sb"]
-        conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute(
-            """INSERT INTO user_app_settings(user_id, settings_json, updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json, updated_at=excluded.updated_at""",
-            (uid, json.dumps(payload, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")),
-        )
-        conn.commit()
-        return True
-    except (sqlite3.Error, TypeError, ValueError, OverflowError):
-        return False
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _save_app_settings_callback():
-    save_app_settings()
-
-
 def load_active_bots(user_id):
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -565,7 +451,6 @@ def _save_mtf_callback():
         return
 
     save_mtf_settings(uid)
-    save_app_settings(uid)
 
 
 for tf in AVAILABLE_TIMEFRAMES:
@@ -651,11 +536,6 @@ def init_db():
 
         cursor.execute(
             """ CREATE TABLE IF NOT EXISTS user_bot_state ( user_id INTEGER PRIMARY KEY, bots_json TEXT NOT NULL, updated_at TEXT NOT NULL ) """
-        )
-
-        # Trwałe ustawienia panelu bocznego i preferencji UI per użytkownik.
-        cursor.execute(
-            """ CREATE TABLE IF NOT EXISTS user_app_settings ( user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """
         )
 
         # Trwała historia transakcji — niezależna od sesji Streamlit.
@@ -1460,7 +1340,6 @@ if not st.session_state.logged_in:
                 st.session_state.trade_history = load_trade_history(user_row[0])
                 st.session_state._trade_history_loaded_user_id = int(user_row[0])
                 apply_mtf_to_session(user_row[0], force=True)
-                apply_app_settings(user_row[0], force=True)
 
                 # Migracja starego hasła do bezpieczniejszego formatu.
                 if not str(user_row[2]).startswith("sha256$"):
@@ -1565,11 +1444,6 @@ if _current_uid and st.session_state.get("_trade_history_loaded_user_id") != int
     st.session_state.trade_history = load_trade_history(_current_uid)
     st.session_state._trade_history_loaded_user_id = int(_current_uid)
 
-# Przy każdym rerun wczytaj tylko brakujące klucze preferencji (np. suwaki ROE,
-# które Streamlit usuwa ze session_state, gdy ochrona ROE jest wyłączona).
-if st.session_state.get("logged_in") and _current_uid:
-    apply_app_settings(_current_uid, force=False)
-
 
 # ============================================================
 # JĘZYK
@@ -1580,12 +1454,11 @@ st.session_state.lang = st.sidebar.selectbox(
     ["Polski", "English"],
     index=(
         0
-        if st.session_state.get("lang_selector", st.session_state.get("lang", "Polski"))
+        if st.session_state.get("lang", "Polski")
         == "Polski"
         else 1
     ),
     key="lang_selector",
-    on_change=_save_app_settings_callback,
 )
 
 
@@ -1621,7 +1494,6 @@ if st.sidebar.button(
     st.session_state.passphrase = ""
     st.session_state.active_mtf_bots = {}
     st.session_state["_mtf_loaded_user_id"] = None
-    st.session_state["_app_settings_loaded_user_id"] = None
     st.rerun()
 
 
@@ -1655,7 +1527,6 @@ selected_exchange = st.sidebar.selectbox(
         else 0
     ),
     key="sidebar_selected_exchange_sb",
-    on_change=_save_app_settings_callback,
 )
 
 st.session_state.selected_exchange = selected_exchange
@@ -1806,7 +1677,6 @@ max_single_trade_usdt = st.sidebar.number_input(
     value=50.0,
     step=5.0,
     key="sb_max_single_trade",
-    on_change=_save_app_settings_callback,
 )
 
 max_active_futures_positions = st.sidebar.slider(
@@ -1815,7 +1685,6 @@ max_active_futures_positions = st.sidebar.slider(
     max_value=20,
     value=5,
     key="sb_max_active_pos",
-    on_change=_save_app_settings_callback,
 )
 
 
@@ -1832,7 +1701,6 @@ enable_roe_guard = st.sidebar.checkbox(
     t("enable_roe"),
     value=True,
     key="enable_roe_guard",
-    on_change=_save_app_settings_callback,
 )
 
 if enable_roe_guard:
@@ -1843,7 +1711,6 @@ if enable_roe_guard:
         value=4.0,
         step=0.5,
         key="custom_stop_loss_roe",
-        on_change=_save_app_settings_callback,
     )
 
     custom_take_profit_roe = st.sidebar.slider(
@@ -1853,7 +1720,6 @@ if enable_roe_guard:
         value=15.0,
         step=0.5,
         key="custom_take_profit_roe",
-        on_change=_save_app_settings_callback,
     )
 
     cooldown_after_sl_tp_minutes = st.sidebar.slider(
@@ -1863,7 +1729,6 @@ if enable_roe_guard:
         value=15,
         step=1,
         key="sb_cooldown_sl_tp",
-        on_change=_save_app_settings_callback,
     )
 
 else:
@@ -1891,7 +1756,6 @@ leverage_mode = st.sidebar.radio(
         "Ręczny",
     ],
     key="sb_leverage_mode",
-    on_change=_save_app_settings_callback,
 )
 
 max_allowed_leverage = st.sidebar.slider(
@@ -1901,7 +1765,6 @@ max_allowed_leverage = st.sidebar.slider(
     value=15,
     step=1,
     key="sb_max_allowed_leverage",
-    on_change=_save_app_settings_callback,
 )
 
 manual_leverage = st.sidebar.slider(
@@ -1911,7 +1774,6 @@ manual_leverage = st.sidebar.slider(
     value=5,
     step=1,
     key="sb_manual_leverage",
-    on_change=_save_app_settings_callback,
 )
 
 
@@ -1928,7 +1790,6 @@ max_fut_scan_pairs = st.sidebar.slider(
     value=30,
     step=1,
     key="sb_max_fut_pairs",
-    on_change=_save_app_settings_callback,
 )
 
 st.sidebar.markdown("---")
@@ -1940,7 +1801,6 @@ auto_base_influence = st.sidebar.slider(
     value=50,
     step=5,
     key="sb_auto_base_influence",
-    on_change=_save_app_settings_callback,
     help=(
         "0% = tylko automatyczny optymalizator, "
         "100% = dokładnie wartości z suwaków."
@@ -1961,14 +1821,7 @@ auto_refresh_seconds = st.sidebar.slider(
     value=15,
     step=1,
     key="sb_auto_refresh",
-    on_change=_save_app_settings_callback,
 )
-
-# Dodatkowy zapis po wyrenderowaniu widgetów, aby każda zmiana była utrwalona
-# nawet wtedy, gdy późniejsza część pętli tradingowej zakończy się błędem.
-if st.session_state.get("user_id"):
-    save_app_settings(st.session_state.user_id)
-    save_mtf_settings(st.session_state.user_id)
 
 
 # ============================================================
@@ -2670,10 +2523,8 @@ if futures_ex:
                             # W tabeli pokazujemy odchylenie EMA od ceny rynkowej
                             # w procentach, a nie wartości EMA w jednostkach ceny.
                             # 0% oznacza, że EMA jest dokładnie na poziomie ceny.
-                            # Pokazujemy rzeczywistą wartość EMA wyliczoną z cen zamknięcia
-                            # z okresami ustawionymi na suwakach dla tego interwału.
-                            "EMA Szybka": round(ema_fast_value, 8),
-                            "EMA Wolna": round(ema_slow_value, 8),
+                            "EMA Szybka (%)": round(((ema_fast_value / market_price) - 1.0) * 100.0, 4),
+                            "EMA Wolna (%)": round(((ema_slow_value / market_price) - 1.0) * 100.0, 4),
                             "ADX": round(current_adx, 2),
                             "RSI": round(current_rsi, 2),
                             "Sygnał": signal_type,
@@ -3282,15 +3133,16 @@ st.subheader(
 )
 
 if scan_results:
-    # Jedna tabela skanera. EMA Szybka/Wolna pokazują rzeczywiste
-    # wartości EMA z zamkniętej świecy, liczone okresami ustawionymi
-    # na suwakach dla danego interwału (nie procentowe odchylenie).
+    # Jedna tabela skanera. EMA Szybka/Wolna pokazują RZECZYWISTE
+    # wartości EMA z zamkniętej świecy dla konkretnej pary i interwału.
+    # Okresy (np. 9/21 albo 15/34) są tylko parametrami obliczenia i
+    # NIGDY nie są wpisywane do kolumn EMA.
     scanner_columns = [
         "Interwał",
         "Para",
         "Cena",
-        "EMA Szybka",
-        "EMA Wolna",
+        "EMA Szybka (%)",
+        "EMA Wolna (%)",
         "ADX",
         "RSI",
         "Sygnał",
