@@ -450,6 +450,15 @@ def init_db():
             """ CREATE TABLE IF NOT EXISTS user_bot_state ( user_id INTEGER PRIMARY KEY, bots_json TEXT NOT NULL, updated_at TEXT NOT NULL ) """
         )
 
+        # Trwała historia transakcji — niezależna od sesji Streamlit.
+        cursor.execute(
+            """ CREATE TABLE IF NOT EXISTS user_trade_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, trade_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_trade_history_user_id_id "
+            "ON user_trade_history(user_id, id DESC)"
+        )
+
         columns = [
             ("api_key", "TEXT"),
             ("secret_key", "TEXT"),
@@ -476,6 +485,65 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+
+
+def load_trade_history(user_id, limit=200):
+    """Wczytuje ostatnie transakcje danego użytkownika z SQLite."""
+    if not user_id:
+        return []
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    try:
+        rows = conn.execute(
+            "SELECT trade_json FROM user_trade_history "
+            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (int(user_id), int(limit)),
+        ).fetchall()
+        history = []
+        for (raw,) in rows:
+            try:
+                item = json.loads(raw)
+                if isinstance(item, dict):
+                    history.append(item)
+            except (TypeError, json.JSONDecodeError):
+                continue
+        return history
+    finally:
+        conn.close()
+
+
+def save_trade_history_item(user_id, trade, max_rows=500):
+    """Dopisuje zdarzenie do trwałej historii, nie nadpisując wcześniejszych."""
+    if not user_id or not isinstance(trade, dict):
+        return
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    try:
+        conn.execute(
+            "INSERT INTO user_trade_history(user_id, trade_json, created_at) "
+            "VALUES (?, ?, ?)",
+            (int(user_id), json.dumps(trade, ensure_ascii=False, default=str),
+             str(trade.get("Czas") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))),
+        )
+        # Ogranicz rozmiar bazy, ale zachowaj ostatnie 500 wpisów na użytkownika.
+        conn.execute(
+            "DELETE FROM user_trade_history WHERE user_id = ? AND id NOT IN "
+            "(SELECT id FROM user_trade_history WHERE user_id = ? "
+            "ORDER BY id DESC LIMIT ?)",
+            (int(user_id), int(user_id), int(max_rows)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_trade(trade):
+    """Dodaje transakcję do widoku i zapisuje ją na stałe dla zalogowanego użytkownika."""
+    if not isinstance(trade, dict):
+        return
+    if "trade_history" not in st.session_state:
+        st.session_state.trade_history = []
+    st.session_state.trade_history.insert(0, trade)
+    st.session_state.trade_history = st.session_state.trade_history[:200]
+    save_trade_history_item(st.session_state.get("user_id"), trade)
 
 
 def get_secret(name, default=""):
@@ -1181,6 +1249,8 @@ if not st.session_state.logged_in:
                 st.session_state.secret_key = user_row[6] or ""
                 st.session_state.passphrase = user_row[7] or ""
                 st.session_state.selected_exchange = user_row[8] or "Bitget"
+                st.session_state.trade_history = load_trade_history(user_row[0])
+                st.session_state._trade_history_loaded_user_id = int(user_row[0])
                 apply_mtf_to_session(user_row[0], force=True)
 
                 # Migracja starego hasła do bezpieczniejszego formatu.
@@ -1279,6 +1349,12 @@ if not st.session_state.logged_in:
     st.stop()
 
 apply_mtf_to_session(st.session_state.get("user_id"))
+
+# Przywróć historię po odświeżeniu strony albo restarcie aplikacji.
+_current_uid = st.session_state.get("user_id")
+if _current_uid and st.session_state.get("_trade_history_loaded_user_id") != int(_current_uid):
+    st.session_state.trade_history = load_trade_history(_current_uid)
+    st.session_state._trade_history_loaded_user_id = int(_current_uid)
 
 
 # ============================================================
@@ -1740,7 +1816,6 @@ if emergency_kill:
     st.session_state.active_mtf_bots = {}
     if st.session_state.get("user_id"):
         save_active_bots(st.session_state.user_id)
-    st.session_state.trade_history = []
     st.session_state.symbol_cooldown = {}
 
     st.success(
@@ -1931,9 +2006,7 @@ if futures_ex:
                                 * 60
                             )
 
-                            st.session_state.trade_history.insert(
-                                0,
-                                {
+                            record_trade({
                                     "Czas": datetime.now().strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     ),
@@ -1955,8 +2028,7 @@ if futures_ex:
                                     "Dźwignia": (
                                         f"{int(lev)}x"
                                     ),
-                                },
-                            )
+                                })
 
                 except Exception:
                     pass
@@ -2459,9 +2531,7 @@ if futures_ex:
                                             },
                                         )
 
-                                        st.session_state.trade_history.insert(
-                                            0,
-                                            {
+                                        record_trade({
                                                 "Czas": datetime.now().strftime(
                                                     "%Y-%m-%d %H:%M:%S"
                                                 ),
@@ -2479,8 +2549,7 @@ if futures_ex:
                                                 "Dźwignia": (
                                                     f"{int(matching_p.get('leverage', 1))}x"
                                                 ),
-                                            },
-                                        )
+                                            })
 
                                         existing_pos_map.pop(
                                             symbol,
@@ -2651,9 +2720,7 @@ if futures_ex:
                                         cooldown_key
                                     ] = time.time()
 
-                                    st.session_state.trade_history.insert(
-                                        0,
-                                        {
+                                    record_trade({
                                             "Czas": datetime.now().strftime(
                                                 "%Y-%m-%d %H:%M:%S"
                                             ),
@@ -2687,8 +2754,7 @@ if futures_ex:
                                                 if protection.get("sl_ok") and protection.get("tp_ok")
                                                 else ("SL" if protection.get("sl_ok") else ("TP" if protection.get("tp_ok") else "BRAK"))
                                             ),
-                                        },
-                                    )
+                                        })
 
                                     active_positions_count += 1
                                     existing_pos_map[
