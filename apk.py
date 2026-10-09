@@ -39,13 +39,13 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# KONFIGURACJA STRIPE
+# POPRAWIONA KONFIGURACJA STRIPE (Z Twoich zdjęć)
 # ========================================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
     "STRIPE_CHECKOUT_FALLBACK",
-    "https://buy.stripe.com/8x2dRa4CbdaXfSAF6V3oA03",
+    "https://buy.stripe.com/00w00kecL1sfbcK0c13oA00",
 )
 
 try:
@@ -737,3 +737,4 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
+
