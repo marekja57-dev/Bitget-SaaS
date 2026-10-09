@@ -102,6 +102,25 @@ def db():
     c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
+    
+    # Automatyczne dodanie brakujących kolumn w starszych bazach danych
+    cursor = c.cursor()
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'email' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if 'stripe_paid' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN stripe_paid INTEGER DEFAULT 0")
+    c.commit()
+    return c
+    c = sqlite3.connect(DB_PATH, timeout=15)
+    c.execute('PRAGMA journal_mode=WAL')
+    c.execute('PRAGMA busy_timeout=15000')
+    c.execute('CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    c.execute('CREATE TABLE IF NOT EXISTS credentials (k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
     c.commit()
     return c
 
