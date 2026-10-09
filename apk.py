@@ -35,7 +35,7 @@ logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
 # Mo\u017cna go nadpisa\u0107 zmienn\u0105 \u015brodowiskow\u0105 STRIPE_CHECKOUT_FALLBACK.
 STRIPE_CHECKOUT_FALLBACK = os.getenv(
     "STRIPE_CHECKOUT_FALLBACK",
-    "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03",
+    ",https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
 )
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 
