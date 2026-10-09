@@ -37,7 +37,35 @@ DEFAULTS = {
 }
 
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
-STRIPE_PRICE_ID_VAL = "price_1M_49pln_placeholder"
+
+# ========================================================
+# KONFIGURACJA STRIPE (Zgodna ze zdjęciami)
+# ========================================================
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
+STRIPE_CHECKOUT_FALLBACK = os.getenv(
+    "STRIPE_CHECKOUT_FALLBACK",
+    "https://buy.stripe.com/8x2dRa4CbdaXfSAF6V3oA03",
+)
+
+try:
+    STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY)
+    STRIPE_PRICE_ID = st.secrets.get("STRIPE_PRICE_ID", STRIPE_PRICE_ID)
+    STRIPE_CHECKOUT_FALLBACK = st.secrets.get("STRIPE_CHECKOUT_FALLBACK", STRIPE_CHECKOUT_FALLBACK)
+except Exception:
+    pass
+
+if STRIPE_SECRET_KEY:
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+    except ImportError:
+        pass
+
+def create_stripe_checkout_session(email, price_id):
+    if STRIPE_CHECKOUT_FALLBACK:
+        return f"{STRIPE_CHECKOUT_FALLBACK}?client_reference_id={email}"
+    return f"https://checkout.stripe.com/pay/{price_id}?client_reference_id={email}"
 
 CSS = '''
 <style>
@@ -251,9 +279,6 @@ def is_user_admin():
 def is_user_paid():
     return bool(st.session_state.get('stripe_paid', 0)) or is_user_admin()
 
-def create_stripe_checkout_session(email, price_id):
-    return f"https://checkout.stripe.com/pay/{price_id}?client_reference_id={email}"
-
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['username'] = ''
@@ -263,24 +288,13 @@ if 'authenticated' not in st.session_state:
     st.session_state['logged_in'] = False
 
 # ========================================================
-# STRIPE & AKTYWACJA POWROTU ZE STRIPE (z Twoich zdjęć)
+# AKTYWACJA POWROTU ZE STRIPE
 # ========================================================
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-if STRIPE_SECRET_KEY:
-    try:
-        import stripe
-        stripe.api_key = STRIPE_SECRET_KEY
-    except ImportError:
-        pass
-
 if st.query_params.get("success") == "true":
-    if (st.session_state.get("logged_in") and st.session_state.get("user_id")):
+    if st.session_state.get("logged_in") and st.session_state.get("user_id"):
         st.session_state.stripe_paid = True
         try:
-            conn = sqlite3.connect(
-                DB_FILE,
-                timeout=30.0,
-            )
+            conn = sqlite3.connect(DB_FILE, timeout=30.0)
             cursor = conn.cursor()
             cursor.execute(
                 """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
@@ -366,7 +380,7 @@ with st.sidebar:
         st.sidebar.success("Subskrypcja aktywna (Pro)")
     else:
         st.sidebar.warning("Subskrypcja nieopłacona")
-        checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID_VAL)
+        checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID)
         st.sidebar.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
             
     st.divider()
@@ -723,3 +737,4 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
+
