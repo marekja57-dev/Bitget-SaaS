@@ -39,7 +39,7 @@ DEFAULTS = {
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 # ========================================================
-# KONFIGURACJA STRIPE (Zgodna ze zdjęciami)
+# KONFIGURACJA STRIPE
 # ========================================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
@@ -381,7 +381,7 @@ with st.sidebar:
     else:
         st.sidebar.warning("Subskrypcja nieopłacona")
         checkout_url = create_stripe_checkout_session(st.session_state.get("user_email", "user@bitget.local"), STRIPE_PRICE_ID)
-        st.sidebar.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
+        st.sidebar.markdown(f'<a href="{checkout_url}" target="_blank"><button style="width:100%; background:linear-gradient(180deg, #1689ff, #0759c8); color:white; border:1px solid #278be8; border-radius:8px; padding:10px; font-weight:700; cursor:pointer;">OPŁAĆ SUBSKRYPCJĘ (49 PLN)</button></a>', unsafe_allow_html=True)
             
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
@@ -737,4 +737,3 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
-
