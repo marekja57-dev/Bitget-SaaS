@@ -16,10 +16,21 @@ LOG_PATH = APP_DIR / 'trading.log'
 logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 DEFAULTS = {
-    'exchange': 'bitget', 'market_type': 'swap', 'symbol': 'BTC/USDT:USDT', 'timeframe': '15m', 'candle_limit': 180,
-    'refresh_seconds': 30, 'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0,
-    'risk_usdt': 10.0, 'max_positions': 3, 'leverage': 2, 'sl_roe': 20.0, 'tp_roe': 40.0, 'enable_roe': True,
-    'mtf_enabled': True, 'timeframes': ['5m', '15m', '1h'], 'auto_refresh': False, 'auto_trade': False, 'paper_mode': True,
+    'exchange': 'bitget', 'market_type': 'swap', 'candle_limit': 180,
+    'refresh_seconds': 30, 'risk_usdt': 10.0, 'max_positions': 3, 'max_leverage': 10, 'sl_roe': 20.0, 'tp_roe': 40.0, 'enable_roe': True,
+    'timeframes': ['15m', '1h', '4h'],
+    'tf_settings': {
+        '1m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
+        '3m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
+        '5m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
+        '15m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
+        '30m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
+        '1h': {'ema_fast': 12, 'ema_slow': 26, 'adx_threshold': 22.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
+        '2h': {'ema_fast': 12, 'ema_slow': 26, 'adx_threshold': 20.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
+        '4h': {'ema_fast': 20, 'ema_slow': 50, 'adx_threshold': 20.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
+        '1d': {'ema_fast': 50, 'ema_slow': 200, 'adx_threshold': 15.0, 'rsi_min': 35.0, 'rsi_max': 65.0}
+    },
+    'auto_refresh': True, 'refresh_seconds': 30, 'auto_trade': False, 'paper_mode': True,
     'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 20
 }
 
@@ -151,57 +162,32 @@ def indicators(df, fast, slow):
     d['adx'] = (100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)).ewm(alpha=1/14, adjust=False).mean()
     return d
 
-def signal_for(cfg, tf):
-    raw = get_candles(cfg['exchange'], cfg['market_type'], cfg['symbol'], tf, cfg['candle_limit'])
-    d = indicators(raw.iloc[:-1].copy(), cfg['ema_fast'], cfg['ema_slow'])
-    if len(d) < max(cfg['ema_slow'] + 5, 35): return {'tf': tf, 'signal': 'WAIT', 'reason': 'Za mało zamkniętych świec'}
-    r = d.iloc[-1]
-    trend_up = r.ema_fast > r.ema_slow
-    trend_down = r.ema_fast < r.ema_slow
-    long_ok = trend_up and r.adx >= cfg['adx_threshold'] and cfg['rsi_min'] <= r.rsi <= cfg['rsi_max'] and r.close > r.ema_fast
-    short_ok = trend_down and r.adx >= cfg['adx_threshold'] and cfg['rsi_min'] <= r.rsi <= cfg['rsi_max'] and r.close < r.ema_fast
-    sig = 'LONG' if long_ok else ('SHORT' if short_ok else 'WAIT')
-    return {'tf': tf, 'signal': sig, 'price': float(r.close), 'ema_fast': float(r.ema_fast), 'ema_slow': float(r.ema_slow), 'adx': float(r.adx), 'rsi': float(r.rsi), 'timestamp': int(r.timestamp), 'reason': 'EMA + ADX + RSI na zamkniętej świecy'}
-
 def signal_for_symbol(cfg, symbol, tf):
     try:
+        tf_cfg = cfg.get('tf_settings', {}).get(tf, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
         raw = get_candles(cfg['exchange'], cfg['market_type'], symbol, tf, cfg['candle_limit'])
-        d = indicators(raw.iloc[:-1].copy(), cfg['ema_fast'], cfg['ema_slow'])
-        if len(d) < max(cfg['ema_slow'] + 5, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'WAIT', 'reason': 'Za mało świec'}
+        d = indicators(raw.iloc[:-1].copy(), tf_cfg['ema_fast'], tf_cfg['ema_slow'])
+        if len(d) < max(tf_cfg['ema_slow'] + 5, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'WAIT', 'reason': 'Za mało świec'}
         r = d.iloc[-1]
         trend_up = r.ema_fast > r.ema_slow
         trend_down = r.ema_fast < r.ema_slow
-        long_ok = cfg['allow_long'] and trend_up and r.adx >= cfg['adx_threshold'] and cfg['rsi_min'] <= r.rsi <= cfg['rsi_max'] and r.close > r.ema_fast
-        short_ok = cfg['allow_short'] and trend_down and r.adx >= cfg['adx_threshold'] and cfg['rsi_min'] <= r.rsi <= cfg['rsi_max'] and r.close < r.ema_fast
+        long_ok = cfg['allow_long'] and trend_up and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close > r.ema_fast
+        short_ok = cfg['allow_short'] and trend_down and r.adx >= tf_cfg['adx_threshold'] and tf_cfg['rsi_min'] <= r.rsi <= tf_cfg['rsi_max'] and r.close < r.ema_fast
         sig = 'LONG' if long_ok else ('SHORT' if short_ok else 'WAIT')
         return {'symbol': symbol, 'tf': tf, 'signal': sig, 'price': float(r.close), 'adx': float(r.adx), 'rsi': float(r.rsi), 'reason': 'OK'}
     except Exception as e:
         return {'symbol': symbol, 'tf': tf, 'signal': 'ERROR', 'reason': str(e)[:100]}
 
-def read_position(ex, symbol):
-    try:
-        positions = ex.fetch_positions([symbol])
-    except Exception:
-        positions = ex.fetch_positions()
-    for p in positions or []:
-        if p.get('symbol') == symbol and abs(float(p.get('contracts') or p.get('contractSize') or 0)) > 0:
-            return p
-    return None
-
-def position_qty(p):
-    try: return abs(float(p.get('contracts') or 0))
-    except Exception: return 0.0
-
 def market_order(ex, symbol, side, qty, reduce_only=False):
     qty = float(ex.amount_to_precision(symbol, qty))
-    if qty <= 0: raise ValueError('Ilość po zaokrągleniu jest zerowa')
+    if qty <= 0: raise ValueError('Ilość zerowa')
     params = {'reduceOnly': True} if reduce_only else {}
     return ex.create_order(symbol, 'market', side, qty, None, params)
 
 def calc_qty(ex, symbol, free_usdt, price, cfg, sl_distance):
     risk = max(0.0, float(cfg['risk_usdt']))
     distance = max(float(sl_distance), 0.001)
-    notional = min(risk / distance, float(cfg['max_notional_usdt']), max(0.0, free_usdt) * float(cfg['leverage']) * 0.90)
+    notional = min(risk / distance, float(cfg['max_notional_usdt']), max(0.0, free_usdt) * float(cfg['max_leverage']) * 0.90)
     market = ex.market(symbol)
     contract = float(market.get('contractSize') or 1)
     qty = notional / max(price * contract, 1e-12)
@@ -213,7 +199,6 @@ def balance_usdt(ex):
     row = b.get('USDT') or {}
     return float(row.get('free') or 0), float(row.get('total') or 0)
 
-# --- PANEL LOGOWANIA I REJESTRACJI (STYL RETRO) ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['username'] = ''
@@ -260,14 +245,13 @@ if not st.session_state['authenticated']:
                         st.error("Taki użytkownik już istnieje.")
     st.stop()
 
-# --- GŁÓWNA APLIKACJA PO ZALOGOWANIU ---
 cfg = load_cfg()
 creds = load_creds()
 ex_id, key, secret, password = creds
 
 with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
-    page = st.radio('NAWIGACJA', ['Automatyczny Skaner Giełdy', 'Trading', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
+    page = st.radio('NAWIGACJA', ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
         st.session_state['authenticated'] = False
@@ -279,90 +263,113 @@ with st.sidebar:
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-if page == 'Automatyczny Skaner Giełdy':
-    st.subheader('Automatyczny Skaner Giełdy i Wielointerwałowy Auto-Handel')
-    st.write('System samodzielnie pobiera listę par z giełdy i skanuje wybrane przez Ciebie interwały oraz liczbę par w jednym cyklu.')
+if page == 'Automatyczny Skaner i Auto-Handel':
+    st.subheader('Automatyczny Skaner Rynku i Cykliczny Auto-Handel')
+    st.write('Bot samoczynnie w pętli skanuje wybrane pary i interwały w ustalonych odstępach czasu.')
     
     with st.form('control_form'):
-        auto = st.checkbox('Włącz automatyczny handel (Auto-Trade)', value=bool(cfg['auto_trade']))
-        paper = st.checkbox('Tryb symulacji PAPER (brak zleceń na żywo)', value=bool(cfg['paper_mode']))
-        submit_ctrl = st.form_submit_button('ZAPISZ TRYB PRACY')
+        cfg['auto_trade'] = st.checkbox('Włącz automatyczny handel (Auto-Trade)', value=bool(cfg['auto_trade']))
+        cfg['paper_mode'] = st.checkbox('Tryb symulacji PAPER (brak zleceń na żywo)', value=bool(cfg['paper_mode']))
+        cfg['auto_refresh'] = st.checkbox('Włącz ciągłą pętlę automatycznego skanowania w tle', value=bool(cfg.get('auto_refresh', True)))
+        cfg['refresh_seconds'] = st.slider('Odstęp czasu między skanami giełdy (sekundy)', 10, 300, int(cfg.get('refresh_seconds', 30)))
+        submit_ctrl = st.form_submit_button('ZAPISZ TRYB PRACY', use_container_width=True)
         if submit_ctrl:
-            cfg['auto_trade'] = auto
-            cfg['paper_mode'] = paper
             save_cfg(cfg)
             st.success('Zapisano tryb pracy bota.')
+            st.rerun()
 
-    if st.button('URUCHOM SKANOWANIE RYNKU TERAZ', type='primary'):
-        try:
-            ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
-            markets = ex.load_markets()
-            
-            all_symbols = [s for s, m in markets.items() if m.get('quote') == 'USDT' and m.get('active') and m.get('linear')]
-            target_symbols = all_symbols[:int(cfg.get('scan_limit_count', 20))]
-            target_tfs = cfg.get('timeframes', ['15m'])
-            
-            st.info(f'Przeszukiwanie {len(target_symbols)} par na interwałach: {", ".join(target_tfs)}...')
-            
-            results = []
-            free, _ = balance_usdt(ex) if not cfg['paper_mode'] else (1000.0, 1000.0)
-            
-            for symbol in target_symbols:
-                for tf in target_tfs:
-                    res = signal_for_symbol(cfg, symbol, tf)
-                    results.append(res)
+    st.markdown('---')
+    st.markdown('### Status i uruchomienie skanowania')
+    
+    try:
+        ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
+        markets = ex.load_markets()
+        
+        all_symbols = [s for s, m in markets.items() if m.get('quote') == 'USDT' and m.get('active') and m.get('linear')]
+        target_symbols = all_symbols[:int(cfg.get('scan_limit_count', 20))]
+        target_tfs = cfg.get('timeframes', ['15m'])
+        
+        st.info(f'Skanowanie {len(target_symbols)} par na interwałach: {", ".join(target_tfs)}...')
+        
+        results = []
+        free, _ = balance_usdt(ex) if not cfg['paper_mode'] else (1000.0, 1000.0)
+        
+        for symbol in target_symbols:
+            for tf in target_tfs:
+                res = signal_for_symbol(cfg, symbol, tf)
+                results.append(res)
+                
+                sig = res['signal']
+                if sig in ('LONG', 'SHORT'):
+                    event('INFO', f'Skaner: Sygnał {sig} na {symbol} [{tf}] (ADX: {res["adx"]:.1f}, RSI: {res["rsi"]:.1f})')
                     
-                    sig = res['signal']
-                    if sig in ('LONG', 'SHORT'):
-                        event('INFO', f'Skaner: Sygnał {sig} na {symbol} [{tf}] (ADX: {res["adx"]:.1f}, RSI: {res["rsi"]:.1f})')
-                        
-                        if cfg['auto_trade']:
-                            if cfg['paper_mode']:
-                                event('TRADE', f'[PAPER] Automatyczne otwarcie {sig} na {symbol} [{tf}]')
-                            else:
-                                lev = int(cfg['leverage'])
-                                stop_fraction = (float(cfg['sl_roe']) / 100.0) / lev
-                                qty, notional = calc_qty(ex, symbol, free, res['price'], cfg, stop_fraction)
-                                try:
-                                    ex.set_leverage(lev, symbol)
-                                except Exception:
-                                    pass
-                                side = 'buy' if sig == 'LONG' else 'sell'
-                                order = market_order(ex, symbol, side, qty, False)
-                                event('TRADE', f'AUTOMATYCZNIE OTWARTO {sig} {symbol} [{tf}] qty={qty} id={order.get("id")}')
-            
-            st.success('Skanowanie wielointerwałowe zakończone pomyślnie!')
-            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-            
-        except Exception as e:
-            st.error(f'Błąd podczas skanowania giełdy: {e}')
+                    if cfg['auto_trade']:
+                        if cfg['paper_mode']:
+                            event('TRADE', f'[PAPER] Automatyczne otwarcie {sig} na {symbol} [{tf}]')
+                        else:
+                            max_lev = int(cfg['max_leverage'])
+                            stop_fraction = (float(cfg['sl_roe']) / 100.0) / max_lev
+                            qty, notional = calc_qty(ex, symbol, free, res['price'], cfg, stop_fraction)
+                            try:
+                                ex.set_leverage(max_lev, symbol)
+                            except Exception:
+                                pass
+                            side = 'buy' if sig == 'LONG' else 'sell'
+                            order = market_order(ex, symbol, side, qty, False)
+                            event('TRADE', f'AUTOMATYCZNIE OTWARTO {sig} {symbol} [{tf}] qty={qty} id={order.get("id")}')
+        
+        st.success('Cykl skanowania zakończony pomyślnie!')
+        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        
+    except Exception as e:
+        st.error(f'Błąd podczas skanowania giełdy: {e}')
+
+    if cfg.get('auto_refresh') and cfg.get('auto_trade'):
+        sec = int(cfg.get('refresh_seconds', 30))
+        st.warning(f'Bot działa w pętli automatycznej. Kolejny skan za {sec} sekund...')
+        time.sleep(sec)
+        st.rerun()
 
 elif page == 'Ustawienia Strategii':
-    st.subheader('Indywidualne ustawienia strategii i zarządzania ryzykiem')
+    st.subheader('Niezależne ustawienia strategii dla każdego interwału i zarządzanie ryzykiem')
+    
     with st.form('cfgform'):
-        a, b, c = st.columns(3)
+        a, b = st.columns(2)
         with a:
             cfg['exchange'] = st.selectbox('Giełda', ['bitget', 'binanceusdm', 'bybit', 'okx'], index=['bitget', 'binanceusdm', 'bybit', 'okx'].index(cfg['exchange']) if cfg['exchange'] in ['bitget', 'binanceusdm', 'bybit', 'okx'] else 0)
             cfg['market_type'] = st.selectbox('Rynek', ['swap', 'future'], index=0 if cfg['market_type'] == 'swap' else 1)
             cfg['scan_limit_count'] = st.slider('Suwak limitu skanowanych par z giełdy', 5, 50, int(cfg.get('scan_limit_count', 20)))
             cfg['timeframes'] = st.multiselect('Interwały do skanowania w tle', TF_OPTIONS, default=[x for x in cfg.get('timeframes', ['15m']) if x in TF_OPTIONS] or ['15m'])
         with b:
-            cfg['ema_fast'] = st.number_input('EMA szybka', 2, 100, int(cfg['ema_fast']))
-            cfg['ema_slow'] = st.number_input('EMA wolna', 3, 300, int(cfg['ema_slow']))
-            cfg['adx_threshold'] = st.number_input('Minimalny ADX', 0.0, 100.0, float(cfg['adx_threshold']))
-            cfg['rsi_min'] = st.number_input('RSI minimum', 0.0, 100.0, float(cfg['rsi_min']))
-            cfg['rsi_max'] = st.number_input('RSI maksimum', 0.0, 100.0, float(cfg['rsi_max']))
-        with c:
             cfg['risk_usdt'] = st.number_input('Maks. ryzyko na pozycję (USDT)', 1.0, 10000.0, float(cfg['risk_usdt']))
-            cfg['max_positions'] = st.number_input('Maks. otwarte pozycje', 1, 20, int(cfg['max_positions']))
-            cfg['leverage'] = st.number_input('Dźwignia', 1, 50, int(cfg['leverage']))
+            cfg['max_positions'] = st.number_input('Maks. otwarte pozycje (sloty)', 1, 20, int(cfg['max_positions']))
+            cfg['max_leverage'] = st.number_input('Maksymalna dźwignia (auto-dopasowanie)', 1, 50, int(cfg['max_leverage']))
+            cfg['sl_roe'] = st.number_input('Stop-loss ROE (%)', 1.0, 95.0, float(cfg['sl_roe']))
+            cfg['tp_roe'] = st.number_input('Take-profit ROE (%)', 1.0, 500.0, float(cfg['tp_roe']))
             cfg['allow_long'] = st.checkbox('Pozwól na LONG', cfg['allow_long'])
             cfg['allow_short'] = st.checkbox('Pozwól na SHORT', cfg['allow_short'])
         
-        submitted = st.form_submit_button('ZAPISZ USTAWIENIA', use_container_width=True)
+        st.markdown('---')
+        st.markdown('### Konfiguracja wskaźników osobno dla każdego interwału')
+        
+        if 'tf_settings' not in cfg:
+            cfg['tf_settings'] = DEFAULTS['tf_settings']
+            
+        selected_tf_tab = st.selectbox('Wybierz interwał do edycji parametrów', TF_OPTIONS, index=TF_OPTIONS.index('15m'))
+        current_tf_cfg = cfg['tf_settings'].get(selected_tf_tab, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
+        
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1: f_fast = st.number_input(f'EMA szybka ({selected_tf_tab})', 2, 100, int(current_tf_cfg.get('ema_fast', 9)))
+        with c2: f_slow = st.number_input(f'EMA wolna ({selected_tf_tab})', 3, 300, int(current_tf_cfg.get('ema_slow', 21)))
+        with c3: f_adx = st.number_input(f'Min. ADX ({selected_tf_tab})', 0.0, 100.0, float(current_tf_cfg.get('adx_threshold', 25.0)))
+        with c4: f_rmin = st.number_input(f'RSI min ({selected_tf_tab})', 0.0, 100.0, float(current_tf_cfg.get('rsi_min', 25.0)))
+        with c5: f_rmax = st.number_input(f'RSI max ({selected_tf_tab})', 0.0, 100.0, float(current_tf_cfg.get('rsi_max', 75.0)))
+            
+        submitted = st.form_submit_button('ZAPISZ WSZYSTKIE USTAWIENIA', use_container_width=True)
     if submitted:
+        cfg['tf_settings'][selected_tf_tab] = {'ema_fast': f_fast, 'ema_slow': f_slow, 'adx_threshold': f_adx, 'rsi_min': f_rmin, 'rsi_max': f_rmax}
         save_cfg(cfg)
-        st.success('Zapisano ustawienia strategii.')
+        st.success(f'Zapisano parametry dla interwału {selected_tf_tab}!')
         st.rerun()
 
 elif page == 'Połączenie API':
@@ -396,94 +403,61 @@ elif page == 'Dziennik':
     else: st.info('Brak zdarzeń.')
 
 else:
-    st.subheader('Panel tradingowy i analiza pojedynczej pary')
-    a, b, c, d = st.columns(4)
-    for col, title, value, sub in [(a, 'GIEŁDA', cfg['exchange'].upper(), cfg['market_type']), (b, 'PARA', cfg['symbol'], cfg['timeframe']), (c, 'STRATEGIA', f"EMA {cfg['ema_fast']}/{cfg['ema_slow']}", f"ADX ≥ {cfg['adx_threshold']:g}"), (d, 'RYZYKO / POZYCJĘ', f"{cfg['risk_usdt']:g} USDT", f"limit {cfg['max_positions']} pozycji")]:
-        col.markdown(f'<div class="panel"><div class="metric-label">{title}</div><div class="metric-value">{value}</div><div class="muted">{sub}</div></div>', unsafe_allow_html=True)
-    st.write('')
-    left, right = st.columns([1.6, 1])
-    with left:
-        st.markdown('### Wykres i wskaźniki')
-        try:
-            raw = get_candles(cfg['exchange'], cfg['market_type'], cfg['symbol'], cfg['timeframe'], cfg['candle_limit'])
-            d = indicators(raw, cfg['ema_fast'], cfg['ema_slow'])
-            st.line_chart(d.assign(EMA_szybka=d.ema_fast, EMA_wolna=d.ema_slow).set_index(pd.to_datetime(d.timestamp, unit='ms', utc=True))[['close', 'EMA_szybka', 'EMA_wolna']], height=330)
-            r = d.iloc[-2] if len(d) > 2 else d.iloc[-1]
-            st.caption(f"Zamknięta świeca: {datetime.fromtimestamp(float(r.timestamp)/1000, timezone.utc).isoformat()} · ADX {r.adx:.1f} · RSI {r.rsi:.1f}")
-        except Exception as e:
-            st.error(f'Nie można pobrać danych publicznych: {e}')
-    with right:
-        st.markdown('### Silnik zleceń')
-        st.write('Tryb paper:', 'WŁĄCZONY' if cfg['paper_mode'] else 'WYŁĄCZONY')
-        st.write('Automatyczny handel:', 'WŁĄCZONY' if cfg['auto_trade'] else 'WYŁĄCZONY')
-        try:
-            sig = signal_for(cfg, cfg['timeframe'])
-            st.metric('Sygnał główny', sig['signal'])
-            st.caption(sig.get('reason', ''))
-        except Exception as e:
-            st.caption(f'Sygnał niedostępny: {e}')
+    st.subheader('Panel Sesji i Analiza Kapitału')
+    st.write('Statystyki Twoich środków, slotów oraz wynik finansowy bieżącej sesji handlowej.')
+    
+    free_bal, total_bal, active_slots, session_pnl = 1000.0, 1000.0, 0, 0.0
+    try:
+        if key and secret:
+            ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
+            free_bal, total_bal = balance_usdt(ex)
+            positions = ex.fetch_positions()
+            active_slots = sum(1 for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0)
+            session_pnl = sum(float(p.get('unrealizedPnl') or 0) for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0)
+    except Exception:
+        pass
+
+    max_slots = int(cfg['max_positions'])
+    free_slots = max(0, max_slots - active_slots)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric('Kapitał / Saldo Całkowite', f'{total_bal:.2f} USDT', f'Wolne: {free_bal:.2f} USDT')
+    c2.metric('Sloty Pozycji (Aktywne / Max)', f'{active_slots} / {max_slots}', f'Wolne sloty: {free_slots}')
+    c3.metric('Wynik Sesji (PnL)', f'{session_pnl:+.2f} USDT', 'Niezrealizowany PnL' if active_slots > 0 else 'Brak pozycji')
+    c4.metric('Status Autopilota', 'WŁĄCZONY' if cfg['auto_trade'] else 'WYŁĄCZONY', 'PAPER' if cfg['paper_mode'] else 'LIVE')
+
     st.divider()
-    st.markdown('### Sterowanie botem')
-    with st.form('bot_controls'):
-        paper = st.checkbox('PAPER / symulacja — nie wysyłaj zleceń', value=bool(cfg['paper_mode']))
-        auto = st.checkbox('Włącz wykonywanie sygnałów automatycznie', value=bool(cfg['auto_trade']))
-        confirm = st.checkbox('Rozumiem ryzyko i potwierdzam, że testowałem konto oraz tryb pozycji giełdy')
-        submitted = st.form_submit_button('ZAPISZ TRYB PRACY')
-    if submitted:
-        if auto and not paper and not confirm: st.error('Aby włączyć live, zaznacz potwierdzenie ryzyka.')
-        else:
-            cfg['paper_mode'] = paper
-            cfg['auto_trade'] = auto
-            save_cfg(cfg)
-            st.success('Zapisano tryb pracy.')
-            st.rerun()
-    if st.button('Wykonaj jeden cykl bota', type='primary'):
-        try:
-            sigs = []
-            tfs = cfg['timeframes'] if cfg['mtf_enabled'] else [cfg['timeframe']]
-            for tf in dict.fromkeys(tfs): sigs.append(signal_for(cfg, tf))
-            active = [x['signal'] for x in sigs if x['signal'] in ('LONG', 'SHORT')]
-            direction = active[0] if active and all(x == active[0] for x in active) and len(active) == len(sigs) else 'WAIT'
-            st.dataframe(pd.DataFrame(sigs), use_container_width=True, hide_index=True)
-            event('INFO', f'MTF signal={direction}; details={sigs}')
-            if direction == 'WAIT': st.info('Brak zgodnego sygnału MTF — bez transakcji.')
-            elif not cfg['auto_trade']: st.info(f'Sygnał {direction}, ale wykonywanie jest wyłączone.')
-            elif cfg['paper_mode']:
-                st.success(f'[PAPER] Symulowany sygnał {direction}; żadne zlecenie nie zostało wysłane.')
+    st.markdown('### Bieżące aktywne pozycje na giełdzie')
+    try:
+        if key and secret:
+            ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
+            positions = ex.fetch_positions()
+            active_pos = [p for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0]
+            if active_pos:
+                st.dataframe(pd.DataFrame([{
+                    'Symbol': p.get('symbol'),
+                    'Strona': p.get('side'),
+                    'Kontrakty': p.get('contracts'),
+                    'Wejście': p.get('entryPrice'),
+                    'PnL (USDT)': p.get('unrealizedPnl')
+                } for p in active_pos]), use_container_width=True, hide_index=True)
             else:
-                if not key or not secret: raise RuntimeError('Brak zapisanych kluczy API')
-                ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
-                ex.load_markets()
-                pos = read_position(ex, cfg['symbol'])
-                if pos and position_qty(pos) > 0: st.warning('Istnieje już pozycja dla tego symbolu.')
-                else:
-                    positions = ex.fetch_positions()
-                    open_count = sum(1 for p in positions or [] if abs(float(p.get('contracts') or 0)) > 0)
-                    if open_count >= int(cfg['max_positions']): raise RuntimeError(f'Limit pozycji osiągnięty')
-                    free, _ = balance_usdt(ex)
-                    price = float(sigs[0]['price'])
-                    lev = int(cfg['leverage'])
-                    stop_fraction = (float(cfg['sl_roe']) / 100.0) / lev
-                    qty, notional = calc_qty(ex, cfg['symbol'], free, price, cfg, stop_fraction)
-                    try: ex.set_leverage(lev, cfg['symbol'])
-                    except Exception as le: event('WARNING', f'Nie udało się ustawić dźwigni: {le}')
-                    side = 'buy' if direction == 'LONG' else 'sell'
-                    order = market_order(ex, cfg['symbol'], side, qty, False)
-                    event('TRADE', f'OPEN {direction} {cfg["symbol"]} qty={qty} order={order.get("id")}')
-                    st.success(f'Wysłano zlecenie rynkowe {direction}: ilość {qty}. ID: {order.get("id")}')
-        except Exception as e:
-            event('ERROR', f'Bot cycle failed: {e}')
-            st.error(f'Cykl nie powiódł się: {e}')
+                st.info('Brak otwartych pozycji na giełdzie w tej chwili.')
+        else:
+            st.info('Skonfiguruj dane API, aby podglądać aktywne pozycje na żywo.')
+    except Exception as e:
+        st.warning(f'Nie udało się pobrać pozycji z giełdy: {e}')
+
     st.divider()
-    st.markdown('### Kill switch')
-    if st.button('ZAMKNIJ WSZYSTKIE POZYCJE', type='secondary'):
+    st.markdown('### Awaryjne zamknięcie wszystkich pozycji (Kill Switch)')
+    if st.button('ZAMKNIJ WSZYSTKIE POZYCJE RYNKOWO', type='secondary'):
         try:
             if not key or not secret: raise RuntimeError('Brak kluczy API')
             ex = exchange_client(ex_id, key, secret, password, cfg['market_type'])
             positions = ex.fetch_positions()
             outcomes = []
             for p in positions or []:
-                qty = position_qty(p)
+                qty = abs(float(p.get('contracts') or 0))
                 symbol = p.get('symbol')
                 if qty <= 0 or not symbol: continue
                 sideinfo = str(p.get('side') or '').lower()
@@ -495,4 +469,3 @@ else:
             for line in outcomes: event('KILL', line)
             st.write('\n'.join(outcomes) if outcomes else 'Giełda nie zgłasza otwartych pozycji.')
         except Exception as e: st.error(f'Kill switch nie powiódł się: {e}')
-
