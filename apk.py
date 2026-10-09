@@ -18,7 +18,7 @@ logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s %
 DEFAULTS = {
     'exchange': 'bitget', 'market_type': 'swap', 'candle_limit': 180,
     'refresh_seconds': 30, 'risk_usdt': 10.0, 'max_positions': 3, 'max_leverage': 10, 'sl_roe': 20.0, 'tp_roe': 40.0, 'enable_roe': True,
-    'timeframes': ['15m', '1h', '4h'],
+    'timeframes': ['15m', '1h', '4h', '1d'],
     'tf_settings': {
         '1m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
         '3m': {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0},
@@ -28,14 +28,16 @@ DEFAULTS = {
         '1h': {'ema_fast': 12, 'ema_slow': 26, 'adx_threshold': 22.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
         '2h': {'ema_fast': 12, 'ema_slow': 26, 'adx_threshold': 20.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
         '4h': {'ema_fast': 20, 'ema_slow': 50, 'adx_threshold': 20.0, 'rsi_min': 30.0, 'rsi_max': 70.0},
-        '1d': {'ema_fast': 50, 'ema_slow': 200, 'adx_threshold': 15.0, 'rsi_min': 35.0, 'rsi_max': 65.0}
+        '1d': {'ema_fast': 40, 'ema_slow': 140, 'adx_threshold': 15.0, 'rsi_min': 35.0, 'rsi_max': 65.0}
     },
     'auto_refresh': True, 'refresh_seconds': 30, 'auto_trade': False, 'paper_mode': True,
-    'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 20,
-    'indicator_multiplier': 100
+    'max_notional_usdt': 50.0, 'cooldown_seconds': 300, 'allow_short': True, 'allow_long': True, 'scan_limit_count': 30,
+    'indicator_multiplier': 60
 }
 
 TF_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
+ALLOW_TEST_ACTIVATION = True
+STRIPE_PRICE_ID_VAL = "price_1M_49pln_placeholder"
 
 CSS = '''
 <style>
@@ -99,7 +101,7 @@ def db():
     c.execute('CREATE TABLE IF NOT EXISTS credentials (k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS bot_state (symbol TEXT PRIMARY KEY, side TEXT, entry REAL, amount REAL, opened REAL, sl REAL, tp REAL, order_id TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, subscription TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, subscription TEXT, stripe_paid INTEGER DEFAULT 0, email TEXT)')
     c.commit()
     return c
 
@@ -166,7 +168,7 @@ def indicators(df, fast, slow):
 
 def get_effective_tf_cfg(cfg, tf):
     base_tf_cfg = cfg.get('tf_settings', {}).get(tf, {'ema_fast': 9, 'ema_slow': 21, 'adx_threshold': 25.0, 'rsi_min': 25.0, 'rsi_max': 75.0})
-    mult = float(cfg.get('indicator_multiplier', 100)) / 100.0
+    mult = float(cfg.get('indicator_multiplier', 60)) / 100.0
     return {
         'ema_fast': max(2, int(round(base_tf_cfg['ema_fast'] * mult))),
         'ema_slow': max(3, int(round(base_tf_cfg['ema_slow'] * mult))),
@@ -180,7 +182,7 @@ def signal_for_symbol(cfg, symbol, tf):
         tf_cfg = get_effective_tf_cfg(cfg, tf)
         raw = get_candles(cfg['exchange'], cfg['market_type'], symbol, tf, cfg['candle_limit'])
         d = indicators(raw.iloc[:-1].copy(), tf_cfg['ema_fast'], tf_cfg['ema_slow'])
-        if len(d) < max(tf_cfg['ema_slow'] + 5, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'NEUTRALNY', 'reason': 'Za mało świec'}
+        if len(d) < max(20, 35): return {'symbol': symbol, 'tf': tf, 'signal': 'NEUTRALNY', 'reason': 'Za mało świec'}
         r = d.iloc[-1]
         trend_up = r.ema_fast > r.ema_slow
         trend_down = r.ema_fast < r.ema_slow
@@ -223,9 +225,21 @@ def balance_usdt(ex):
     row = b.get('USDT') or {}
     return float(row.get('free') or 0), float(row.get('total') or 0)
 
+def is_user_paid():
+    return bool(st.session_state.get('stripe_paid', 0))
+
+def is_user_admin():
+    return st.session_state.get('username') == 'admin'
+
+def create_stripe_checkout_session(email, price_id):
+    return f"https://checkout.stripe.com/pay/{price_id}?client_reference_id={email}"
+
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['username'] = ''
+    st.session_state['user_id'] = None
+    st.session_state['stripe_paid'] = 0
+    st.session_state['user_email'] = ''
 
 if not st.session_state['authenticated']:
     st.markdown('<div class="brand-retro">Bitget-SaaS</div><div class="subbrand-retro">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
@@ -240,21 +254,25 @@ if not st.session_state['authenticated']:
             submit_login = st.form_submit_button("ZALOGUJ SIĘ", use_container_width=True)
             if submit_login:
                 with db() as c:
-                    row = c.execute("SELECT password FROM users WHERE username=?", (l_user,)).fetchone()
-                if row and row[0] == l_pass:
+                    row = c.execute("SELECT id, password, stripe_paid, email FROM users WHERE username=?", (l_user,)).fetchone()
+                if row and row[1] == l_pass:
                     st.session_state['authenticated'] = True
                     st.session_state['username'] = l_user
+                    st.session_state['user_id'] = row[0]
+                    st.session_state['stripe_paid'] = row[2]
+                    st.session_state['user_email'] = row[3] or f"{l_user}@bitget-saas.local"
                     st.success("Zalogowano pomyślnie!")
                     st.rerun()
                 else:
                     st.error("Nieprawidłowy login lub hasło.")
 
     with tab_reg:
-        st.subheader("Rejestracja użytkownika i subskrypcja")
+        st.subheader("Rejestracja użytkownika i subskrypcja (49 PLN / mies.)")
         with st.form("reg_form"):
             r_user = st.text_input("Nazwa użytkownika")
+            r_email = st.text_input("Adres E-mail", value="user@example.com")
             r_pass = st.text_input("Hasło", type="password")
-            r_sub = st.selectbox("Wybierz subskrypcję", ["Starter (Darmowy)", "Pro Trader (Miesięczny)", "VIP SaaS (Roczny)"])
+            r_sub = st.selectbox("Wybierz subskrypcję", ["Pro Trader (49 PLN / miesiąc)", "VIP SaaS (Roczny)"])
             submit_reg = st.form_submit_button("ZAREJESTRUJ SIĘ", use_container_width=True)
             if submit_reg:
                 if not r_user.strip() or not r_pass.strip():
@@ -262,7 +280,7 @@ if not st.session_state['authenticated']:
                 else:
                     try:
                         with db() as c:
-                            c.execute("INSERT INTO users(username, password, subscription) VALUES(?,?,?)", (r_user.strip(), r_pass.strip(), r_sub))
+                            c.execute("INSERT INTO users(username, password, subscription, stripe_paid, email) VALUES(?,?,?,0,?)", (r_user.strip(), r_pass.strip(), r_sub, r_email.strip()))
                             c.commit()
                         st.success("Konto utworzone pomyślnie! Możesz się teraz zalogować.")
                     except sqlite3.IntegrityError:
@@ -276,6 +294,47 @@ ex_id, key, secret, password = creds
 with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
     page = st.radio('NAWIGACJA', ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
+    
+    # ========================================================
+    # SUBSKRYPCJA / STRIPE (z Twojego kodu źródłowego)
+    # ========================================================
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Status Subskrypcji (49 PLN)")
+    
+    if is_user_admin() or is_user_paid():
+        st.sidebar.success("Subskrypcja aktywna (Pro)")
+    else:
+        st.sidebar.warning("Subskrypcja nieopłacona")
+        
+    checkout_url = create_stripe_checkout_session(
+        st.session_state.get("user_email", "user@bitget.local"),
+        STRIPE_PRICE_ID_VAL,
+    )
+    st.sidebar.link_button(
+        "OPŁAĆ SUBSKRYPCJĘ (49 PLN)",
+        checkout_url,
+        use_container_width=True,
+    )
+    
+    if ALLOW_TEST_ACTIVATION:
+        if st.sidebar.button(
+            "⚡ [TEST] Aktywuj dostęp natychmiast",
+            use_container_width=True,
+        ):
+            st.session_state['stripe_paid'] = 1
+            try:
+                with db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE users SET stripe_paid = 1 WHERE id = ?",
+                        (st.session_state.user_id,),
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+            st.success("Subskrypcja aktywowana testowo!")
+            st.rerun()
+            
     st.divider()
     if st.button('Wyloguj', use_container_width=True):
         st.session_state['authenticated'] = False
@@ -310,8 +369,8 @@ if page == 'Automatyczny Skaner i Auto-Handel':
         markets = ex.load_markets()
         
         all_symbols = [s for s, m in markets.items() if m.get('quote') == 'USDT' and m.get('active') and m.get('linear')]
-        target_symbols = all_symbols[:int(cfg.get('scan_limit_count', 20))]
-        target_tfs = cfg.get('timeframes', ['15m'])
+        target_symbols = all_symbols[:int(cfg.get('scan_limit_count', 30))]
+        target_tfs = cfg.get('timeframes', ['4h', '1d'])
         
         st.info(f'Skanowanie {len(target_symbols)} par na interwałach: {", ".join(target_tfs)}...')
         
@@ -360,7 +419,7 @@ elif page == 'Ustawienia Strategii':
         cfg['tf_settings'] = DEFAULTS['tf_settings']
         
     if 'selected_tf_edit' not in st.session_state:
-        st.session_state['selected_tf_edit'] = '15m'
+        st.session_state['selected_tf_edit'] = '1d'
 
     def update_tf_selection():
         st.session_state['selected_tf_edit'] = st.session_state['tf_selectbox_key']
@@ -368,7 +427,7 @@ elif page == 'Ustawienia Strategii':
     selected_tf_tab = st.selectbox(
         'Wybierz interwał do edycji parametrów bazowych', 
         TF_OPTIONS, 
-        index=TF_OPTIONS.index(st.session_state['selected_tf_edit']) if st.session_state['selected_tf_edit'] in TF_OPTIONS else 3,
+        index=TF_OPTIONS.index(st.session_state['selected_tf_edit']) if st.session_state['selected_tf_edit'] in TF_OPTIONS else 8,
         key='tf_selectbox_key',
         on_change=update_tf_selection
     )
@@ -380,8 +439,8 @@ elif page == 'Ustawienia Strategii':
         with a:
             cfg['exchange'] = st.selectbox('Giełda', ['bitget', 'binanceusdm', 'bybit', 'okx'], index=['bitget', 'binanceusdm', 'bybit', 'okx'].index(cfg['exchange']) if cfg['exchange'] in ['bitget', 'binanceusdm', 'bybit', 'okx'] else 0)
             cfg['market_type'] = st.selectbox('Rynek', ['swap', 'future'], index=0 if cfg['market_type'] == 'swap' else 1)
-            cfg['scan_limit_count'] = st.slider('Suwak limitu skanowanych par z giełdy', 5, 50, int(cfg.get('scan_limit_count', 20)))
-            cfg['timeframes'] = st.multiselect('Interwały do skanowania w tle', TF_OPTIONS, default=[x for x in cfg.get('timeframes', ['15m']) if x in TF_OPTIONS] or ['15m'])
+            cfg['scan_limit_count'] = st.slider('Suwak limitu skanowanych par z giełdy', 5, 50, int(cfg.get('scan_limit_count', 30)))
+            cfg['timeframes'] = st.multiselect('Interwały do skanowania w tle', TF_OPTIONS, default=[x for x in cfg.get('timeframes', ['4h', '1d']) if x in TF_OPTIONS] or ['4h', '1d'])
             cfg['indicator_multiplier'] = st.slider('Automatyczny multiplikator wskaźników (%)', 0, 100, int(cfg.get('indicator_multiplier', 60)), help="Skala od 0 do 100% określająca stopień automatycznego dostrajania wskaźników przez bota.")
         with b:
             cfg['risk_usdt'] = st.number_input('Maks. ryzyko na pozycję (USDT)', 1.0, 10000.0, float(cfg['risk_usdt']))
