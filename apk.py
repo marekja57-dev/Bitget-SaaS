@@ -64,7 +64,7 @@ ADMIN_EMAILS = [
 
 TRANSLATIONS = {
     "Polski": {
-        "title": "Bitget-SaaS",
+        "title": "BITGET FUTURES",
         "subtitle": "AUTONOMICZNY SYSTEM TRANSAKCYJNY",
         "login_tab": "Zaloguj się",
         "register_tab": "Załóż konto",
@@ -124,7 +124,7 @@ TRANSLATIONS = {
         "terms_body": "System jest narzędziem wspomagającym handel. Użytkownik odpowiada za własne ustawienia, klucze API, środki oraz decyzje inwestycyjne. Handel Futures wiąże się z ryzykiem utraty kapitału. Nie udostępniaj kluczy API osobom trzecim.",
     },
     "English": {
-        "title": "Bitget-SaaS",
+        "title": "BITGET FUTURES",
         "subtitle": "AUTONOMOUS TRADING SYSTEM",
         "login_tab": "Login",
         "register_tab": "Register",
@@ -254,140 +254,64 @@ def _mtf_default_settings():
 
 
 def load_mtf_settings(user_id):
-    """Wczytuje ustawienia osobno dla każdego interwału, bez wspólnych wartości."""
     data = _mtf_default_settings()
-    if not user_id:
-        return data
-    conn = None
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
         row = conn.execute(
             "SELECT settings_json FROM user_mtf_settings WHERE user_id=?",
             (int(user_id),),
         ).fetchone()
+        conn.close()
         if not row or not row[0]:
             return data
         saved = json.loads(row[0])
         if not isinstance(saved, dict):
             return data
-
-        # Każdy interwał jest pobierany wyłącznie spod własnego klucza (np. "5m").
-        # Obsługujemy też starsze nazwy pól, aby nie zgubić wcześniej zapisanych danych.
         for tf in AVAILABLE_TIMEFRAMES:
-            src = saved.get(tf)
+            src = saved.get(tf, {})
             if not isinstance(src, dict):
                 continue
             dst = data[tf]
             mode = str(src.get("mode", dst["mode"]))
             dst["mode"] = "Ręczny" if mode == "Ręczny" else "Automatyczny"
-            try:
-                fast = int(float(src.get("ema_fast", src.get("ema_f", dst["ema_fast"]))))
-                slow = int(float(src.get("ema_slow", src.get("ema_s", dst["ema_slow"]))))
-                fast = max(1, min(200, fast))
-                slow = max(2, min(300, slow))
-                # Nie przestawiaj obu wartości na domyślne; koryguj tylko konflikt fast >= slow.
-                if fast >= slow:
-                    if slow < 300:
-                        slow = fast + 1
-                    else:
-                        fast = slow - 1
-                dst["ema_fast"], dst["ema_slow"] = fast, slow
-                dst["min_adx"] = max(10.0, min(50.0, float(src.get("min_adx", src.get("adx", dst["min_adx"])))) )
-                dst["max_rsi"] = max(50.0, min(95.0, float(src.get("max_rsi", dst["max_rsi"]))))
-                dst["min_rsi"] = max(5.0, min(50.0, float(src.get("min_rsi", dst["min_rsi"]))))
-                dst["capital_multiplier"] = max(0.1, min(20.0, float(src.get("capital_multiplier", src.get("cap_mult", dst["capital_multiplier"])))) )
-            except (TypeError, ValueError, OverflowError):
-                # Wadliwy pojedynczy wpis nie nadpisuje ustawień innych interwałów.
-                continue
-    except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError):
+            dst["ema_fast"] = max(1, min(200, int(float(src.get("ema_fast", dst["ema_fast"])))) )
+            dst["ema_slow"] = max(2, min(300, int(float(src.get("ema_slow", dst["ema_slow"])))) )
+            if dst["ema_fast"] >= dst["ema_slow"]:
+                dst["ema_fast"], dst["ema_slow"] = dst["ema_slow"] - 1, dst["ema_slow"]
+            dst["min_adx"] = max(10.0, min(50.0, float(src.get("min_adx", src.get("adx", dst["min_adx"])))) )
+            dst["max_rsi"] = max(50.0, min(95.0, float(src.get("max_rsi", dst["max_rsi"]))))
+            dst["min_rsi"] = max(5.0, min(50.0, float(src.get("min_rsi", dst["min_rsi"]))))
+            dst["capital_multiplier"] = max(0.1, min(20.0, float(src.get("capital_multiplier", src.get("cap_mult", dst["capital_multiplier"])))) )
+    except Exception:
         pass
-    finally:
-        if conn is not None:
-            conn.close()
     return data
 
 
 def save_mtf_settings(user_id, settings=None):
-    """Zapisuje pełny zestaw ustawień per użytkownik i interwał. Zabezpieczenie: nie wolno zapisać wartości domyślnych z nowej sesji, zanim ustawienia tego użytkownika zostaną odczytane z bazy. """
-    if not user_id:
-        return False
     try:
-        uid = int(user_id)
-    except (TypeError, ValueError):
-        return False
-
-    # Zwykły zapis z widżetów wymaga wcześniejszego wczytania ustawień
-    # tego samego użytkownika. Chroni to przed nadpisaniem ich wartościami
-    # startowymi po reconnect/rerun/login.
-    if settings is None and st.session_state.get("_mtf_loaded_user_id") != uid:
-        return False
-
-    conn = None
-    try:
-        # Najpierw zachowujemy zapisane ustawienia, żeby brakujący klucz w session_state
-        # nie zamienił się przypadkowo w wartość domyślną dla danego interwału.
-        payload = load_mtf_settings(int(user_id))
-        if isinstance(settings, dict):
+        if settings is None:
+            settings = {}
             for tf in AVAILABLE_TIMEFRAMES:
-                incoming = settings.get(tf)
-                if isinstance(incoming, dict):
-                    payload[tf].update(incoming)
-        else:
-            for tf in AVAILABLE_TIMEFRAMES:
-                defaults = DEFAULT_TF_VALUES[tf]
-                # Osobne klucze Streamlit dla każdego TF; nie używaj wartości z innego interwału.
-                values = {
-                    "mode": st.session_state.get(f"radio_mode_{tf}", payload[tf]["mode"]),
-                    "ema_fast": st.session_state.get(f"ema_f_{tf}", payload[tf]["ema_fast"]),
-                    "ema_slow": st.session_state.get(f"ema_s_{tf}", payload[tf]["ema_slow"]),
-                    "min_adx": st.session_state.get(f"adx_{tf}", payload[tf]["min_adx"]),
-                    "max_rsi": st.session_state.get(f"max_rsi_{tf}", payload[tf]["max_rsi"]),
-                    "min_rsi": st.session_state.get(f"min_rsi_{tf}", payload[tf]["min_rsi"]),
-                    "capital_multiplier": st.session_state.get(f"cap_mult_{tf}", payload[tf]["capital_multiplier"]),
+                settings[tf] = {
+                    "mode": st.session_state.get(f"radio_mode_{tf}", "Automatyczny"),
+                    "ema_fast": int(st.session_state.get(f"ema_f_{tf}", DEFAULT_TF_VALUES[tf]["ema_fast"])),
+                    "ema_slow": int(st.session_state.get(f"ema_s_{tf}", DEFAULT_TF_VALUES[tf]["ema_slow"])),
+                    "min_adx": float(st.session_state.get(f"adx_{tf}", DEFAULT_TF_VALUES[tf]["adx"])),
+                    "max_rsi": float(st.session_state.get(f"max_rsi_{tf}", DEFAULT_TF_VALUES[tf]["max_rsi"])),
+                    "min_rsi": float(st.session_state.get(f"min_rsi_{tf}", DEFAULT_TF_VALUES[tf]["min_rsi"])),
+                    "capital_multiplier": float(st.session_state.get(f"cap_mult_{tf}", DEFAULT_TF_VALUES[tf]["cap_mult"])),
                     "tf": tf,
                 }
-                # Zapisuj tylko wartości prawidłowe, bez cichego resetowania pozostałych TF.
-                try:
-                    values["ema_fast"] = max(1, min(200, int(values["ema_fast"])))
-                    values["ema_slow"] = max(2, min(300, int(values["ema_slow"])))
-                    if values["ema_fast"] >= values["ema_slow"]:
-                        values["ema_slow"] = min(300, values["ema_fast"] + 1)
-                        if values["ema_fast"] >= values["ema_slow"]:
-                            values["ema_fast"] = values["ema_slow"] - 1
-                    values["min_adx"] = max(10.0, min(50.0, float(values["min_adx"])))
-                    values["max_rsi"] = max(50.0, min(95.0, float(values["max_rsi"])))
-                    values["min_rsi"] = max(5.0, min(50.0, float(values["min_rsi"])))
-                    values["capital_multiplier"] = max(0.1, min(20.0, float(values["capital_multiplier"])))
-                    values["mode"] = "Ręczny" if values["mode"] == "Ręczny" else "Automatyczny"
-                    payload[tf] = values
-                except (TypeError, ValueError, OverflowError):
-                    continue
-
-        # Normalizacja pól i wymuszenie prawidłowej etykiety TF.
-        normalized = {}
-        for tf in AVAILABLE_TIMEFRAMES:
-            src = payload.get(tf, {})
-            base = _mtf_default_settings()[tf]
-            item = dict(base)
-            if isinstance(src, dict):
-                item.update(src)
-            item["tf"] = tf
-            normalized[tf] = item
-
+        payload = {tf: dict(settings.get(tf, {})) for tf in AVAILABLE_TIMEFRAMES}
         conn = sqlite3.connect(DB_FILE, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute(
             """INSERT INTO user_mtf_settings(user_id,settings_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json, updated_at=excluded.updated_at""",
-            (int(user_id), json.dumps(normalized, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")),
+            (int(user_id), json.dumps(payload, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")),
         )
         conn.commit()
-        return True
-    except (sqlite3.Error, TypeError, ValueError, OverflowError):
-        return False
-    finally:
-        if conn is not None:
-            conn.close()
+        conn.close()
+    except Exception:
+        pass
 
 
 def load_active_bots(user_id):
@@ -437,20 +361,8 @@ def apply_mtf_to_session(user_id, force=False):
 
 def _save_mtf_callback():
     uid = st.session_state.get("user_id")
-    if not uid:
-        return
-    try:
-        uid = int(uid)
-    except (TypeError, ValueError):
-        return
-
-    # Jeśli użytkownik zmienił się lub sesja nie zdążyła wczytać ustawień,
-    # najpierw odtwórz zapis z bazy. Nie zapisuj wtedy domyślnych wartości.
-    if st.session_state.get("_mtf_loaded_user_id") != uid:
-        apply_mtf_to_session(uid, force=True)
-        return
-
-    save_mtf_settings(uid)
+    if uid:
+        save_mtf_settings(int(uid))
 
 
 for tf in AVAILABLE_TIMEFRAMES:
@@ -538,15 +450,6 @@ def init_db():
             """ CREATE TABLE IF NOT EXISTS user_bot_state ( user_id INTEGER PRIMARY KEY, bots_json TEXT NOT NULL, updated_at TEXT NOT NULL ) """
         )
 
-        # Trwała historia transakcji — niezależna od sesji Streamlit.
-        cursor.execute(
-            """ CREATE TABLE IF NOT EXISTS user_trade_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, trade_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ) """
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_user_trade_history_user_id_id "
-            "ON user_trade_history(user_id, id DESC)"
-        )
-
         columns = [
             ("api_key", "TEXT"),
             ("secret_key", "TEXT"),
@@ -573,65 +476,6 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
-
-
-def load_trade_history(user_id, limit=200):
-    """Wczytuje ostatnie transakcje danego użytkownika z SQLite."""
-    if not user_id:
-        return []
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    try:
-        rows = conn.execute(
-            "SELECT trade_json FROM user_trade_history "
-            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-            (int(user_id), int(limit)),
-        ).fetchall()
-        history = []
-        for (raw,) in rows:
-            try:
-                item = json.loads(raw)
-                if isinstance(item, dict):
-                    history.append(item)
-            except (TypeError, json.JSONDecodeError):
-                continue
-        return history
-    finally:
-        conn.close()
-
-
-def save_trade_history_item(user_id, trade, max_rows=500):
-    """Dopisuje zdarzenie do trwałej historii, nie nadpisując wcześniejszych."""
-    if not user_id or not isinstance(trade, dict):
-        return
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    try:
-        conn.execute(
-            "INSERT INTO user_trade_history(user_id, trade_json, created_at) "
-            "VALUES (?, ?, ?)",
-            (int(user_id), json.dumps(trade, ensure_ascii=False, default=str),
-             str(trade.get("Czas") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))),
-        )
-        # Ogranicz rozmiar bazy, ale zachowaj ostatnie 500 wpisów na użytkownika.
-        conn.execute(
-            "DELETE FROM user_trade_history WHERE user_id = ? AND id NOT IN "
-            "(SELECT id FROM user_trade_history WHERE user_id = ? "
-            "ORDER BY id DESC LIMIT ?)",
-            (int(user_id), int(user_id), int(max_rows)),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def record_trade(trade):
-    """Dodaje transakcję do widoku i zapisuje ją na stałe dla zalogowanego użytkownika."""
-    if not isinstance(trade, dict):
-        return
-    if "trade_history" not in st.session_state:
-        st.session_state.trade_history = []
-    st.session_state.trade_history.insert(0, trade)
-    st.session_state.trade_history = st.session_state.trade_history[:200]
-    save_trade_history_item(st.session_state.get("user_id"), trade)
 
 
 def get_secret(name, default=""):
@@ -969,7 +813,7 @@ def get_exchange( api_k="", sec_k="", pass_k="", ex_name="Bitget", allow_public=
 
 
 def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, leverage, stop_loss_roe, take_profit_roe, ):
-    """Place real exchange-side SL/TP using the exact ROE sliders. For Bitget USDT-M Futures we use Bitget's position TPSL endpoint directly, because that endpoint is specifically designed to attach position-level stop-loss and take-profit protection. For other exchanges we use CCXT's unified stopLossPrice/takeProfitPrice trigger orders. """
+    """Ustawia giełdowy SL i TP dokładnie według wartości ROE z panelu. ROE jest przeliczane na zmianę ceny instrumentu przez dźwignię: price_move = ROE / leverage Dzięki temu ustawienia z suwaków są identyczne z ochroną pozycji wystawioną na giełdzie, a nie tylko z lokalnym strażnikiem. """
     result = {
         "sl_price": None,
         "tp_price": None,
@@ -980,16 +824,14 @@ def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, le
     }
 
     try:
-        entry = float(entry_price or 0.0)
+        entry = float(entry_price or 0)
         lev = max(1.0, float(leverage or 1.0))
         sl_roe = max(0.0, float(stop_loss_roe or 0.0))
         tp_roe = max(0.0, float(take_profit_roe or 0.0))
         qty = abs(float(amount or 0.0))
 
-        if entry <= 0 or qty <= 0:
-            raise ValueError("Nieprawidłowa cena wejścia lub ilość pozycji.")
-        if sl_roe <= 0 and tp_roe <= 0:
-            raise ValueError("Stop Loss i Take Profit są wyłączone.")
+        if entry <= 0 or qty <= 0 or sl_roe <= 0 or tp_roe <= 0:
+            raise ValueError("Nieprawidłowe parametry SL/TP.")
 
         side = str(position_side or "").lower()
         is_long = side in ("buy", "long")
@@ -1000,122 +842,80 @@ def place_sl_tp_orders( exchange, symbol, position_side, amount, entry_price, le
         tp_move = tp_roe / (100.0 * lev)
 
         if is_long:
-            sl_price = entry * (1.0 - sl_move) if sl_roe > 0 else None
-            tp_price = entry * (1.0 + tp_move) if tp_roe > 0 else None
+            sl_price = entry * (1.0 - sl_move)
+            tp_price = entry * (1.0 + tp_move)
+            close_side = "sell"
         else:
-            sl_price = entry * (1.0 + sl_move) if sl_roe > 0 else None
-            tp_price = entry * (1.0 - tp_move) if tp_roe > 0 else None
+            sl_price = entry * (1.0 + sl_move)
+            tp_price = entry * (1.0 - tp_move)
+            close_side = "buy"
 
-        if sl_price is not None:
-            sl_price = float(exchange.price_to_precision(symbol, sl_price))
-            result["sl_price"] = sl_price
-        if tp_price is not None:
-            tp_price = float(exchange.price_to_precision(symbol, tp_price))
-            result["tp_price"] = tp_price
-
-        # ------------------------------------------------------------
-        # BITGET USDT-FUTURES: use the native position TPSL endpoint.
-        # This avoids creating a normal market order with a trigger parameter,
-        # which can be rejected/ignored depending on the Bitget account mode.
-        # ------------------------------------------------------------
-        if getattr(exchange, "id", "") == "bitget":
-            method = getattr(exchange, "privateMixPostV2MixOrderPlacePosTpsl", None)
-            if method is None:
-                raise RuntimeError(
-                    "Zainstalowana wersja CCXT nie udostępnia Bitget "
-                    "place-pos-tpsl. Zaktualizuj pakiet ccxt."
-                )
-
-            market = exchange.market(symbol)
-            margin_coin = str(
-                market.get("settle")
-                or market.get("quote")
-                or "USDT"
-            ).upper()
-            product_type = "USDT-FUTURES"
-            # The app opens positions in one-way buy/sell mode.
-            hold_side = "buy" if is_long else "sell"
-
-            params = {
-                "marginCoin": margin_coin,
-                "productType": product_type,
-                "holdSide": hold_side,
-                "stpMode": "none",
-            }
-
-            if sl_price is not None:
-                params.update({
-                    "stopLossTriggerPrice": str(sl_price),
-                    "stopLossTriggerType": "mark_price",
-                    "stopLossExecutePrice": "0",
-                })
-            if tp_price is not None:
-                params.update({
-                    "stopSurplusTriggerPrice": str(tp_price),
-                    "stopSurplusTriggerType": "mark_price",
-                    "stopSurplusExecutePrice": "0",
-                })
-
-            # Position-level TPSL does not require a size. Bitget binds the
-            # protection to the currently open position on this symbol/side.
-            response = method(params)
-            if not isinstance(response, dict) or str(response.get("code", "00000")) != "00000":
-                raise RuntimeError(f"Bitget TPSL error: {response}")
-
-            if sl_price is not None:
-                result["sl_ok"] = True
-            if tp_price is not None:
-                result["tp_ok"] = True
-            return result
-
-        # ------------------------------------------------------------
-        # OTHER EXCHANGES: CCXT unified conditional orders.
-        # ------------------------------------------------------------
-        close_side = "sell" if is_long else "buy"
+        sl_price = float(exchange.price_to_precision(symbol, sl_price))
+        tp_price = float(exchange.price_to_precision(symbol, tp_price))
+        result["sl_price"] = sl_price
+        result["tp_price"] = tp_price
 
         def _submit(trigger_price, kind):
-            if trigger_price is None:
-                return None
-            if kind == "SL":
-                params = {
-                    "stopLossPrice": trigger_price,
-                    "reduceOnly": True,
-                }
-            else:
-                params = {
-                    "takeProfitPrice": trigger_price,
-                    "reduceOnly": True,
-                }
-            return exchange.create_order(
-                symbol,
-                "market",
-                close_side,
-                qty,
-                None,
-                params,
-            )
-
-        if sl_price is not None:
+            # Najpierw używamy zunifikowanego CCXT stopLossPrice /
+            # takeProfitPrice. To jest bezpieczniejsza ścieżka niż
+            # ręczne parametry zależne od konkretnej giełdy.
+            unified_key = "stopLossPrice" if kind == "SL" else "takeProfitPrice"
+            params = {
+                "reduceOnly": True,
+                unified_key: trigger_price,
+            }
             try:
-                _submit(sl_price, "SL")
-                result["sl_ok"] = True
-            except Exception as exc:
-                result["sl_error"] = str(exc)
+                return exchange.create_order(
+                    symbol,
+                    "market",
+                    close_side,
+                    qty,
+                    None,
+                    params,
+                )
+            except Exception as first_error:
+                # Druga zunifikowana ścieżka CCXT dla giełd, które
+                # oczekują bezpośrednio triggerPrice.
+                trigger_direction = (
+                    "1" if trigger_price > entry else "2"
+                )
+                fallback = {
+                    "reduceOnly": True,
+                    "triggerPrice": trigger_price,
+                    "triggerDirection": trigger_direction,
+                }
+                try:
+                    return exchange.create_order(
+                        symbol,
+                        "market",
+                        close_side,
+                        qty,
+                        None,
+                        fallback,
+                    )
+                except Exception as second_error:
+                    raise RuntimeError(
+                        f"{kind}: {first_error}; fallback: {second_error}"
+                    ) from second_error
 
-        if tp_price is not None:
-            try:
-                _submit(tp_price, "TP")
-                result["tp_ok"] = True
-            except Exception as exc:
-                result["tp_error"] = str(exc)
-
-    except Exception as exc:
-        if not result["sl_ok"]:
+        try:
+            _submit(sl_price, "SL")
+            result["sl_ok"] = True
+        except Exception as exc:
             result["sl_error"] = str(exc)
-        if not result["tp_ok"]:
+
+        try:
+            _submit(tp_price, "TP")
+            result["tp_ok"] = True
+        except Exception as exc:
             result["tp_error"] = str(exc)
 
+    except Exception as exc:
+        result["sl_error"] = str(exc)
+        result["tp_error"] = str(exc)
+
     return result
+
 
 def calculate_risk_based_allocation( free_balance, entry_price, stop_loss_price, risk_percentage=0.01, leverage=1, max_single_limit=50.0, tf_multiplier=1.0, ):
     if free_balance <= 0 or entry_price <= 0 or stop_loss_price <= 0:
@@ -1255,7 +1055,7 @@ if st.query_params.get("success") == "true":
 # ============================================================
 
 st.markdown(
-    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background: linear-gradient(135deg, #061a3a 0%, #0b2e63 52%, #06152f 100%) !important; } section[data-testid="stSidebar"] { background: linear-gradient(180deg, #08234b 0%, #06152f 100%) !important; border-right: 2px solid #f3d57a; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: linear-gradient(145deg, rgba(8, 35, 75, 0.97) 0%, rgba(5, 21, 47, 0.98) 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { display: inline-block; box-sizing: border-box; width: 100%; padding: 18px 12px; margin: 0 auto 18px auto; background: linear-gradient(135deg, #1e4d2b 0%, #0f2b17 100%); border: 3px solid #f3d57a; border-radius: 10px; box-shadow: 0 0 22px rgba(243, 213, 122, 0.18), inset 0 0 12px rgba(0, 0, 0, 0.35); font-family: 'Bungee Inline', cursive, sans-serif; font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.2; color: #f3d57a; letter-spacing: 4px; text-shadow: 2px 2px 0 rgba(0,0,0,0.8); } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } /* Spójna typografia panelu: taka sama rodzina liter jak logowanie i zielone kafelki. */ /* Wyrównanie kafelków MTF: wszystkie kolumny mają równą wysokość i spokojnie mieszczą napisy. */ .st-key-mtf_grid [data-testid="stHorizontalBlock"] { align-items: stretch !important; gap: 0.55rem !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div { min-width: 0 !important; display: flex !important; align-items: stretch !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div > div { width: 100% !important; } /* Mniejsze, zwarte etykiety — bez rozpychania kafelków przez zawijanie tekstu. */ .st-key-mtf_grid [data-testid="stWidgetLabel"] p, .st-key-mtf_grid [data-testid="stWidgetLabel"] label { font-family: 'Cinzel', serif !important; font-size: 0.66rem !important; line-height: 1.05 !important; letter-spacing: 0 !important; margin-bottom: 0.12rem !important; } .st-key-mtf_grid .stRadio label, .st-key-mtf_grid [data-baseweb="radio"] label { font-size: 0.64rem !important; line-height: 1.05 !important; } .st-key-mtf_grid [data-testid="stCaptionContainer"], .st-key-mtf_grid [data-testid="stAlert"] { font-size: 0.62rem !important; line-height: 1.08 !important; } .st-key-mtf_grid div.stButton > button { min-height: 2.35rem !important; height: 2.35rem !important; padding: 0.25rem 0.35rem !important; font-size: 0.68rem !important; line-height: 1.0 !important; white-space: normal !important; } .st-key-mtf_grid [data-testid="stAlert"] { min-height: 3.4rem !important; padding: 0.45rem 0.5rem !important; } h1, h2, h3, h4, h5, h6, [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6 { font-family: 'Cinzel', serif !important; } h1, h2, h3, h4, h5, h6 { color: #f3d57a !important; letter-spacing: 0.5px; } [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label { color: #e6c687 !important; } [data-testid="stExpander"] summary p { font-family: 'Cinzel', serif !important; color: #f3d57a !important; font-weight: 700 !important; } /* Logowanie i rejestracja na niebieskim tle; kafelek marki pozostaje zielono-złoty. */ [data-testid="stTabs"] [data-baseweb="tab-list"] { background: rgba(5, 21, 47, 0.55) !important; border-bottom: 1px solid rgba(243, 213, 122, 0.45) !important; } [data-testid="stTabs"] [data-baseweb="tab"] { color: #f3d57a !important; font-family: 'Cinzel', serif !important; } [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stTextArea"] textarea, [data-baseweb="select"] > div { background-color: #071a37 !important; color: #ffffff !important; border-color: #f3d57a !important; } @media (max-width: 600px) { .hero-wrapper { padding-top: 20px; } .retro-ornate-frame { padding: 24px 16px; } .retro-vintage-title { letter-spacing: 2px; padding: 15px 8px; } } </style> """,
+    """ <style> @import url('https://fonts.googleapis.com/css2?family=Bungee+Inline&family=Cinzel:wght@700&display=swap'); .stApp { background-color: #0d0b0a; } section[data-testid="stSidebar"] { background-color: #141110; border-right: 2px solid #3d2f1f; } .metrics-row { display: flex; flex-direction: row; flex-wrap: nowrap !important; gap: 14px; width: 100%; margin-bottom: 10px; } .metric-card { flex: 1; min-width: 0; border: 2px solid #f3d57a; border-radius: 10px; padding: 12px 14px; background-color: rgba(243, 213, 122, 0.03); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); } .metric-label { font-family: 'Cinzel', serif; color: #f3d57a; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .metric-value { font-size: 1.4rem; font-weight: bold; color: #ffffff; margin-bottom: 4px; } .metric-delta { font-size: 0.75rem; color: #e6c687; } .hero-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; padding-top: 50px; padding-bottom: 20px; } .retro-ornate-frame { position: relative; background: radial-gradient(circle, #221a14 0%, #110d0a 100%); border: 6px double #f3d57a; padding: 40px 30px; border-radius: 16px; box-shadow: 0 0 50px rgba(243, 213, 122, 0.4), inset 0 0 35px rgba(0, 0, 0, 0.9); width: 100%; max-width: 600px; text-align: center; } .retro-vintage-title { font-family: 'Bungee Inline', cursive, sans-serif; font-size: 3rem; color: #f3d57a; letter-spacing: 4px; text-shadow: 4px 4px 0px #8b0000, 8px 8px 0px rgba(0,0,0,0.95); margin-bottom: 10px; } .retro-subtitle { font-family: 'Cinzel', serif; color: #e6c687; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 25px; } div.stButton > button { background: linear-gradient( 135deg, #1e4d2b 0%, #0f2b17 100% ) !important; color: #f3d57a !important; border: 2px solid #f3d57a !important; font-family: 'Cinzel', serif !important; font-weight: 700 !important; font-size: 1rem !important; padding: 10px 24px !important; border-radius: 8px !important; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; transition: all 0.3s ease !important; } div.stButton > button:hover { background: linear-gradient( 135deg, #28663a 0%, #163d22 100% ) !important; border-color: #ffe89d !important; color: #ffe89d !important; box-shadow: 0 0 20px rgba(243, 213, 122, 0.4) !important; transform: translateY(-2px); } /* Spójna typografia panelu: taka sama rodzina liter jak logowanie i zielone kafelki. */ /* Wyrównanie kafelków MTF: wszystkie kolumny mają równą wysokość i spokojnie mieszczą napisy. */ .st-key-mtf_grid [data-testid="stHorizontalBlock"] { align-items: stretch !important; gap: 0.55rem !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div { min-width: 0 !important; display: flex !important; align-items: stretch !important; } .st-key-mtf_grid [data-testid="stHorizontalBlock"] > div > div { width: 100% !important; } /* Mniejsze, zwarte etykiety — bez rozpychania kafelków przez zawijanie tekstu. */ .st-key-mtf_grid [data-testid="stWidgetLabel"] p, .st-key-mtf_grid [data-testid="stWidgetLabel"] label { font-family: 'Cinzel', serif !important; font-size: 0.66rem !important; line-height: 1.05 !important; letter-spacing: 0 !important; margin-bottom: 0.12rem !important; } .st-key-mtf_grid .stRadio label, .st-key-mtf_grid [data-baseweb="radio"] label { font-size: 0.64rem !important; line-height: 1.05 !important; } .st-key-mtf_grid [data-testid="stCaptionContainer"], .st-key-mtf_grid [data-testid="stAlert"] { font-size: 0.62rem !important; line-height: 1.08 !important; } .st-key-mtf_grid div.stButton > button { min-height: 2.35rem !important; height: 2.35rem !important; padding: 0.25rem 0.35rem !important; font-size: 0.68rem !important; line-height: 1.0 !important; white-space: normal !important; } .st-key-mtf_grid [data-testid="stAlert"] { min-height: 3.4rem !important; padding: 0.45rem 0.5rem !important; } h1, h2, h3, h4, h5, h6, [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6 { font-family: 'Cinzel', serif !important; } h1, h2, h3, h4, h5, h6 { color: #f3d57a !important; letter-spacing: 0.5px; } [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, section[data-testid="stSidebar"] label { color: #e6c687 !important; } [data-testid="stExpander"] summary p { font-family: 'Cinzel', serif !important; color: #f3d57a !important; font-weight: 700 !important; } </style> """,
     unsafe_allow_html=True,
 )
 
@@ -1337,8 +1137,6 @@ if not st.session_state.logged_in:
                 st.session_state.secret_key = user_row[6] or ""
                 st.session_state.passphrase = user_row[7] or ""
                 st.session_state.selected_exchange = user_row[8] or "Bitget"
-                st.session_state.trade_history = load_trade_history(user_row[0])
-                st.session_state._trade_history_loaded_user_id = int(user_row[0])
                 apply_mtf_to_session(user_row[0], force=True)
 
                 # Migracja starego hasła do bezpieczniejszego formatu.
@@ -1437,12 +1235,6 @@ if not st.session_state.logged_in:
     st.stop()
 
 apply_mtf_to_session(st.session_state.get("user_id"))
-
-# Przywróć historię po odświeżeniu strony albo restarcie aplikacji.
-_current_uid = st.session_state.get("user_id")
-if _current_uid and st.session_state.get("_trade_history_loaded_user_id") != int(_current_uid):
-    st.session_state.trade_history = load_trade_history(_current_uid)
-    st.session_state._trade_history_loaded_user_id = int(_current_uid)
 
 
 # ============================================================
@@ -1732,11 +1524,8 @@ if enable_roe_guard:
     )
 
 else:
-    # Wyłączona ochrona = brak zlecenia SL/TP na giełdzie.
-    # Nie używamy wartości 999%, bo mogłaby przypadkowo stać się
-    # prawdziwym poziomem ochrony.
-    custom_stop_loss_roe = 0.0
-    custom_take_profit_roe = 0.0
+    custom_stop_loss_roe = 999.0
+    custom_take_profit_roe = 999.0
     cooldown_after_sl_tp_minutes = 15
 
 
@@ -1904,6 +1693,7 @@ if emergency_kill:
     st.session_state.active_mtf_bots = {}
     if st.session_state.get("user_id"):
         save_active_bots(st.session_state.user_id)
+    st.session_state.trade_history = []
     st.session_state.symbol_cooldown = {}
 
     st.success(
@@ -2094,7 +1884,9 @@ if futures_ex:
                                 * 60
                             )
 
-                            record_trade({
+                            st.session_state.trade_history.insert(
+                                0,
+                                {
                                     "Czas": datetime.now().strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     ),
@@ -2116,7 +1908,8 @@ if futures_ex:
                                     "Dźwignia": (
                                         f"{int(lev)}x"
                                     ),
-                                })
+                                },
+                            )
 
                 except Exception:
                     pass
@@ -2520,11 +2313,10 @@ if futures_ex:
                             "Interwał": tf,
                             "Para": symbol,
                             "Cena": market_price,
-                            # W tabeli pokazujemy odchylenie EMA od ceny rynkowej
-                            # w procentach, a nie wartości EMA w jednostkach ceny.
-                            # 0% oznacza, że EMA jest dokładnie na poziomie ceny.
-                            # Pokazujemy rzeczywistą wartość EMA wyliczoną z cen zamknięcia
-                            # z okresami ustawionymi na suwakach dla tego interwału.
+                            # W TABELI pokazujemy RZECZYWISTE, DYNAMICZNIE
+                            # OBLICZONE wartości EMA z zamkniętej świecy.
+                            # e_fast/e_slow są tylko okresami (np. 9/21);
+                            # nie wolno ich wyświetlać zamiast wartości wskaźnika.
                             "EMA Szybka": round(ema_fast_value, 8),
                             "EMA Wolna": round(ema_slow_value, 8),
                             "ADX": round(current_adx, 2),
@@ -2620,7 +2412,9 @@ if futures_ex:
                                             },
                                         )
 
-                                        record_trade({
+                                        st.session_state.trade_history.insert(
+                                            0,
+                                            {
                                                 "Czas": datetime.now().strftime(
                                                     "%Y-%m-%d %H:%M:%S"
                                                 ),
@@ -2638,7 +2432,8 @@ if futures_ex:
                                                 "Dźwignia": (
                                                     f"{int(matching_p.get('leverage', 1))}x"
                                                 ),
-                                            })
+                                            },
+                                        )
 
                                         existing_pos_map.pop(
                                             symbol,
@@ -2793,7 +2588,7 @@ if futures_ex:
                                         "tp_price": None,
                                     }
 
-                                    if actual_entry > 0 and filled_amount > 0 and (custom_stop_loss_roe > 0 or custom_take_profit_roe > 0):
+                                    if enable_roe_guard and actual_entry > 0 and filled_amount > 0:
                                         protection = place_sl_tp_orders(
                                             futures_ex,
                                             symbol,
@@ -2809,7 +2604,9 @@ if futures_ex:
                                         cooldown_key
                                     ] = time.time()
 
-                                    record_trade({
+                                    st.session_state.trade_history.insert(
+                                        0,
+                                        {
                                             "Czas": datetime.now().strftime(
                                                 "%Y-%m-%d %H:%M:%S"
                                             ),
@@ -2843,7 +2640,8 @@ if futures_ex:
                                                 if protection.get("sl_ok") and protection.get("tp_ok")
                                                 else ("SL" if protection.get("sl_ok") else ("TP" if protection.get("tp_ok") else "BRAK"))
                                             ),
-                                        })
+                                        },
+                                    )
 
                                     active_positions_count += 1
                                     existing_pos_map[
@@ -3135,9 +2933,10 @@ st.subheader(
 )
 
 if scan_results:
-    # Jedna tabela skanera. EMA Szybka/Wolna pokazują rzeczywiste
-    # wartości EMA z zamkniętej świecy, liczone okresami ustawionymi
-    # na suwakach dla danego interwału (nie procentowe odchylenie).
+    # Jedna tabela skanera. EMA Szybka/Wolna pokazują RZECZYWISTE
+    # wartości EMA z zamkniętej świecy dla konkretnej pary i interwału.
+    # Okresy (np. 9/21 albo 15/34) są tylko parametrami obliczenia i
+    # NIGDY nie są wpisywane do kolumn EMA.
     scanner_columns = [
         "Interwał",
         "Para",
@@ -3158,8 +2957,8 @@ if scan_results:
         hide_index=True,
         column_config={
             "Cena": st.column_config.NumberColumn("Cena", format="%.8f"),
-            "EMA Szybka (%)": st.column_config.NumberColumn("EMA Szybka (%)", format="%.4f%%"),
-            "EMA Wolna (%)": st.column_config.NumberColumn("EMA Wolna (%)", format="%.4f%%"),
+            "EMA Szybka": st.column_config.NumberColumn("EMA Szybka", format="%.8f"),
+            "EMA Wolna": st.column_config.NumberColumn("EMA Wolna", format="%.8f"),
             "ADX": st.column_config.NumberColumn("ADX", format="%.2f"),
             "RSI": st.column_config.NumberColumn("RSI", format="%.2f"),
             "Wolumen": st.column_config.NumberColumn("Wolumen", format="%.2f"),
