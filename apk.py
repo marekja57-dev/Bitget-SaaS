@@ -262,11 +262,25 @@ if 'authenticated' not in st.session_state:
     st.session_state['user_email'] = ''
     st.session_state['logged_in'] = False
 
+# ========================================================
+# STRIPE & AKTYWACJA POWROTU ZE STRIPE (z Twoich zdjęć)
+# ========================================================
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+if STRIPE_SECRET_KEY:
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+    except ImportError:
+        pass
+
 if st.query_params.get("success") == "true":
-    if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+    if (st.session_state.get("logged_in") and st.session_state.get("user_id")):
         st.session_state.stripe_paid = True
         try:
-            conn = sqlite3.connect(DB_FILE, timeout=30.0)
+            conn = sqlite3.connect(
+                DB_FILE,
+                timeout=30.0,
+            )
             cursor = conn.cursor()
             cursor.execute(
                 """ UPDATE users SET stripe_paid = 1 WHERE id = ? """,
@@ -337,7 +351,6 @@ ex_id, key, secret, password = creds
 with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
     
-    # Dynamiczne menu zawierające nowe sekcje oraz panel admina
     nav_options = ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik', 'Regulamin & Instrukcja Obsługi']
     if is_user_admin():
         nav_options.append('Panel Administratora (Subskrybenci)')
@@ -710,5 +723,3 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
-
-
