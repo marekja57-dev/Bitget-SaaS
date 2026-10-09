@@ -336,7 +336,13 @@ ex_id, key, secret, password = creds
 
 with st.sidebar:
     st.markdown(f'<div class="brand"><span>⚡</span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
-    page = st.radio('NAWIGACJA', ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik'])
+    
+    # Dynamiczne menu zawierające nowe sekcje oraz panel admina
+    nav_options = ['Automatyczny Skaner i Auto-Handel', 'Panel Sesji i Kapitału', 'Ustawienia Strategii', 'Połączenie API', 'Dziennik', 'Regulamin & Instrukcja Obsługi']
+    if is_user_admin():
+        nav_options.append('Panel Administratora (Subskrybenci)')
+        
+    page = st.radio('NAWIGACJA', nav_options)
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Status Subskrypcji (49 PLN)")
@@ -514,6 +520,88 @@ elif page == 'Dziennik':
     if rows: st.dataframe(pd.DataFrame(rows, columns=['UTC', 'Poziom', 'Wiadomość']), use_container_width=True, hide_index=True)
     else: st.info('Brak zdarzeń.')
 
+elif page == 'Regulamin & Instrukcja Obsługi':
+    st.subheader('Regulamin Serwisu SaaS oraz Instrukcja Obsługi')
+    
+    tab_instrukcja, tab_regulamin = st.tabs(["📖 Instrukcja Obsługi (Krok po Kroku)", "📜 Regulamin i Warunki Świadczenia Usług"])
+    
+    with tab_instrukcja:
+        st.markdown("""
+        ### Jak w pełni skonfigurować i uruchomić Bitget-SaaS?
+
+        1. **Założenie konta i Subskrypcja:**
+           - Zarejestruj się w systemie podając swój unikalny login i e-mail.
+           - Opłacaj subskrypcję (49 PLN/miesięcznie), aby aktywować pełny dostęp do automatycznego skanera giełdowego i auto-handlu.
+        
+        2. **Konfiguracja API na giełdzie (np. Bitget / Bybit):**
+           - Zaloguj się na swoje konto giełdowe i przejdź do zakładki **API Management**.
+           - Utwórz nowy klucz API z uprawnieniami do **handlu futures (Futures Trading)** oraz **odczytu danych (Read-only)**. Pamiętaj, aby **wyłączyć uprawnienia do wypłat (Withdrawals)** dla bezpieczeństwa!
+           - Skopiuj `API Key`, `Secret Key` oraz `Passphrase` (jeśli dotyczy) i wklej je w zakładce **Połączenie API** w aplikacji, a następnie kliknij *Zapisz dane API*.
+        
+        3. **Ustawienie parametrów ryzyka:**
+           - Przejdź do zakładki **Ustawienia Strategii**, gdzie możesz dostosować wielkość pozycji, dźwignię, limity oraz wskaźniki (EMA, RSI, ADX) dla poszczególnych interwałów czasowych.
+        
+        4. **Testowanie i Uruchomienie Auto-Handlu:**
+           - Na początku zaleca się uruchomienie bota w **trybie symulacji (PAPER MODE)** w zakładce *Automatyczny Skaner i Auto-Handel*, aby sprawdzić sygnały generowane przez algorytm bez ryzykowania realnych środków.
+           - Gdy upewnisz się, że wszystko działa prawidłowo, wyłącz tryb Paper, włącz Auto-Trade i pozwól botowi zarządzać portfelem w tle!
+        """)
+
+    with tab_regulamin:
+        st.markdown("""
+        ### REGULAMIN KORZYSTANIA Z SERWISU BITGET-SAAS FUTURES
+
+        **§ 1. Postanowienia ogólne**
+        1. Niniejszy Regulamin określa zasady korzystania z platformy programowej Bitget-SaaS Futures (zwanej dalej „Serwisem”).
+        2. Korzystanie z Serwisu jest możliwe po uprzedniej rejestracji, utworzeniu konta użytkownika oraz opłaceniu abonamentu w wysokości 49 PLN miesięcznie (lub odpowiednika rocznego).
+        3. Właściciel Serwisu zastrzega sobie prawo do zablokowania lub usunięcia kont użytkowników naruszających niniejszy Regulamin lub próbujących uzyskać nielicencjonowany dostęp do zasobów (np. ominięcie płatności subskrypcji).
+
+        **§ 2. Charakter usług i Ostrzeżenie o ryzyku (Disclaimer)**
+        1. Serwis dostarcza oprogramowanie narzędziowe (bot transakcyjny) działające w oparciu o interfejsy API zewnętrznych giełd kryptowalut.
+        2. Oprogramowanie ma charakter wyłącznie ankietowy, informacyjny i automatyzujący. **Właściciel Serwisu nie świadczy doradztwa finansowego, inwestycyjnego ani podatkowego.**
+        3. Handel instrumentami pochodnymi (Futures) z użyciem dźwigni finansowej wiąże się z bardzo wysokim ryzykiem utraty kapitału. Użytkownik korzysta z bota na własną wyłączną odpowiedzialność i ryzyko. Właściciel Serwisu nie ponosi żadnej odpowiedzialności za straty finansowe poniesione na giełdach kryptowalut.
+
+        **§ 3. Subskrypcje i Płatności**
+        1. Dostęp do pełnej funkcjonalności autohandlu wymaga aktywnej i opłaconej subskrypcji.
+        2. Płatności realizowane są za pośrednictwem zewnętrznych operatorów płatności (np. Stripe).
+        3. W przypadku braku opłacenia subskrypcji dostęp do funkcji automatycznego handlu zostanie wstrzymany do momentu uregulowania płatności.
+        """)
+
+elif page == 'Panel Administratora (Subskrybenci)':
+    st.subheader('Panel Zarządzania Użytkownikami i Subskrypcjami')
+    st.write('Lista wszystkich zarejestrowanych osób w systemie. Możesz kontrolować status subskrypcji oraz blokować dostęp.')
+    
+    with db() as conn:
+        users_rows = conn.execute("SELECT id, username, email, subscription, stripe_paid FROM users").fetchall()
+        
+    if users_rows:
+        df_users = pd.DataFrame(users_rows, columns=['ID', 'Nazwa użytkownika', 'E-mail', 'Pakiet', 'Opłacone (0/1)'])
+        st.dataframe(df_users, use_container_width=True, hide_index=True)
+        
+        st.markdown('### Zarządzanie dostępem użytkownika')
+        with st.form("admin_manage_form"):
+            selected_user_id = st.selectbox("Wybierz ID użytkownika do edycji", df_users['ID'].tolist())
+            action = st.selectbox("Akcja", ["Nadaj/Włącz subskrypcję PRO (stripe_paid = 1)", "Zablokuj/Odbierz subskrypcję (stripe_paid = 0)", "Usuń całkowicie użytkownika z bazy"])
+            submit_admin_action = st.form_submit_button("WYKONaj AKCJĘ", use_container_width=True)
+            
+            if submit_admin_action:
+                with db() as conn:
+                    cur = conn.cursor()
+                    if "Włącz" in action:
+                        cur.execute("UPDATE users SET stripe_paid = 1 WHERE id = ?", (selected_user_id,))
+                        conn.commit()
+                        st.success(f"Aktywowano subskrypcję dla użytkownika ID {selected_user_id}!")
+                    elif "Zablokuj" in action:
+                        cur.execute("UPDATE users SET stripe_paid = 0 WHERE id = ?", (selected_user_id,))
+                        conn.commit()
+                        st.warning(f"Odebrano subskrypcję dla użytkownika ID {selected_user_id}.")
+                    elif "Usuń" in action:
+                        cur.execute("DELETE FROM users WHERE id = ?", (selected_user_id,))
+                        conn.commit()
+                        st.error(f"Usunięto użytkownika ID {selected_user_id} z bazy.")
+                st.rerun()
+    else:
+        st.info('Brak zarejestrowanych użytkowników w bazie.')
+
 else:
     st.subheader('Panel Sesji i Analiza Kapitału')
     st.write('Statystyki Twoich środków, slotów oraz wynik finansowy bieżącej sesji handlowej (automatyczne odświeżanie co 30 sekund).')
@@ -622,4 +710,5 @@ else:
         time.sleep(1)
     placeholder.empty()
     st.rerun()
+
 
