@@ -68,6 +68,13 @@ def db():
     con.execute("""CREATE TABLE IF NOT EXISTS credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS events ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, subscription TEXT, stripe_paid INTEGER NOT NULL DEFAULT 0, email TEXT UNIQUE)""")
+    
+    # Bezpieczna migracja: jeśli tabela credentials powstała wcześniej w starej wersji, dodaj brakującą kolumnę user_id bez utraty danych
+    try:
+        con.execute("ALTER TABLE credentials ADD COLUMN user_id INTEGER")
+    except Exception:
+        pass
+        
     con.commit()
     return con
 
