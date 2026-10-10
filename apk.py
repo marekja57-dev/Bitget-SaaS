@@ -364,25 +364,31 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     try:
         market = ex.market(symbol)
     except Exception:
-        return 0.0, 0.0
+        market = {}
 
     contract_size = asfloat(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
     min_amount = asfloat((limits.get("amount") or {}).get("min"))
 
+    # Wyliczenie surowej liczby kontraktów
     raw_qty = target / (price * contract_size)
-    qty = float(ex.amount_to_precision(symbol, raw_qty))
-
-    if not np.isfinite(qty) or qty <= 0:
-        return 0.0, 0.0
+    
+    # Bezpieczne formatowanie precyzji ilości zleceń
+    try:
+        qty = float(ex.amount_to_precision(symbol, raw_qty))
+    except Exception:
+        qty = round(raw_qty, 3)
 
     if min_amount > 0 and qty < min_amount:
         qty = min_amount
 
+    if not np.isfinite(qty) or qty <= 0:
+        return 0.0, 0.0
+
     actual_notional = qty * price * contract_size
     actual_margin = actual_notional / leverage
 
-    if actual_margin < MIN_MARGIN_USDT or actual_margin > margin_budget:
+    if actual_notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
 
     return qty, actual_notional
