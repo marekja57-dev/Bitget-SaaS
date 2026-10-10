@@ -8,6 +8,7 @@ import logging
 import hashlib
 import hmac
 import secrets
+import gc
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -162,7 +163,7 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     return cls(opts)
 
 
-@st.cache_data(ttl=20, max_entries=40, show_spinner=False)
+@st.cache_data(ttl=30, max_entries=20, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
@@ -214,7 +215,8 @@ def signal_for_symbol(cfg, symbol, timeframe):
     try:
         t = effective_tf_cfg(cfg, timeframe)
         raw = get_candles(cfg["exchange"], cfg["market_type"], symbol, timeframe, cfg["candle_limit"])
-        d = indicators(raw.iloc[:-1].copy(), t["ema_fast"], t["ema_slow"])
+        # Poprawka: analiza na pełnym zestawie (bez sztucznego obcinania ostatniej świecy iloc[:-1])
+        d = indicators(raw.copy(), t["ema_fast"], t["ema_slow"])
         if len(d) < max(35, t["ema_slow"] + 5):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": None,
                     "adx": None, "rsi": None, "reason": "Za mało świec"}
@@ -233,6 +235,8 @@ def signal_for_symbol(cfg, symbol, timeframe):
     except Exception as exc:
         return {"symbol": symbol, "tf": timeframe, "signal": "BŁĄD", "price": None,
                 "adx": None, "rsi": None, "reason": str(exc)[:180]}
+    finally:
+        gc.collect()
 
 
 def _as_float(value):
@@ -244,7 +248,6 @@ def _as_float(value):
 
 
 def balance_usdt(ex, positions=None):
-    """Return (free USDT, total USDT), preferring actual futures-wallet fields."""
     balance = ex.fetch_balance() or {}
     free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
     row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
@@ -305,11 +308,6 @@ def balance_usdt(ex, positions=None):
     if total is None:
         total = free + used if used is not None else free
 
-    # Some exchange/account modes return the available USDT amount in both
-    # the unified "free" and "total" fields. If live positions clearly have
-    # allocated margin, do not display all wallet equity as freely available.
-    # Prefer exchange-reported used margin; otherwise infer allocated margin
-    # from the actual open positions passed by the caller.
     position_margin = 0.0
     if positions:
         for position in positions:
@@ -332,7 +330,6 @@ def active_positions(ex):
 
 
 def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None):
-    """Send a market order; opening orders must be worth at least 10 USDT. Reduce-only closing orders are exempt so small residual positions can be closed. """
     qty = float(ex.amount_to_precision(symbol, qty))
     if not np.isfinite(qty) or qty <= 0:
         raise ValueError("Ilość zlecenia wynosi zero lub jest nieprawidłowa")
@@ -385,7 +382,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
 
 
 def ranked_symbols(ex, limit_count):
-    """Pobiera tickery partiami i przechowuje tylko najlepsze pary, ograniczając RAM."""
     now = time.time()
     limit_count = max(1, int(limit_count))
     cache_key = f"ranked_symbols:{ex.id}:{ex.options.get('defaultType', '')}:{limit_count}"
@@ -405,8 +401,6 @@ def ranked_symbols(ex, limit_count):
         st.session_state[cache_key] = {"ts": now, "ranked": []}
         return []
 
-    # Nie trzymaj jednocześnie tickerów wszystkich kontraktów w pamięci.
-    # Sortujemy każdy mały pakiet i zachowujemy tylko najlepsze N wyników.
     ranked_top = []
     batch_size = 40
     for offset in range(0, len(candidates), batch_size):
@@ -424,6 +418,7 @@ def ranked_symbols(ex, limit_count):
         ranked_top = ranked_top[:limit_count]
 
     st.session_state[cache_key] = {"ts": now, "ranked": ranked_top}
+    gc.collect()
     return ranked_top
 
 
@@ -524,8 +519,11 @@ with st.sidebar:
         st.rerun()
     if st.button("Wyczyść cache danych", use_container_width=True):
         get_candles.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
         st.session_state.clear()
-        st.success("Cache danych wyczyszczony. Odśwież stronę, jeśli panel nie przeładuje się automatycznie.")
+        gc.collect()
+        st.success("Cache danych wyczyszczony. Odśwież stronę.")
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
@@ -599,10 +597,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
                         event("WARNING", f"Pominięto {symbol} [{tf}]: nie spełnia minimum 10 USDT lub limitu ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
                         continue
+                    
+                    # Wymuszenie i twarde sprawdzenie dźwigni (żeby giełda nie otwierała z 20x na pałę)
                     try:
-                        ex.set_leverage(int(cfg["max_leverage"]), symbol)
+                        leverage_val = int(cfg["max_leverage"])
+                        ex.set_leverage(leverage_val, symbol)
                     except Exception as lev_exc:
-                        event("WARNING", f"Nie udało się ustawić dźwigni dla {symbol}: {lev_exc}")
+                        event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
+                        st.warning(f"Zablokowano {symbol}: Giełda odrzuciła ustawienie dźwigni {leverage_val}x ({lev_exc})")
+                        continue
+
                     side = "buy" if res["signal"] == "LONG" else "sell"
                     order = market_order(ex, symbol, side, qty, reference_price=res["price"])
                     opened_this_scan.append(symbol)
@@ -617,11 +621,12 @@ if page == "Automatyczny Skaner i Auto-Handel":
     except Exception as exc:
         st.error(f"Błąd skanowania giełdy: {exc}")
         event("ERROR", f"Błąd skanowania: {exc}")
+    finally:
+        gc.collect()
+
     if cfg.get("auto_refresh"):
         wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie; aplikacja nie blokuje wątku przez sleep.")
-        import gc
-        gc.collect()
+        st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie.")
 
 
 # -------------------- Ustawienia strategii --------------------
@@ -682,6 +687,8 @@ elif page == "Ustawienia Strategii":
             save_cfg(cfg)
             exchange_client.clear()
             get_candles.clear()
+            st.cache_data.clear()
+            gc.collect()
             st.success("Zapisano ustawienia.")
             st.rerun()
 
@@ -699,6 +706,8 @@ elif page == "Połączenie API":
     if save_api:
         save_creds(exchange_choice, api_key_input.strip(), secret_input.strip(), pass_input.strip())
         exchange_client.clear()
+        st.cache_data.clear()
+        gc.collect()
         st.success("Dane API zapisane.")
         st.rerun()
     if st.button("Testuj API i pobierz saldo"):
@@ -713,6 +722,8 @@ elif page == "Połączenie API":
                 st.markdown(f'<div class="metric-card"><div class="metric-label">Saldo Futures</div><div class="metric-value">{total:.4f} USDT</div><div class="metric-note">Całkowite saldo raportowane przez giełdę</div></div>', unsafe_allow_html=True)
         except Exception as exc:
             st.error(f"Błąd API: {exc}")
+        finally:
+            gc.collect()
 
 
 # -------------------- Dziennik --------------------
@@ -732,9 +743,9 @@ elif page == "Regulamin i Instrukcja":
     st.subheader("Instrukcja obsługi i regulamin")
     tab_help, tab_terms = st.tabs(["Instrukcja", "Regulamin"])
     with tab_help:
-        st.markdown("""1. Utwórz konto i zaloguj się. 2. Administrator potwierdza płatność w panelu Stripe i aktywuje dostęp. 3. Utwórz klucz API giełdy z uprawnieniami odczytu i handlu Futures. Nie włączaj wypłat. 4. Zapisz dane API w zakładce Połączenie API. 5. Ustaw interwały, wskaźniki, limity pozycji i ryzyko. 6. Najpierw testuj w trybie PAPER. Tryb PAPER nie wysyła prawdziwych zleceń.""")
+        st.markdown("""1. Utwórz konto i zaloguj się. 2. Administrator potwierdza płatność w panelu Stripe i aktywuje dostęp. 3. Utwórz klucz API giełdy z uprawnieniami odczytu i handlu Futures. Nie włączaj wypłat. 4. Zapisz dane API w zakładce Połączenie API. 5. Ustaw interwały, wskaźniki, limity pozycji i ryzyko. 6. Najpierw testuj w trybie PAPER.""")
     with tab_terms:
-        st.markdown("""**Regulamin Bitget-SaaS Futures** 1. Serwis udostępnia narzędzia programowe do analizy rynku i składania zleceń. 2. Użytkownik odpowiada za klucze API, konfigurację ryzyka i decyzje inwestycyjne. 3. Handel futures wiąże się z ryzykiem utraty kapitału. Wyniki nie są gwarantowane. 4. Dostęp płatny kosztuje 49 PLN miesięcznie, zgodnie z warunkami prezentowanymi przy płatności.""")
+        st.markdown("""**Regulamin Bitget-SaaS Futures** 1. Serwis udostępnia narzędzia programowe do analizy rynku i składania zleceń. 2. Użytkownik odpowiada za klucze API, konfigurację ryzyka i decyzje inwestycyjne. 3. Handel futures wiąże się z ryzykiem utraty kapitału. Wyniki nie są gwarantowane. 4. Dostęp płatny kosztuje 49 PLN miesięcznie.""")
 
 
 # -------------------- Panel administratora --------------------
@@ -786,6 +797,8 @@ elif page == "Panel Sesji i Kapitału":
             api_ok = True
         except Exception as exc:
             st.warning(f"Nie udało się pobrać salda lub pozycji: {exc}")
+        finally:
+            gc.collect()
     max_slots = int(cfg["max_positions"])
 
     def metric_card(label, value, note="", tone=""):
@@ -804,7 +817,7 @@ elif page == "Panel Sesji i Kapitału":
     c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1:
         metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT",
-                    "Saldo całkowite / środki dostępne po uwzględnieniu margin", "gold")
+                    "Saldo całkowite / środki dostępne", "gold")
     with c2:
         metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
                     "Łączny PnL otwartych pozycji", "green" if session_pnl >= 0 else "red")
@@ -854,7 +867,6 @@ elif page == "Panel Sesji i Kapitału":
             st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
         except Exception as exc:
             st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
+        finally:
+            gc.collect()
 
-    if cfg.get("auto_refresh", True):
-        interval = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Odświeżanie co {interval} s jest skonfigurowane, ale ta wersja nie używa blokującego sleep. Użyj odświeżenia strony, aby pobrać nowe dane.")
