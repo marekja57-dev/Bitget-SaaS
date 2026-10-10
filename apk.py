@@ -532,6 +532,7 @@ with st.sidebar:
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
 # -------------------- Skaner i auto-handel --------------------
+
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Automatyczny skaner rynku i cykliczny auto-handel")
     with st.form("control_form"):
@@ -549,14 +550,9 @@ if page == "Automatyczny Skaner i Auto-Handel":
     st.warning("Futures mogą spowodować utratę kapitału. Najpierw sprawdź tryb PAPER.")
     if not is_user_paid():
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
-    
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        
-        # Pełny zakres suwaka do 200 par (bez sztucznego limitu 20)
-        scan_limit = int(cfg.get("scan_limit_count", 30))
-        ranked = ranked_symbols(ex, scan_limit)
-        
+        ranked = ranked_symbols(ex, min(20, cfg.get("scan_limit_count", 10)))
         symbols = [item[0] for item in ranked]
         volume_map = dict(ranked)
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
