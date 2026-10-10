@@ -9,7 +9,6 @@ import secrets
 import gc
 from pathlib import Path
 from datetime import datetime, timezone
-
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -24,6 +23,7 @@ st.set_page_config(page_title="Bitget-SaaS Futures", page_icon="", layout="wide"
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("BITGET_SAAS_DB", str(APP_DIR / "bitget_saas.db")))
 LOG_PATH = APP_DIR / "trading.log"
+
 logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
@@ -44,6 +44,7 @@ DEFAULT_TF_SETTINGS = {
     "4h": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 20.0, "rsi_min": 30.0, "rsi_max": 70.0},
     "1d": {"ema_fast": 40, "ema_slow": 140, "adx_threshold": 15.0, "rsi_min": 35.0, "rsi_max": 65.0},
 }
+
 DEFAULTS = {
     "exchange": "bitget", "market_type": "swap", "candle_limit": 150,
     "refresh_seconds": 30, "risk_usdt": 10.0, "max_positions": 3,
@@ -93,14 +94,14 @@ def load_cfg():
     try:
         with db() as con:
             row = con.execute("SELECT v FROM settings WHERE k='main'").fetchone()
-        if row:
-            saved = json.loads(row["v"])
-            cfg.update(saved)
-            merged = json.loads(json.dumps(DEFAULT_TF_SETTINGS))
-            for tf, values in (cfg.get("tf_settings") or {}).items():
-                if tf in merged and isinstance(values, dict):
-                    merged[tf].update(values)
-            cfg["tf_settings"] = merged
+            if row:
+                saved = json.loads(row["v"])
+                cfg.update(saved)
+        merged = json.loads(json.dumps(DEFAULT_TF_SETTINGS))
+        for tf, values in (cfg.get("tf_settings") or {}).items():
+            if tf in merged and isinstance(values, dict):
+                merged[tf].update(values)
+        cfg["tf_settings"] = merged
     except Exception:
         logging.exception("Nie udało się wczytać ustawień")
     return cfg
@@ -124,7 +125,7 @@ def load_creds(user_id):
         return ("bitget", "", "", "")
     with db() as con:
         row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
-    return tuple(row) if row else ("bitget", "", "", "")
+        return tuple(row) if row else ("bitget", "", "", "")
 
 def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
@@ -244,7 +245,6 @@ def balance_usdt(ex, positions=None):
     balance = ex.fetch_balance() or {}
     free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
     row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
-
     def number(*values):
         for value in values:
             if value is None or value == "":
@@ -256,7 +256,6 @@ def balance_usdt(ex, positions=None):
             except (TypeError, ValueError):
                 continue
         return None
-
     free = number(row.get("free"), free_map.get("USDT"))
     used = number(row.get("used"), used_map.get("USDT"))
     total = number(row.get("total"), total_map.get("USDT"))
@@ -268,12 +267,12 @@ def balance_usdt(ex, positions=None):
             candidates.extend(x for x in data if isinstance(x, dict))
         elif isinstance(data, dict):
             candidates.append(data)
-            for key in ("assetList", "assets", "list", "accounts"):
-                value = data.get(key)
-                if isinstance(value, list):
-                    candidates.extend(x for x in value if isinstance(x, dict))
-                elif isinstance(value, dict):
-                    candidates.append(value)
+        for key in ("assetList", "assets", "list", "accounts"):
+            value = data.get(key)
+            if isinstance(value, list):
+                candidates.extend(x for x in value if isinstance(x, dict))
+            elif isinstance(value, dict):
+                candidates.append(value)
         for key in ("assetList", "assets", "list", "accounts"):
             value = info.get(key)
             if isinstance(value, list):
@@ -300,7 +299,6 @@ def balance_usdt(ex, positions=None):
         free = 0.0
     if total is None:
         total = free + used if used is not None else free
-
     position_margin = 0.0
     if positions:
         for position in positions:
@@ -308,12 +306,10 @@ def balance_usdt(ex, positions=None):
             if margin_value is None:
                 margin_value = position.get("margin")
             position_margin += max(0.0, asfloat(margin_value))
-
     reported_used = max(0.0, float(used or 0.0))
     allocated_margin = max(reported_used, position_margin)
     if total > 0 and free >= total - max(0.01, total * 0.001) and allocated_margin > 0:
         free = max(0.0, float(total) - allocated_margin)
-
     return max(0.0, float(free)), max(0.0, float(total))
 
 def active_positions(ex):
@@ -324,7 +320,6 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
     qty = float(ex.amount_to_precision(symbol, qty))
     if not np.isfinite(qty) or qty <= 0:
         raise ValueError("Ilość zlecenia wynosi zero lub jest nieprawidłowa")
-
     if not reduce_only:
         price = asfloat(reference_price)
         if price <= 0:
@@ -337,7 +332,6 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
                 f"Zablokowano zlecenie: wartość po zaokrągleniu ilości wynosi "
                 f"{notional:.4f} USDT, a minimum to {MIN_ORDER_NOTIONAL_USDT:.2f} USDT."
             )
-
     params = {"reduceOnly": True} if reduce_only else {}
     return ex.create_order(symbol, "market", side, qty, None, params)
 
@@ -348,43 +342,33 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     risk_limit = max(0.0, float(cfg.get("risk_usdt", 10.0)))
     max_notional = max(0.0, float(cfg.get("max_notional_usdt", 200.0)))
     sl_roe = float(cfg.get("sl_roe", 20.0))
-
     if price <= 0 or sl_roe <= 0 or free_usdt <= 0:
         return 0.0, 0.0
-
     risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
-
     target = min(risk_based_notional, max_notional, free_usdt * leverage * 0.90)
     if target < MIN_ORDER_NOTIONAL_USDT:
         target = MIN_ORDER_NOTIONAL_USDT
-
     try:
         market = ex.market(symbol)
     except Exception:
         market = {}
-
     contract_size = asfloat(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
     min_amount = asfloat((limits.get("amount") or {}).get("min"))
-
     raw_qty = target / (price * contract_size)
     try:
         qty = float(ex.amount_to_precision(symbol, raw_qty))
     except Exception:
         qty = round(raw_qty, 4)
-
     if min_amount > 0 and qty < min_amount:
         qty = min_amount
-
     if not np.isfinite(qty) or qty <= 0:
         return 0.0, 0.0
-
     actual_notional = qty * price * contract_size
     if actual_notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
-
     return qty, actual_notional
 
 def ranked_symbols(ex, limit_count):
@@ -394,7 +378,6 @@ def ranked_symbols(ex, limit_count):
     cached = st.session_state.get(cache_key)
     if cached and now - cached.get("ts", 0) < 180:
         return cached["ranked"]
-
     markets = ex.load_markets()
     candidates = [
         symbol for symbol, market in markets.items()
@@ -406,7 +389,6 @@ def ranked_symbols(ex, limit_count):
     if not candidates:
         st.session_state[cache_key] = {"ts": now, "ranked": []}
         return []
-
     ranked_top = []
     batch_size = 40
     for offset in range(0, len(candidates), batch_size):
@@ -419,10 +401,9 @@ def ranked_symbols(ex, limit_count):
                 quote_volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
             if quote_volume > 0:
                 ranked_top.append((symbol, quote_volume))
-        ranked_top.sort(key=lambda item: item[1], reverse=True)
-        del tickers
-        ranked_top = ranked_top[:limit_count]
-
+    ranked_top.sort(key=lambda item: item[1], reverse=True)
+    del tickers
+    ranked_top = ranked_top[:limit_count]
     st.session_state[cache_key] = {"ts": now, "ranked": ranked_top}
     gc.collect()
     return ranked_top
@@ -430,7 +411,7 @@ def ranked_symbols(ex, limit_count):
 # -------------------- Logowanie --------------------
 
 for k, default in {"authenticated": False, "logged_in": False, "username": "",
-                    "user_id": None, "stripe_paid": 0, "user_email": ""}.items():
+                   "user_id": None, "stripe_paid": 0, "user_email": ""}.items():
     if k not in st.session_state:
         st.session_state[k] = default
 
@@ -454,21 +435,21 @@ if not st.session_state["authenticated"]:
             login_name = st.text_input("Nazwa użytkownika / e-mail")
             login_pass = st.text_input("Hasło", type="password")
             submit_login = st.form_submit_button("ZALOGUJ SIĘ", use_container_width=True)
-        if submit_login:
-            with db() as con:
-                row = con.execute("SELECT id,password,stripe_paid,email,username FROM users WHERE username=? OR email=?",
-                                  (login_name.strip(), login_name.strip().lower())).fetchone()
-            valid, legacy = verify_password(row["password"], login_pass) if row else (False, False)
-            if row and valid:
-                if legacy:
-                    with db() as con:
-                        con.execute("UPDATE users SET password=? WHERE id=?", (password_hash(login_pass), row["id"]))
-                        con.commit()
-                st.session_state.update(authenticated=True, logged_in=True, user_id=row["id"],
-                    stripe_paid=row["stripe_paid"], user_email=(row["email"] or "").lower(), username=row["username"])
-                st.rerun()
-            else:
-                st.error("Nieprawidłowy login lub hasło.")
+            if submit_login:
+                with db() as con:
+                    row = con.execute("SELECT id,password,stripe_paid,email,username FROM users WHERE username=? OR email=?",
+                                      (login_name.strip(), login_name.strip().lower())).fetchone()
+                valid, legacy = verify_password(row["password"], login_pass) if row else (False, False)
+                if row and valid:
+                    if legacy:
+                        with db() as con:
+                            con.execute("UPDATE users SET password=? WHERE id=?", (password_hash(login_pass), row["id"]))
+                            con.commit()
+                    st.session_state.update(authenticated=True, logged_in=True, user_id=row["id"],
+                                            stripe_paid=row["stripe_paid"], user_email=(row["email"] or "").lower(), username=row["username"])
+                    st.rerun()
+                else:
+                    st.error("Nieprawidłowy login lub hasło.")
     with reg_tab:
         st.subheader("Rejestracja - 49 PLN / miesiąc")
         with st.form("reg_form"):
@@ -477,20 +458,20 @@ if not st.session_state["authenticated"]:
             reg_pass = st.text_input("Hasło", type="password")
             reg_plan = st.selectbox("Subskrypcja", ["Pro Trader (49 PLN / miesiąc)", "VIP SaaS (Roczny)"])
             submit_reg = st.form_submit_button("ZAREJESTRUJ SIĘ", use_container_width=True)
-        if submit_reg:
-            if not reg_user.strip() or not reg_pass.strip() or not reg_email.strip():
-                st.error("Uzupełnij login, e-mail i hasło.")
-            elif "@" not in reg_email or "." not in reg_email.rsplit("@", 1)[-1]:
-                st.error("Podaj prawidłowy adres e-mail.")
-            else:
-                try:
-                    with db() as con:
-                        con.execute("INSERT INTO users(username,password,subscription,stripe_paid,email) VALUES(?,?,?,0,?)",
-                                    (reg_user.strip(), password_hash(reg_pass), reg_plan, reg_email.strip().lower()))
-                        con.commit()
-                    st.success("Konto utworzone. Zaloguj się, a następnie opłać subskrypcję.")
-                except sqlite3.IntegrityError:
-                    st.error("Taki login lub adres e-mail już istnieje.")
+            if submit_reg:
+                if not reg_user.strip() or not reg_pass.strip() or not reg_email.strip():
+                    st.error("Uzupełnij login, e-mail i hasło.")
+                elif "@" not in reg_email or "." not in reg_email.rsplit("@", 1)[-1]:
+                    st.error("Podaj prawidłowy adres e-mail.")
+                else:
+                    try:
+                        with db() as con:
+                            con.execute("INSERT INTO users(username,password,subscription,stripe_paid,email) VALUES(?,?,?,0,?)",
+                                        (reg_user.strip(), password_hash(reg_pass), reg_plan, reg_email.strip().lower()))
+                            con.commit()
+                        st.success("Konto utworzone. Zaloguj się, a następnie opłać subskrypcję.")
+                    except sqlite3.IntegrityError:
+                        st.error("Taki login lub adres e-mail już istnieje.")
     st.stop()
 
 cfg = load_cfg()
@@ -535,7 +516,7 @@ st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class
 
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Główny Pulpit Transakcyjny - Pełny Podgląd Na Żywo")
-    
+
     with st.expander("Ustawienia trybu pracy i czyszczenie", expanded=False):
         with st.form("control_form"):
             c_left, c_right = st.columns(2)
@@ -546,24 +527,22 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 auto_refresh = st.checkbox("Włącz ciągłe skanowanie na żywo", value=bool(cfg.get("auto_refresh", True)))
                 refresh_seconds = st.slider("Odstęp między odświeżeniami (s)", 10, 120, int(cfg.get("refresh_seconds", 30)))
             submit_ctrl = st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True)
-        if submit_ctrl:
-            cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
-            save_cfg(cfg)
-            st.success("Zapisano ustawienia.")
-            st.rerun()
+            if submit_ctrl:
+                cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
+                save_cfg(cfg)
+                st.success("Zapisano ustawienia.")
+                st.rerun()
 
     refresh_sec = max(10, int(cfg.get("refresh_seconds", 30)))
 
     @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
     def render_full_dashboard():
         st.caption(f"Status: Odświeżanie danych na żywo co {refresh_sec} s.")
-        
-        # --- 1. SEKCJA KAPITAŁU I POZYCJI (GÓRA) ---
+
         total_balance = free_balance = session_pnl = used_margin = 0.0
         active = []
         connected = bool(api_key_saved and secret_saved)
         api_ok = False
-
         if connected:
             try:
                 client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
@@ -578,7 +557,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 gc.collect()
 
         max_slots = int(cfg["max_positions"])
-
         def metric_card(label, value, note="", tone=""):
             tone_class = f" {tone}" if tone else ""
             st.markdown(
@@ -605,7 +583,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
         st.divider()
 
-        # --- 2. TABELA AKTYWNYCH POZYCJI NA GIEŁDZIE ---
         st.markdown("### Aktywne Pozycje na Bitget")
         if active:
             st.dataframe(pd.DataFrame([{
@@ -623,69 +600,54 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
         st.divider()
 
-        # --- 3. SKANER RYNKU I AUTOMATYCZNA EGZEKUCJA (DÓŁ) ---
         st.markdown("### Wyniki Skanera Rynku i Sygnały")
         if not is_user_paid():
             st.error("Subskrypcja nieaktywna. Skaner działa, ale handel LIVE jest zablokowany.")
-
         try:
             ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
             scan_limit = int(cfg.get("scan_limit_count", 30))
             ranked = ranked_symbols(ex, scan_limit)
-            
             symbols = [item[0] for item in ranked]
             volume_map = dict(ranked)
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-            
+
             st.caption(f"Przeskanowano {len(symbols)} par według wolumenu. Interwały: {', '.join(tfs)}")
-            
+
             results = []
             paper_open_symbols = set()
-
             for symbol in symbols:
                 for tf in tfs:
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                     results.append(res)
-                    
                     if res["signal"] not in ("LONG", "SHORT"):
                         continue
-                        
                     event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
-                    
                     if not cfg["auto_trade"] or not is_user_paid():
                         continue
-                        
                     if cfg["paper_mode"]:
                         if symbol in paper_open_symbols or len(paper_open_symbols) >= max_slots:
                             continue
                         paper_open_symbols.add(symbol)
                         event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
                         continue
-
                     if not (api_key_saved and secret_saved and res.get("price")):
                         continue
-
                     try:
                         positions = active_positions(ex)
                         current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
-                        
                         if len(positions) >= max_slots or symbol in current_symbols:
                             continue
-                        
                         free, total = balance_usdt(ex, positions)
                         qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
-                        
                         if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
                             event("WARNING", f"Pominięto {symbol}: depozyt < 10 USDT lub limit ryzyka.")
                             continue
-                        
                         leverage_val = int(cfg["max_leverage"])
                         try:
                             ex.set_leverage(leverage_val, symbol)
                         except Exception:
                             pass
-
                         side = "buy" if res["signal"] == "LONG" else "sell"
                         order = market_order(ex, symbol, side, qty, reference_price=res["price"])
                         event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT; ID={order.get('id')}")
@@ -747,11 +709,11 @@ elif page == "Ustawienia Strategii":
         left, right = st.columns(2)
         with left:
             exchange_name = st.selectbox("Giełda", ["bitget", "binanceusdm", "bybit", "okx"],
-                index=["bitget", "binanceusdm", "bybit", "okx"].index(cfg["exchange"]) if cfg["exchange"] in ["bitget", "binanceusdm", "bybit", "okx"] else 0)
+                                         index=["bitget", "binanceusdm", "bybit", "okx"].index(cfg["exchange"]) if cfg["exchange"] in ["bitget", "binanceusdm", "bybit", "okx"] else 0)
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
             scan_limit = st.slider("Liczba skanowanych par", 5, 200, int(cfg.get("scan_limit_count", 30)))
             timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS,
-                default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS])
+                                        default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS])
             multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, int(cfg.get("indicator_multiplier", 100)))
             candle_limit = st.slider("Liczba świec do analizy", 100, 250, min(250, int(cfg.get("candle_limit", 150))))
         with right:
@@ -776,26 +738,26 @@ elif page == "Ustawienia Strategii":
         with c5:
             rmax = st.number_input("RSI maksimum", 0.0, 100.0, float(base["rsi_max"]))
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
-    if save:
-        if fast >= slow:
-            st.error("EMA szybka musi być mniejsza od EMA wolnej.")
-        elif rmin >= rmax:
-            st.error("RSI minimum musi być mniejsze od RSI maksimum.")
-        else:
-            cfg.update(exchange=exchange_name, market_type=market_type, scan_limit_count=scan_limit,
-                timeframes=timeframes or ["4h", "1d"], indicator_multiplier=multiplier,
-                candle_limit=candle_limit, risk_usdt=risk, max_notional_usdt=max_notional,
-                max_positions=int(max_positions), max_leverage=int(max_leverage),
-                sl_roe=sl_roe, tp_roe=tp_roe, allow_long=allow_long, allow_short=allow_short)
-            cfg["tf_settings"][selected_tf] = {"ema_fast": int(fast), "ema_slow": int(slow),
-                "adx_threshold": float(adx), "rsi_min": float(rmin), "rsi_max": float(rmax)}
-            save_cfg(cfg)
-            exchange_client.clear()
-            get_candles.clear()
-            st.cache_data.clear()
-            gc.collect()
-            st.success("Zapisano ustawienia.")
-            st.rerun()
+        if save:
+            if fast >= slow:
+                st.error("EMA szybka musi być mniejsza od EMA wolnej.")
+            elif rmin >= rmax:
+                st.error("RSI minimum musi być mniejsze od RSI maksimum.")
+            else:
+                cfg.update(exchange=exchange_name, market_type=market_type, scan_limit_count=scan_limit,
+                           timeframes=timeframes or ["4h", "1d"], indicator_multiplier=multiplier,
+                           candle_limit=candle_limit, risk_usdt=risk, max_notional_usdt=max_notional,
+                           max_positions=int(max_positions), max_leverage=int(max_leverage),
+                           sl_roe=sl_roe, tp_roe=tp_roe, allow_long=allow_long, allow_short=allow_short)
+                cfg["tf_settings"][selected_tf] = {"ema_fast": int(fast), "ema_slow": int(slow),
+                                                 "adx_threshold": float(adx), "rsi_min": float(rmin), "rsi_max": float(rmax)}
+                save_cfg(cfg)
+                exchange_client.clear()
+                get_candles.clear()
+                st.cache_data.clear()
+                gc.collect()
+                st.success("Zapisano ustawienia.")
+                st.rerun()
 
 # -------------------- Połączenie API --------------------
 
@@ -803,18 +765,19 @@ elif page == "Połączenie API":
     st.subheader("Połączenie z giełdą")
     with st.form("credentials"):
         exchange_choice = st.selectbox("Giełda", ["bitget", "binanceusdm", "bybit", "okx"],
-            index=["bitget", "binanceusdm", "bybit", "okx"].index(ex_id) if ex_id in ["bitget", "binanceusdm", "bybit", "okx"] else 0)
+                                     index=["bitget", "binanceusdm", "bybit", "okx"].index(ex_id) if ex_id in ["bitget", "binanceusdm", "bybit", "okx"] else 0)
         api_key_input = st.text_input("API Key", value=api_key_saved, type="password")
         secret_input = st.text_input("API Secret", value=secret_saved, type="password")
         pass_input = st.text_input("Passphrase (Bitget/OKX)", value=passphrase_saved, type="password")
         save_api = st.form_submit_button("ZAPISZ DANE API")
-    if save_api:
-        save_creds(current_user_id, exchange_choice, api_key_input.strip(), secret_input.strip(), pass_input.strip())
-        exchange_client.clear()
-        st.cache_data.clear()
-        gc.collect()
-        st.success("Dane API zapisane wyłącznie dla Twojego konta.")
-        st.rerun()
+        if save_api:
+            save_creds(current_user_id, exchange_choice, api_key_input.strip(), secret_input.strip(), pass_input.strip())
+            exchange_client.clear()
+            st.cache_data.clear()
+            gc.collect()
+            st.success("Dane API zapisane wyłącznie dla Twojego konta.")
+            st.rerun()
+
     if st.button("Testuj API i pobierz saldo"):
         try:
             client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
@@ -836,11 +799,11 @@ elif page == "Dziennik":
     st.subheader("Zdarzenia i zlecenia bota")
     with db() as con:
         rows = con.execute("SELECT ts,level,message FROM events ORDER BY id DESC LIMIT 300").fetchall()
-    if rows:
-        st.dataframe(pd.DataFrame([tuple(r) for r in rows], columns=["Czas UTC", "Poziom", "Wiadomość"]),
-                     use_container_width=True, hide_index=True)
-    else:
-        st.info("Brak zdarzeń.")
+        if rows:
+            st.dataframe(pd.DataFrame([tuple(r) for r in rows], columns=["Czas UTC", "Poziom", "Wiadomość"]),
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("Brak zdarzeń.")
 
 # -------------------- Instrukcja i regulamin --------------------
 
@@ -858,29 +821,30 @@ elif page == "Panel Administratora" and is_user_admin():
     st.subheader("Zarządzanie użytkownikami i subskrypcjami")
     with db() as con:
         rows = con.execute("SELECT id,username,email,subscription,stripe_paid FROM users ORDER BY id").fetchall()
-    if rows:
-        df = pd.DataFrame([tuple(r) for r in rows], columns=["ID", "Użytkownik", "E-mail", "Pakiet", "Opłacone (0/1)"])
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        with st.form("admin_manage_form"):
-            user_id = st.selectbox("Wybierz użytkownika", df["ID"].tolist())
-            action = st.selectbox("Operacja", ["Aktywuj subskrypcję", "Odbierz subskrypcję", "Usuń użytkownika"])
-            confirm = st.checkbox("Potwierdzam operację")
-            go = st.form_submit_button("WYKONAJ", use_container_width=True)
-        if go:
-            if not confirm:
-                st.error("Zaznacz potwierdzenie.")
-            else:
-                with db() as con:
-                    if action == "Aktywuj subskrypcję":
-                        con.execute("UPDATE users SET stripe_paid=1 WHERE id=?", (user_id,))
-                    elif action == "Odbierz subskrypcję":
-                        con.execute("UPDATE users SET stripe_paid=0 WHERE id=?", (user_id,))
+        if rows:
+            df = pd.DataFrame([tuple(r) for r in rows], columns=["ID", "Użytkownik", "E-mail", "Pakiet", "Opłacone (0/1)"])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            with st.form("admin_manage_form"):
+                user_id = st.selectbox("Wybierz użytkownika", df["ID"].tolist())
+                action = st.selectbox("Operacja", ["Aktywuj subskrypcję", "Odbierz subskrypcję", "Usuń użytkownika"])
+                confirm = st.checkbox("Potwierdzam operację")
+                go = st.form_submit_button("WYKONAJ", use_container_width=True)
+                if go:
+                    if not confirm:
+                        st.error("Zaznacz potwierdzenie.")
                     else:
-                        con.execute("DELETE FROM users WHERE id=?", (user_id,))
-                        con.execute("DELETE FROM user_credentials WHERE user_id=?", (user_id,))
-                    con.commit()
-                event("ADMIN", f"{action}; user_id={user_id}")
-                st.success("Operacja wykonana.")
-                st.rerun()
-    else:
-        st.info("Brak użytkowników.")
+                        with db() as con:
+                            if action == "Aktywuj subskrypcję":
+                                con.execute("UPDATE users SET stripe_paid=1 WHERE id=?", (user_id,))
+                            elif action == "Odbierz subskrypcję":
+                                con.execute("UPDATE users SET stripe_paid=0 WHERE id=?", (user_id,))
+                            else:
+                                con.execute("DELETE FROM users WHERE id=?", (user_id,))
+                                con.execute("DELETE FROM user_credentials WHERE user_id=?", (user_id,))
+                            con.commit()
+                        event("ADMIN", f"{action}; user_id={user_id}")
+                        st.success("Operacja wykonana.")
+                        st.rerun()
+        else:
+            st.info("Brak użytkowników.")
+
