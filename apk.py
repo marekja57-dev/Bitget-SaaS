@@ -55,7 +55,7 @@ DEFAULTS = {
     "indicator_multiplier": 100,
 }
 
-st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card { border:1px solid var(--gold); border-radius:14px; padding:18px 20px; min-height:124px; background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98)); box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24); } .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(22px,2.2vw,31px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} </style> """, unsafe_allow_html=True)
+st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card {border:1px solid var(--gold);border-radius:14px;padding:18px 20px;height:150px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98));box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24);overflow:hidden} .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} .metric-card.gold .metric-value {color:#fff2c7} </style> """, unsafe_allow_html=True)
 
 
 # -------------------- Baza danych --------------------
@@ -79,7 +79,7 @@ def password_hash(password, salt=None):
 
 
 def verify_password(stored, password):
-    if stored == password: # Migracja starego konta z hasłem jawnym.
+    if stored == password:
         return True, True
     try:
         scheme, salt, digest = stored.split("$", 2)
@@ -133,7 +133,7 @@ def load_creds():
 
 def save_creds(exchange, api_key, secret, passphrase):
     with db() as con:
-        con.execute("""INSERT INTO credentials(k,exchange,api_key,secret,password) VALUES('main',?,?,?,?) ON CONFLICT(k) DO UPDATE SET exchange=excluded.exchange,api_key=excluded.api_key, secret=excluded.secret,password=excluded.password""",
+        con.execute("""INSERT INTO credentials(k,exchange,api_key,secret,password) VALUES('main',?,?,?,?) ON CONFLICT(k) DO UPDATE SET exchange=excluded.exchange,api_key=excluded.api_key,secret=excluded.secret,password=excluded.password""",
                     (exchange, api_key, secret, passphrase))
         con.commit()
 
@@ -162,7 +162,7 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     return cls(opts)
 
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=30, max_entries=250, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
@@ -203,8 +203,7 @@ def effective_tf_cfg(cfg, tf):
     fast = max(2, int(round(float(base["ema_fast"]) * mult)))
     slow = max(fast + 1, int(round(float(base["ema_slow"]) * mult)))
     return {
-        "ema_fast": fast,
-        "ema_slow": slow,
+        "ema_fast": fast, "ema_slow": slow,
         "adx_threshold": max(2.0, min(90.0, float(base["adx_threshold"]) * mult)),
         "rsi_min": max(2.0, min(45.0, float(base["rsi_min"]))),
         "rsi_max": max(55.0, min(98.0, float(base["rsi_max"]))),
@@ -215,27 +214,25 @@ def signal_for_symbol(cfg, symbol, timeframe):
     try:
         t = effective_tf_cfg(cfg, timeframe)
         raw = get_candles(cfg["exchange"], cfg["market_type"], symbol, timeframe, cfg["candle_limit"])
-        # Pomijamy niedomkniętą świecę, by nie generować sygnałów z jej zmiennych danych.
         d = indicators(raw.iloc[:-1].copy(), t["ema_fast"], t["ema_slow"])
         if len(d) < max(35, t["ema_slow"] + 5):
-            return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY",
-                    "price": None, "adx": None, "rsi": None, "reason": "Za mało świec"}
+            return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": None,
+                    "adx": None, "rsi": None, "reason": "Za mało świec"}
         r = d.iloc[-1]
         vals_ok = all(pd.notna(r[x]) and np.isfinite(float(r[x])) for x in ["close", "ema_fast", "ema_slow", "adx", "rsi"])
         if not vals_ok:
-            return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY",
-                    "price": float(r["close"]), "adx": None, "rsi": None, "reason": "Brak danych wskaźników"}
+            return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": float(r["close"]),
+                    "adx": None, "rsi": None, "reason": "Brak danych wskaźników"}
         trend = r["ema_fast"] > r["ema_slow"]
         filters = r["adx"] >= t["adx_threshold"] and t["rsi_min"] <= r["rsi"] <= t["rsi_max"]
         long_ok = bool(cfg["allow_long"] and trend and filters and r["close"] > r["ema_fast"])
         short_ok = bool(cfg["allow_short"] and not trend and filters and r["close"] < r["ema_fast"])
         signal = "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY"
-        return {"symbol": symbol, "tf": timeframe, "signal": signal,
-                "price": float(r["close"]), "adx": float(r["adx"]),
-                "rsi": float(r["rsi"]), "reason": "OK"}
+        return {"symbol": symbol, "tf": timeframe, "signal": signal, "price": float(r["close"]),
+                "adx": float(r["adx"]), "rsi": float(r["rsi"]), "reason": "OK"}
     except Exception as exc:
-        return {"symbol": symbol, "tf": timeframe, "signal": "BŁĄD",
-                "price": None, "adx": None, "rsi": None, "reason": str(exc)[:180]}
+        return {"symbol": symbol, "tf": timeframe, "signal": "BŁĄD", "price": None,
+                "adx": None, "rsi": None, "reason": str(exc)[:180]}
 
 
 def _as_float(value):
@@ -247,11 +244,9 @@ def _as_float(value):
 
 
 def balance_usdt(ex, positions=None):
-    """Return (free USDT, total USDT), preferring the exchange's actual futures-wallet fields."""
+    """Return (free USDT, total USDT), preferring actual futures-wallet fields."""
     balance = ex.fetch_balance() or {}
-    free_map = balance.get("free") or {}
-    used_map = balance.get("used") or {}
-    total_map = balance.get("total") or {}
+    free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
     row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
 
     def number(*values):
@@ -266,12 +261,9 @@ def balance_usdt(ex, positions=None):
                 continue
         return None
 
-    # CCXT unified balance fields.
     free = number(row.get("free"), free_map.get("USDT"))
     used = number(row.get("used"), used_map.get("USDT"))
     total = number(row.get("total"), total_map.get("USDT"))
-
-    # Exchange-specific payloads (especially Bitget USDT-M futures).
     info = balance.get("info")
     if isinstance(info, dict):
         candidates = []
@@ -292,36 +284,26 @@ def balance_usdt(ex, positions=None):
                 candidates.extend(x for x in value if isinstance(x, dict))
             elif isinstance(value, dict):
                 candidates.append(value)
-
         for item in candidates:
             coin = str(item.get("marginCoin", item.get("coin", item.get("currency", "")))).upper()
             if coin and coin != "USDT":
                 continue
             if free is None:
-                free = number(item.get("available"), item.get("availableBalance"),
-                              item.get("availableEquity"), item.get("maxAvailable"))
+                free = number(item.get("available"), item.get("availableBalance"), item.get("availableEquity"), item.get("maxAvailable"))
             if total is None:
-                total = number(item.get("accountEquity"), item.get("equity"),
-                               item.get("totalEquity"), item.get("totalWalletBalance"),
-                               item.get("total"))
+                total = number(item.get("accountEquity"), item.get("equity"), item.get("totalEquity"), item.get("totalWalletBalance"), item.get("total"))
             if used is None:
                 used = number(item.get("locked"), item.get("used"), item.get("frozen"))
             if free is not None and total is not None:
                 break
-
         if free is None:
-            free = number(info.get("availableBalance"), info.get("available"),
-                          info.get("availableUSDT"), info.get("availableEquity"))
+            free = number(info.get("availableBalance"), info.get("available"), info.get("availableUSDT"), info.get("availableEquity"))
         if total is None:
-            total = number(info.get("accountEquity"), info.get("equity"),
-                           info.get("totalEquity"), info.get("totalWalletBalance"))
-
-    # Use free + used only if the exchange does not provide a total balance.
+            total = number(info.get("accountEquity"), info.get("equity"), info.get("totalEquity"), info.get("totalWalletBalance"))
     if free is None:
         free = 0.0
     if total is None:
         total = free + used if used is not None else free
-    # Never add position notional to wallet balance: notional is not cash/equity.
     return max(0.0, float(free)), max(0.0, float(total))
 
 
@@ -339,22 +321,18 @@ def market_order(ex, symbol, side, qty, reduce_only=False):
 
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
-    """Minimalna wartość nowej pozycji to 10 USDT, z uwzględnieniem limitów rynku."""
     price = _as_float(price)
     total_usdt, free_usdt = max(0.0, _as_float(total_usdt)), max(0.0, _as_float(free_usdt))
     leverage = max(1, int(cfg["max_leverage"]))
-    risk_limit = max(0.0, float(cfg["risk_usdt"]))
-    max_notional = max(0.0, float(cfg["max_notional_usdt"]))
+    risk_limit, max_notional = max(0.0, float(cfg["risk_usdt"])), max(0.0, float(cfg["max_notional_usdt"]))
     sl_roe = float(cfg["sl_roe"])
     if price <= 0 or sl_roe <= 0 or max_notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
-
     risk_budget = min(risk_limit, total_usdt * 0.02)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
     margin_budget = free_usdt * 0.90
     target = min(risk_based_notional, max_notional, margin_budget * leverage)
-
     market = ex.market(symbol)
     contract_size = _as_float(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
@@ -363,49 +341,46 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     required = max(MIN_ORDER_NOTIONAL_USDT, min_cost)
     if target < required:
         return 0.0, 0.0
-
     qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
     if not np.isfinite(qty) or qty <= 0 or qty < min_amount:
         return 0.0, 0.0
     actual = qty * price * contract_size
-    if actual < required or actual > target * 1.001:
-        return 0.0, 0.0
-    if actual / leverage > margin_budget:
+    if actual < required or actual > target * 1.001 or actual / leverage > margin_budget:
         return 0.0, 0.0
     return qty, actual
 
 
 def ranked_symbols(ex, limit_count):
-    """Aktywne liniowe kontrakty USDT, posortowane malejąco po wolumenie w USDT."""
+    """Cache ticker ranking per Streamlit session to avoid refetching all tickers on every rerun."""
+    now = time.time()
+    cache_key = f"ranked_symbols:{ex.id}:{ex.options.get('defaultType', '')}:{int(limit_count)}"
+    cached = st.session_state.get(cache_key)
+    if cached and now - cached.get("ts", 0) < 120:
+        return cached["ranked"]
     markets = ex.load_markets()
-    candidates = []
-    for symbol, market in markets.items():
-        if (market.get("active") is False or market.get("quote") != "USDT"
-                or not market.get("linear") or not market.get("swap", False)):
-            continue
-        candidates.append(symbol)
+    candidates = [symbol for symbol, market in markets.items()
+                  if market.get("active") is not False and market.get("quote") == "USDT"
+                  and market.get("linear") and market.get("swap", False)]
     if not candidates:
+        st.session_state[cache_key] = {"ts": now, "ranked": []}
         return []
-
     tickers = ex.fetch_tickers(candidates)
     ranked = []
     for symbol in candidates:
         ticker = tickers.get(symbol) or {}
         quote_volume = _as_float(ticker.get("quoteVolume"))
         if quote_volume <= 0:
-            base_volume = _as_float(ticker.get("baseVolume"))
-            last = _as_float(ticker.get("last"))
-            quote_volume = base_volume * last
+            quote_volume = _as_float(ticker.get("baseVolume")) * _as_float(ticker.get("last"))
         ranked.append((symbol, quote_volume))
     ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked[:max(1, int(limit_count))]
+    result = ranked[:max(1, int(limit_count))]
+    st.session_state[cache_key] = {"ts": now, "ranked": result}
+    return result
 
 
 # -------------------- Logowanie --------------------
-for k, default in {
-    "authenticated": False, "logged_in": False, "username": "",
-    "user_id": None, "stripe_paid": 0, "user_email": ""
-}.items():
+for k, default in {"authenticated": False, "logged_in": False, "username": "",
+                   "user_id": None, "stripe_paid": 0, "user_email": ""}.items():
     if k not in st.session_state:
         st.session_state[k] = default
 
@@ -443,8 +418,7 @@ if not st.session_state["authenticated"]:
                         con.execute("UPDATE users SET password=? WHERE id=?", (password_hash(login_pass), row["id"]))
                         con.commit()
                 st.session_state.update(authenticated=True, logged_in=True, user_id=row["id"],
-                    stripe_paid=row["stripe_paid"], user_email=(row["email"] or "").lower(),
-                    username=row["username"])
+                    stripe_paid=row["stripe_paid"], user_email=(row["email"] or "").lower(), username=row["username"])
                 st.rerun()
             else:
                 st.error("Nieprawidłowy login lub hasło.")
@@ -501,7 +475,8 @@ with st.sidebar:
         st.rerun()
     if st.button("Wyczyść cache danych", use_container_width=True):
         get_candles.clear()
-        st.success("Cache wyczyszczony.")
+        st.session_state.clear()
+        st.success("Cache danych wyczyszczony. Odśwież stronę, jeśli panel nie przeładuje się automatycznie.")
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
@@ -516,8 +491,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         refresh_seconds = st.slider("Odstęp między skanami (sekundy)", 10, 300, int(cfg.get("refresh_seconds", 30)))
         submit_ctrl = st.form_submit_button("ZAPISZ TRYB PRACY", use_container_width=True)
     if submit_ctrl:
-        cfg.update(auto_trade=auto_trade, paper_mode=paper_mode,
-                   auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
+        cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
         save_cfg(cfg)
         st.success("Zapisano ustawienia.")
         st.rerun()
@@ -588,8 +562,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
                     st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
         if results:
-            df = pd.DataFrame(results)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
         else:
             st.info("Brak wyników skanowania.")
     except Exception as exc:
@@ -597,9 +570,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         event("ERROR", f"Błąd skanowania: {exc}")
     if cfg.get("auto_refresh"):
         wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Następny skan za {wait} s.")
-        time.sleep(wait)
-        st.rerun()
+        st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie; aplikacja nie blokuje wątku przez sleep.")
 
 
 # -------------------- Ustawienia strategii --------------------
@@ -686,17 +657,9 @@ elif page == "Połączenie API":
             st.success("Połączenie działa.")
             c1, c2 = st.columns(2, gap="medium")
             with c1:
-                st.markdown(
-                    f'<div class="metric-card green"><div class="metric-label">Wolne środki</div>'
-                    f'<div class="metric-value">{free:.4f} USDT</div>'
-                    f'<div class="metric-note">Dostępne do nowych zleceń</div></div>',
-                    unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card green"><div class="metric-label">Wolne środki</div><div class="metric-value">{free:.4f} USDT</div><div class="metric-note">Dostępne do nowych zleceń</div></div>', unsafe_allow_html=True)
             with c2:
-                st.markdown(
-                    f'<div class="metric-card"><div class="metric-label">Saldo Futures</div>'
-                    f'<div class="metric-value">{total:.4f} USDT</div>'
-                    f'<div class="metric-note">Całkowite saldo raportowane przez giełdę</div></div>',
-                    unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card"><div class="metric-label">Saldo Futures</div><div class="metric-value">{total:.4f} USDT</div><div class="metric-note">Całkowite saldo raportowane przez giełdę</div></div>', unsafe_allow_html=True)
         except Exception as exc:
             st.error(f"Błąd API: {exc}")
 
@@ -707,8 +670,8 @@ elif page == "Dziennik":
     with db() as con:
         rows = con.execute("SELECT ts,level,message FROM events ORDER BY id DESC LIMIT 300").fetchall()
     if rows:
-        st.dataframe(pd.DataFrame([tuple(r) for r in rows],
-            columns=["Czas UTC", "Poziom", "Wiadomość"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([tuple(r) for r in rows], columns=["Czas UTC", "Poziom", "Wiadomość"]),
+                     use_container_width=True, hide_index=True)
     else:
         st.info("Brak zdarzeń.")
 
@@ -718,9 +681,9 @@ elif page == "Regulamin i Instrukcja":
     st.subheader("Instrukcja obsługi i regulamin")
     tab_help, tab_terms = st.tabs(["Instrukcja", "Regulamin"])
     with tab_help:
-        st.markdown(""" 1. Utwórz konto i zaloguj się. 2. Administrator potwierdza płatność w panelu Stripe i aktywuje dostęp. 3. Utwórz klucz API giełdy z uprawnieniami odczytu i handlu Futures. Nie włączaj wypłat. 4. Zapisz dane API w zakładce Połączenie API. 5. Ustaw interwały, wskaźniki, limity pozycji i ryzyko. 6. Najpierw testuj w trybie PAPER. Tryb PAPER nie wysyła prawdziwych zleceń. """)
+        st.markdown("""1. Utwórz konto i zaloguj się. 2. Administrator potwierdza płatność w panelu Stripe i aktywuje dostęp. 3. Utwórz klucz API giełdy z uprawnieniami odczytu i handlu Futures. Nie włączaj wypłat. 4. Zapisz dane API w zakładce Połączenie API. 5. Ustaw interwały, wskaźniki, limity pozycji i ryzyko. 6. Najpierw testuj w trybie PAPER. Tryb PAPER nie wysyła prawdziwych zleceń.""")
     with tab_terms:
-        st.markdown(""" **Regulamin Bitget-SaaS Futures** 1. Serwis udostępnia narzędzia programowe do analizy rynku i składania zleceń. 2. Użytkownik odpowiada za klucze API, konfigurację ryzyka i decyzje inwestycyjne. 3. Handel futures wiąże się z ryzykiem utraty kapitału. Wyniki nie są gwarantowane. 4. Dostęp płatny kosztuje 49 PLN miesięcznie, zgodnie z warunkami prezentowanymi przy płatności. """)
+        st.markdown("""**Regulamin Bitget-SaaS Futures** 1. Serwis udostępnia narzędzia programowe do analizy rynku i składania zleceń. 2. Użytkownik odpowiada za klucze API, konfigurację ryzyka i decyzje inwestycyjne. 3. Handel futures wiąże się z ryzykiem utraty kapitału. Wyniki nie są gwarantowane. 4. Dostęp płatny kosztuje 49 PLN miesięcznie, zgodnie z warunkami prezentowanymi przy płatności.""")
 
 
 # -------------------- Panel administratora --------------------
@@ -729,8 +692,7 @@ elif page == "Panel Administratora" and is_user_admin():
     with db() as con:
         rows = con.execute("SELECT id,username,email,subscription,stripe_paid FROM users ORDER BY id").fetchall()
     if rows:
-        df = pd.DataFrame([tuple(r) for r in rows],
-            columns=["ID", "Użytkownik", "E-mail", "Pakiet", "Opłacone (0/1)"])
+        df = pd.DataFrame([tuple(r) for r in rows], columns=["ID", "Użytkownik", "E-mail", "Pakiet", "Opłacone (0/1)"])
         st.dataframe(df, use_container_width=True, hide_index=True)
         with st.form("admin_manage_form"):
             user_id = st.selectbox("Wybierz użytkownika", df["ID"].tolist())
@@ -762,6 +724,7 @@ elif page == "Panel Sesji i Kapitału":
     total_balance = free_balance = session_pnl = used_margin = 0.0
     active = []
     connected = bool(api_key_saved and secret_saved)
+    api_ok = False
     if connected:
         try:
             client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
@@ -769,6 +732,7 @@ elif page == "Panel Sesji i Kapitału":
             free_balance, total_balance = balance_usdt(client, active)
             session_pnl = sum(_as_float(p.get("unrealizedPnl")) for p in active)
             used_margin = sum(_as_float(p.get("initialMargin") or p.get("margin")) for p in active)
+            api_ok = True
         except Exception as exc:
             st.warning(f"Nie udało się pobrać salda lub pozycji: {exc}")
     max_slots = int(cfg["max_positions"])
@@ -783,21 +747,23 @@ elif page == "Panel Sesji i Kapitału":
             unsafe_allow_html=True,
         )
 
+    terminal_active = bool(api_ok and cfg.get("auto_refresh", True))
+    terminal_text = "AKTYWNY" if terminal_active else "NIEAKTYWNY"
+    terminal_note = "API działa; ciągłe skanowanie włączone" if terminal_active else "Brak połączenia API lub skanowanie wyłączone"
     c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1:
-        metric_card("Saldo Futures", f"{total_balance:.2f} USDT",
-                    "Całkowita wartość portfela raportowana przez giełdę", "gold")
+        metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT",
+                    "Saldo całkowite / środki dostępne", "gold")
     with c2:
-        metric_card("Wolne środki", f"{free_balance:.2f} USDT",
-                    "Środki dostępne do otwierania nowych pozycji", "green")
+        metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
+                    "Łączny PnL otwartych pozycji", "green" if session_pnl >= 0 else "red")
     with c3:
         metric_card("Otwarte pozycje", f"{len(active)} / {max_slots}",
                     f"Zgłoszony margin: {used_margin:.2f} USDT", "blue")
     with c4:
-        metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
-                    f"Auto-Trade: {'WŁĄCZONY' if cfg['auto_trade'] else 'WYŁĄCZONY'} | "
-                    f"{'PAPER' if cfg['paper_mode'] else 'LIVE'}",
-                    "green" if session_pnl >= 0 else "red")
+        metric_card("Terminal", terminal_text, terminal_note,
+                    "green" if terminal_active else "red")
+
     st.divider()
     st.markdown("### Aktywne pozycje")
     if active:
@@ -806,7 +772,7 @@ elif page == "Panel Sesji i Kapitału":
             "Kontrakty": p.get("contracts"), "Cena wejścia": p.get("entryPrice"),
             "PnL (USDT)": p.get("unrealizedPnl"), "Margin": p.get("initialMargin")
         } for p in active]), use_container_width=True, hide_index=True)
-    elif connected:
+    elif connected and api_ok:
         st.info("Brak otwartych pozycji.")
     else:
         st.info("Zapisz klucze API, aby wyświetlić saldo i pozycje.")
@@ -840,6 +806,4 @@ elif page == "Panel Sesji i Kapitału":
 
     if cfg.get("auto_refresh", True):
         interval = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Odświeżenie za {interval} s. Ostatni odczyt: {datetime.now().astimezone().strftime('%H:%M:%S')}")
-        time.sleep(interval)
-        st.rerun()
+        st.caption(f"Odświeżanie co {interval} s jest skonfigurowane, ale ta wersja nie używa blokującego sleep. Użyj odświeżenia strony, aby pobrać nowe dane.")
