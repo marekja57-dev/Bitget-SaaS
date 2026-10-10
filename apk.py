@@ -268,10 +268,11 @@ def _as_float(value):
         return 0.0
 
 
-def balance_usdt(ex):
-    """Zwraca (wolne USDT, ca艂kowite USDT), obs艂uguj膮c typow膮 struktur臋 CCXT."""
+def balance_usdt(ex, positions=None):
+    """Zwraca (wolne USDT, ca艂kowite USDT). Je艣li gie艂da nie podaje u偶ytego salda, wykorzystuje depozyt otwartych pozycji jako kontrolowany fallback."""
     b = ex.fetch_balance() or {}
     row = b.get("USDT") if isinstance(b.get("USDT"), dict) else {}
+
     free = row.get("free")
     total = row.get("total")
     used = row.get("used")
@@ -281,15 +282,32 @@ def balance_usdt(ex):
         total = b["total"].get("USDT")
     if used is None and isinstance(b.get("used"), dict):
         used = b["used"].get("USDT")
-    free_value = _as_float(free)
-    used_value = _as_float(used)
-    total_value = _as_float(total) if total is not None else free_value + used_value
-    # Ochrona przed niesp贸jn膮 odpowiedzi膮 gie艂dy, gdzie total przypadkowo r贸wna si臋 free.
+
+    free_value = max(0.0, _as_float(free))
+    used_value = max(0.0, _as_float(used))
+    position_margin = 0.0
+    for pos in positions or []:
+        # CCXT ujednolica initialMargin; niekt贸re gie艂dy udost臋pniaj膮 tylko
+        # margin lub warto艣膰 w polu info.
+        margin = pos.get("initialMargin")
+        if margin is None:
+            margin = pos.get("margin")
+        if margin is None and isinstance(pos.get("info"), dict):
+            info = pos["info"]
+            margin = info.get("marginSize") or info.get("totalMargin") or info.get("positionIM")
+        position_margin += max(0.0, _as_float(margin))
+
+    total_value = max(0.0, _as_float(total)) if total is not None else free_value + used_value
+    # Gdy gie艂da zwraca total == free mimo otwartych pozycji, uwzgl臋dnij
+    # raportowany used albo depozyt z pozycji. Nie obni偶aj poprawnego total.
     if used is not None:
         total_value = max(total_value, free_value + used_value)
-    elif total is None:
+    if position_margin > 0:
+        total_value = max(total_value, free_value + used_value, free_value + position_margin)
+    if total is None and used is None and position_margin <= 0:
         total_value = free_value
-    return max(0.0, free_value), max(0.0, total_value)
+
+    return free_value, total_value
 
 
 def active_positions(ex):
@@ -461,7 +479,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         event("WARNING", f"[PAPER] Pomini臋to {symbol}: limit slot贸w {max_slots} osi膮gni臋ty.")
                         continue
                     paper_open_symbols.add(symbol)
-                    event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}] 鈥� slot {len(paper_open_symbols)}/{max_slots}")
+                    event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}] - slot {len(paper_open_symbols)}/{max_slots}")
                     continue
 
                 if not (key and secret and res.get("price")):
@@ -494,16 +512,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         event("WARNING", f"Nie uda艂o si臋 ustawi膰 d藕wigni dla {symbol}: {lev_exc}")
                     order = market_order(ex, symbol, "buy" if res["signal"] == "LONG" else "sell", qty)
                     opened_this_scan.append(symbol)
-                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} notional鈮坽notional:.2f USDT; slot do {effective_count + 1}/{max_slots}; id={order.get('id')}")
+                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} notional={notional:.2f} USDT; slot do {effective_count + 1}/{max_slots}; id={order.get('id')}")
                 except Exception as trade_exc:
                     event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
                     st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
         st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
     except Exception as exc:
         st.error(f"B\u0142\u0105d podczas skanowania gie\u0142dy: {exc}")
-    if cfg.get("auto_refresh") and cfg.get("auto_trade"):
+    if cfg.get("auto_refresh"):
         st.warning(f"Od\u015bwie\u017cenie za {int(cfg.get('refresh_seconds', 30))} s.")
-        time.sleep(int(cfg.get("refresh_seconds", 30)))
+        time.sleep(max(10, int(cfg.get("refresh_seconds", 30))))
         st.rerun()
 
 
@@ -661,11 +679,13 @@ elif page == "Panel Sesji i Kapita\u0142u":
     if key and secret:
         try:
             client = exchange_client(ex_id, key, secret, passphrase, cfg["market_type"])
-            free_bal, total_bal = balance_usdt(client)
             active = active_positions(client)
+            # Najpierw pobierz otwarte pozycje, aby saldo ca艂kowite nie by艂o
+            # b艂臋dnie r贸wne wolnemu, gdy gie艂da nie raportuje pola used.
+            free_bal, total_bal = balance_usdt(client, active)
             active_slots = len(active)
-            session_pnl = sum(float(p.get("unrealizedPnl") or 0) for p in active)
-            used_margin = sum(float(p.get("initialMargin") or p.get("margin") or 0) for p in active)
+            session_pnl = sum(_as_float(p.get("unrealizedPnl")) for p in active)
+            used_margin = sum(_as_float(p.get("initialMargin") or p.get("margin")) for p in active)
         except Exception as exc:
             st.warning(f"Nie uda\u0142o si\u0119 pobra\u0107 salda/pozycji: {exc}")
     max_slots = int(cfg["max_positions"])
@@ -719,3 +739,9 @@ elif page == "Panel Sesji i Kapita\u0142u":
         except Exception as exc:
             st.error(f"Kill switch nie powi\u00f3d\u0142 si\u0119: {exc}")
 
+    # Od艣wie偶aj panel salda i pozycji niezale偶nie od tego, czy Auto-Trade jest w艂膮czony.
+    if cfg.get("auto_refresh", True):
+        refresh_interval = max(10, int(cfg.get("refresh_seconds", 30)))
+        st.caption(f"Dane salda i pozycji od艣wie偶膮 si臋 automatycznie za {refresh_interval} s. Ostatnie pobranie: {datetime.now().astimezone().strftime('%H:%M:%S')}")
+        time.sleep(refresh_interval)
+        st.rerun()
