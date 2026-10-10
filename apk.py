@@ -33,6 +33,7 @@ STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
+MIN_MARGIN_USDT = 10.0 # Twardy wymóg: minimum 10 USDT czystego depozytu z portfela
 
 DEFAULT_TF_SETTINGS = {
     "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25.0, "rsi_min": 25.0, "rsi_max": 75.0},
@@ -51,7 +52,7 @@ DEFAULTS = {
     "max_leverage": 10, "sl_roe": 20.0, "tp_roe": 40.0, "enable_roe": True,
     "timeframes": ["4h", "1d"], "tf_settings": DEFAULT_TF_SETTINGS,
     "auto_refresh": True, "auto_trade": False, "paper_mode": True,
-    "max_notional_usdt": 50.0, "cooldown_seconds": 300,
+    "max_notional_usdt": 200.0, "cooldown_seconds": 300,
     "allow_short": True, "allow_long": True, "scan_limit_count": 10,
     "indicator_multiplier": 100,
 }
@@ -215,7 +216,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
     try:
         t = effective_tf_cfg(cfg, timeframe)
         raw = get_candles(cfg["exchange"], cfg["market_type"], symbol, timeframe, cfg["candle_limit"])
-        # Poprawka: analiza na pełnym zestawie (bez sztucznego obcinania ostatniej świecy iloc[:-1])
         d = indicators(raw.copy(), t["ema_fast"], t["ema_slow"])
         if len(d) < max(35, t["ema_slow"] + 5):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": None,
@@ -337,7 +337,7 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
     if not reduce_only:
         price = _as_float(reference_price)
         if price <= 0:
-            raise ValueError("Zablokowano otwarcie pozycji: brak prawidłowej ceny do sprawdzenia minimum 10 USDT.")
+            raise ValueError("Zablokowano otwarcie pozycji: brak prawidłowej ceny do sprawdzenia wartości pozycji.")
         market = ex.market(symbol)
         contract_size = _as_float(market.get("contractSize")) or 1.0
         notional = qty * price * contract_size
@@ -357,27 +357,42 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     leverage = max(1, int(cfg["max_leverage"]))
     risk_limit, max_notional = max(0.0, float(cfg["risk_usdt"])), max(0.0, float(cfg["max_notional_usdt"]))
     sl_roe = float(cfg["sl_roe"])
-    if price <= 0 or sl_roe <= 0 or max_notional < MIN_ORDER_NOTIONAL_USDT:
+    if price <= 0 or sl_roe <= 0:
         return 0.0, 0.0
-    risk_budget = min(risk_limit, total_usdt * 0.02)
+
+    # Poprawka: Obliczamy kwotę z ryzyka i wymuszamy MINIMUM 10 USDT depozytu zabezpieczającego (Margin)
+    risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
     margin_budget = free_usdt * 0.90
+    
     target = min(risk_based_notional, max_notional, margin_budget * leverage)
+    
+    # Wymóg: Wartość pozycji MUSI wynosić co najmniej (MIN_MARGIN_USDT * dźwignia), np. 10 USDT * 10x = 100 USDT pozycji
+    min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, MIN_MARGIN_USDT * leverage)
+    
     market = ex.market(symbol)
     contract_size = _as_float(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
     min_cost = _as_float((limits.get("cost") or {}).get("min"))
     min_amount = _as_float((limits.get("amount") or {}).get("min"))
-    required = max(MIN_ORDER_NOTIONAL_USDT, min_cost)
+    
+    required = max(min_required_notional, min_cost)
+    
     if target < required:
         return 0.0, 0.0
+        
     qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
     if not np.isfinite(qty) or qty <= 0 or qty < min_amount:
         return 0.0, 0.0
+        
     actual = qty * price * contract_size
-    if actual < required or actual > target * 1.001 or actual / leverage > margin_budget:
+    actual_margin = actual / leverage
+    
+    # Ostateczne sprawdzenie czy czysty margin nie jest mniejszy niż 10 USDT
+    if actual < required or actual_margin < MIN_MARGIN_USDT or actual_margin > margin_budget:
         return 0.0, 0.0
+        
     return qty, actual
 
 
@@ -595,10 +610,9 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     free, total = balance_usdt(ex, positions)
                     qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
                     if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
-                        event("WARNING", f"Pominięto {symbol} [{tf}]: nie spełnia minimum 10 USDT lub limitu ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
+                        event("WARNING", f"Pominięto {symbol} [{tf}]: depozyt mniejszy niż 10 USDT lub limit ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
                         continue
                     
-                    # Wymuszenie i twarde sprawdzenie dźwigni (żeby giełda nie otwierała z 20x na pałę)
                     try:
                         leverage_val = int(cfg["max_leverage"])
                         ex.set_leverage(leverage_val, symbol)
@@ -610,7 +624,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     side = "buy" if res["signal"] == "LONG" else "sell"
                     order = market_order(ex, symbol, side, qty, reference_price=res["price"])
                     opened_this_scan.append(symbol)
-                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT; order={order.get('id')}")
+                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
                 except Exception as trade_exc:
                     event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
                     st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
