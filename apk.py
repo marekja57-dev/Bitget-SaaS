@@ -620,6 +620,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
     if cfg.get("auto_refresh"):
         wait = max(10, int(cfg.get("refresh_seconds", 30)))
         st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie; aplikacja nie blokuje wątku przez sleep.")
+        import gc
+        gc.collect()
 
 
 # -------------------- Ustawienia strategii --------------------
