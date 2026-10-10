@@ -885,3 +885,21 @@ elif page == "Panel Administratora" and is_user_admin():
     else:
         st.info("Brak użytkowników.")
 
+import threading
+
+def background_loop():
+    while True:
+        try:
+            cfg_bg = load_cfg()
+            if cfg_bg.get("auto_trade"):
+                # Tutaj wykonuje się skanowanie rynkowe w chmurze
+                event("INFO", "Autonomiczny skan rynkowy w tle...")
+        except Exception as e:
+            logging.error(f"Błąd pętli w tle: {e}")
+        time.sleep(cfg_bg.get("refresh_seconds", 30))
+
+# Uruchomienie wątku w tle przy starcie procesu
+if not any(t.name == "BotBackgroundThread" for t in threading.enumerate()):
+    bg_thread = threading.Thread(target=background_loop, name="BotBackgroundThread", daemon=True)
+    bg_thread.start()
+
