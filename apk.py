@@ -31,10 +31,10 @@ LOG_PATH = APP_DIR / "trading.log"
 logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-# Produkcyjny Stripe Payment Link podany przez użytkownika.
-# Celowo nie pobieramy go ze zmiennej środowiskowej: stara lub pusta
-# wartość STRIPE_CHECKOUT_FALLBACK na serwerze nadpisywała poprawny adres.
-STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
+# Produkcyjny Stripe Payment Link podany przez u偶ytkownika.
+# Celowo nie pobieramy go ze zmiennej 艣rodowiskowej: stara lub pusta
+# warto艣膰 STRIPE_CHECKOUT_FALLBACK na serwerze nadpisywa艂a poprawny adres.
+STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
@@ -60,7 +60,7 @@ DEFAULTS = {
     "indicator_multiplier": 60,
 }
 
-CSS = """ <style> :root { color-scheme: dark; } .stApp { background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color: #eaf3ff; } /* Belka Streamlit zostaje nad treścią, a panel otrzymuje bezpieczny odstęp. */ [data-testid="stHeader"] { background: rgba(3, 12, 29, 0.96); z-index: 1000; } [data-testid="stAppViewContainer"] .main .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem !important; max-width: 1600px; overflow: visible; } [data-testid="stSidebar"] { background: linear-gradient(180deg, #06152d, #081f42); border-right: 1px solid #164a84; } /* Nagłówek głównego panelu: pełny tekst, bez nachodzenia na górną belkę. */ .brand { display: block; position: relative; margin-top: 0.5rem; margin-bottom: 0.35rem; padding-top: 0.25rem; font-weight: 900; letter-spacing: -0.7px; font-size: clamp(23px, 2.5vw, 32px); line-height: 1.35; color: #eaf5ff; overflow-wrap: anywhere; } .brand span { color: #28a8ff; } .subbrand { display: block; position: relative; margin-top: 0.2rem; margin-bottom: 1.5rem; color: #7da9d8; font-size: 11px; line-height: 1.6; letter-spacing: 1.5px; text-transform: uppercase; overflow-wrap: anywhere; } /* Nagłówek logowania i rejestracji. */ .brand-retro { display: block; position: relative; padding-top: 0.5rem; margin-top: 0.5rem; margin-bottom: 0.5rem; font-weight: 900; font-size: clamp(27px, 3vw, 38px); line-height: 1.35; letter-spacing: -0.5px; color: #f3c653; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.6); text-align: center; font-family: serif; overflow-wrap: anywhere; } .subbrand-retro { color: #7da9d8; font-size: 11px; line-height: 1.7; letter-spacing: 1.5px; text-transform: uppercase; text-align: center; margin-bottom: 20px; } .panel { background: linear-gradient(145deg, rgba(12,43,83,.95), rgba(5,24,51,.96)); border: 1px solid #164a80; border-radius: 14px; padding: 16px 18px; box-shadow: 0 4px 12px rgba(0,0,0,.3); } .metric-label { font-size: 12px; color: #90b8e6; text-transform: uppercase; letter-spacing: 1px; } .metric-value { font-size: 24px; font-weight: 800; color: #f1f7ff; margin-top: 5px; } .muted { color: #83a7d0; font-size: 12px; margin-top: 4px; } div.stButton > button { border: 1px solid #278be8; border-radius: 8px; background: linear-gradient(180deg, #1689ff, #0759c8); color: white; font-weight: 700; } hr { border-color: #16416f; } @media (max-width: 768px) { [data-testid="stAppViewContainer"] .main .block-container { padding-top: 2.8rem !important; padding-left: 1rem; padding-right: 1rem; } .brand { font-size: 25px; letter-spacing: -0.4px; } .subbrand { font-size: 10px; letter-spacing: 1px; } } </style> """
+CSS = """ <style> :root { color-scheme: dark; } .stApp { background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color: #eaf3ff; } /* Belka Streamlit zostaje nad tre艣ci膮, a panel otrzymuje bezpieczny odst臋p. */ [data-testid="stHeader"] { background: rgba(3, 12, 29, 0.96); z-index: 1000; } [data-testid="stAppViewContainer"] .main .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem !important; max-width: 1600px; overflow: visible; } [data-testid="stSidebar"] { background: linear-gradient(180deg, #06152d, #081f42); border-right: 1px solid #164a84; } /* Nag艂贸wek g艂贸wnego panelu: pe艂ny tekst, bez nachodzenia na g贸rn膮 belk臋. */ .brand { display: block; position: relative; margin-top: 0.5rem; margin-bottom: 0.35rem; padding-top: 0.25rem; font-weight: 900; letter-spacing: -0.7px; font-size: clamp(23px, 2.5vw, 32px); line-height: 1.35; color: #eaf5ff; overflow-wrap: anywhere; } .brand span { color: #28a8ff; } .subbrand { display: block; position: relative; margin-top: 0.2rem; margin-bottom: 1.5rem; color: #7da9d8; font-size: 11px; line-height: 1.6; letter-spacing: 1.5px; text-transform: uppercase; overflow-wrap: anywhere; } /* Nag艂贸wek logowania i rejestracji. */ .brand-retro { display: block; position: relative; padding-top: 0.5rem; margin-top: 0.5rem; margin-bottom: 0.5rem; font-weight: 900; font-size: clamp(27px, 3vw, 38px); line-height: 1.35; letter-spacing: -0.5px; color: #f3c653; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.6); text-align: center; font-family: serif; overflow-wrap: anywhere; } .subbrand-retro { color: #7da9d8; font-size: 11px; line-height: 1.7; letter-spacing: 1.5px; text-transform: uppercase; text-align: center; margin-bottom: 20px; } .panel { background: linear-gradient(145deg, rgba(12,43,83,.95), rgba(5,24,51,.96)); border: 1px solid #164a80; border-radius: 14px; padding: 16px 18px; box-shadow: 0 4px 12px rgba(0,0,0,.3); } .metric-label { font-size: 12px; color: #90b8e6; text-transform: uppercase; letter-spacing: 1px; } .metric-value { font-size: 24px; font-weight: 800; color: #f1f7ff; margin-top: 5px; } .muted { color: #83a7d0; font-size: 12px; margin-top: 4px; } div.stButton > button { border: 1px solid #278be8; border-radius: 8px; background: linear-gradient(180deg, #1689ff, #0759c8); color: white; font-weight: 700; } hr { border-color: #16416f; } @media (max-width: 768px) { [data-testid="stAppViewContainer"] .main .block-container { padding-top: 2.8rem !important; padding-left: 1rem; padding-right: 1rem; } .brand { font-size: 25px; letter-spacing: -0.4px; } .subbrand { font-size: 10px; letter-spacing: 1px; } } </style> """
 st.markdown(CSS, unsafe_allow_html=True)
 
 
@@ -260,10 +260,42 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     return qty, notional
 
 
+def _as_float(value):
+    try:
+        number = float(value)
+        return number if np.isfinite(number) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def balance_usdt(ex):
-    b = ex.fetch_balance()
-    row = b.get("USDT") or {}
-    return float(row.get("free") or 0), float(row.get("total") or 0)
+    """Zwraca (wolne USDT, ca艂kowite USDT), obs艂uguj膮c typow膮 struktur臋 CCXT."""
+    b = ex.fetch_balance() or {}
+    row = b.get("USDT") if isinstance(b.get("USDT"), dict) else {}
+    free = row.get("free")
+    total = row.get("total")
+    used = row.get("used")
+    if free is None and isinstance(b.get("free"), dict):
+        free = b["free"].get("USDT")
+    if total is None and isinstance(b.get("total"), dict):
+        total = b["total"].get("USDT")
+    if used is None and isinstance(b.get("used"), dict):
+        used = b["used"].get("USDT")
+    free_value = _as_float(free)
+    used_value = _as_float(used)
+    total_value = _as_float(total) if total is not None else free_value + used_value
+    # Ochrona przed niesp贸jn膮 odpowiedzi膮 gie艂dy, gdzie total przypadkowo r贸wna si臋 free.
+    if used is not None:
+        total_value = max(total_value, free_value + used_value)
+    elif total is None:
+        total_value = free_value
+    return max(0.0, free_value), max(0.0, total_value)
+
+
+def active_positions(ex):
+    """Zwraca tylko otwarte pozycje. B艂膮d API przerywa pr贸b臋 otwarcia nowych pozycji."""
+    positions = ex.fetch_positions() or []
+    return [pos for pos in positions if abs(_as_float(pos.get("contracts"))) > 0]
 
 
 # ========================================================
@@ -408,25 +440,64 @@ if page == "Automatyczny Skaner i Auto-Handel":
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
         st.info(f"Skanowanie {len(symbols)} par na interwa\u0142ach: {', '.join(tfs)}")
         results = []
-        free, total = balance_usdt(ex) if not cfg["paper_mode"] and key and secret else (1000.0, 1000.0)
+        max_slots = max(1, int(cfg.get("max_positions", 3)))
+        paper_open_symbols = set()
+        opened_this_scan = [] # Rezerwacja slot贸w na czas bie偶膮cego skanu.
         for symbol in symbols:
             for tf in tfs:
                 res = signal_for_symbol(cfg, symbol, tf)
                 results.append(res)
-                if res["signal"] in ("LONG", "SHORT"):
-                    event("INFO", f"Sygna\u0142 {res['signal']} {symbol} [{tf}]")
-                    if cfg["auto_trade"]:
-                        if cfg["paper_mode"]:
-                            event("TRADE", f"[PAPER] Sygna\u0142 {res['signal']} {symbol} [{tf}]")
-                        elif key and secret and res.get("price"):
-                            qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
-                            if qty > 0:
-                                try:
-                                    ex.set_leverage(int(cfg["max_leverage"]), symbol)
-                                except Exception:
-                                    pass
-                                order = market_order(ex, symbol, "buy" if res["signal"] == "LONG" else "sell", qty)
-                                event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} id={order.get('id')}")
+                if res["signal"] not in ("LONG", "SHORT"):
+                    continue
+
+                event("INFO", f"Sygna艂 {res['signal']} {symbol} [{tf}]")
+                if not cfg["auto_trade"]:
+                    continue
+
+                if cfg["paper_mode"]:
+                    if symbol in paper_open_symbols:
+                        continue
+                    if len(paper_open_symbols) >= max_slots:
+                        event("WARNING", f"[PAPER] Pomini臋to {symbol}: limit slot贸w {max_slots} osi膮gni臋ty.")
+                        continue
+                    paper_open_symbols.add(symbol)
+                    event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}] 鈥� slot {len(paper_open_symbols)}/{max_slots}")
+                    continue
+
+                if not (key and secret and res.get("price")):
+                    event("WARNING", f"Pomini臋to {symbol}: brak kluczy API lub ceny.")
+                    continue
+
+                try:
+                    # Od艣wie偶 pozycje przed ka偶dym zleceniem. Przy b艂臋dzie API nie handlujemy w ciemno.
+                    current_positions = active_positions(ex)
+                    current_symbols = {str(pos.get("symbol")) for pos in current_positions if pos.get("symbol")}
+                    current_count = len(current_positions)
+                    # Nie licz drugi raz pozycji, kt贸re gie艂da zd膮偶y艂a ju偶 zwr贸ci膰.
+                    reserved_not_visible = [s for s in opened_this_scan if s not in current_symbols]
+                    effective_count = current_count + len(reserved_not_visible)
+                    if effective_count >= max_slots:
+                        event("WARNING", f"Pomini臋to {symbol}: osi膮gni臋to limit {max_slots} otwartych slot贸w.")
+                        continue
+                    if symbol in current_symbols or symbol in opened_this_scan:
+                        event("INFO", f"Pomini臋to {symbol}: pozycja na tej parze ju偶 istnieje lub zosta艂a otwarta w tym skanie.")
+                        continue
+
+                    free, total = balance_usdt(ex)
+                    qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
+                    if qty <= 0 or notional <= 0:
+                        event("WARNING", f"Pomini臋to {symbol}: za ma艂o wolnych 艣rodk贸w na nowe zlecenie.")
+                        continue
+                    try:
+                        ex.set_leverage(int(cfg["max_leverage"]), symbol)
+                    except Exception as lev_exc:
+                        event("WARNING", f"Nie uda艂o si臋 ustawi膰 d藕wigni dla {symbol}: {lev_exc}")
+                    order = market_order(ex, symbol, "buy" if res["signal"] == "LONG" else "sell", qty)
+                    opened_this_scan.append(symbol)
+                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} notional鈮坽notional:.2f USDT; slot do {effective_count + 1}/{max_slots}; id={order.get('id')}")
+                except Exception as trade_exc:
+                    event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
+                    st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
         st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
     except Exception as exc:
         st.error(f"B\u0142\u0105d podczas skanowania gie\u0142dy: {exc}")
@@ -591,8 +662,7 @@ elif page == "Panel Sesji i Kapita\u0142u":
         try:
             client = exchange_client(ex_id, key, secret, passphrase, cfg["market_type"])
             free_bal, total_bal = balance_usdt(client)
-            positions = client.fetch_positions()
-            active = [p for p in positions or [] if abs(float(p.get("contracts") or 0)) > 0]
+            active = active_positions(client)
             active_slots = len(active)
             session_pnl = sum(float(p.get("unrealizedPnl") or 0) for p in active)
             used_margin = sum(float(p.get("initialMargin") or p.get("margin") or 0) for p in active)
@@ -611,8 +681,7 @@ elif page == "Panel Sesji i Kapita\u0142u":
     if key and secret:
         try:
             client = exchange_client(ex_id, key, secret, passphrase, cfg["market_type"])
-            positions = client.fetch_positions()
-            active = [p for p in positions or [] if abs(float(p.get("contracts") or 0)) > 0]
+            active = active_positions(client)
             if active:
                 st.dataframe(pd.DataFrame([{"Symbol": p.get("symbol"), "Strona": p.get("side"),
                     "Kontrakty": p.get("contracts"), "Wej\u015bcie": p.get("entryPrice"),
@@ -631,9 +700,9 @@ elif page == "Panel Sesji i Kapita\u0142u":
             if not key or not secret:
                 raise RuntimeError("Brak kluczy API")
             client = exchange_client(ex_id, key, secret, passphrase, cfg["market_type"])
-            positions = client.fetch_positions()
+            positions = active_positions(client)
             outcomes = []
-            for pos in positions or []:
+            for pos in positions:
                 qty = abs(float(pos.get("contracts") or 0))
                 symbol = pos.get("symbol")
                 if qty <= 0 or not symbol:
@@ -649,3 +718,4 @@ elif page == "Panel Sesji i Kapita\u0142u":
             st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
         except Exception as exc:
             st.error(f"Kill switch nie powi\u00f3d\u0142 si\u0119: {exc}")
+
