@@ -1,4 +1,4 @@
-mport os
+import os
 import json
 import sqlite3
 import time
