@@ -55,7 +55,7 @@ DEFAULTS = {
     "indicator_multiplier": 100,
 }
 
-st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} </style> """, unsafe_allow_html=True)
+st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card { border:1px solid var(--gold); border-radius:14px; padding:18px 20px; min-height:124px; background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98)); box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24); } .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(22px,2.2vw,31px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} </style> """, unsafe_allow_html=True)
 
 
 # -------------------- Baza danych --------------------
@@ -247,41 +247,82 @@ def _as_float(value):
 
 
 def balance_usdt(ex, positions=None):
-    """Zwraca (wolne USDT, całkowite USDT) na podstawie danych CCXT."""
+    """Return (free USDT, total USDT), preferring the exchange's actual futures-wallet fields."""
     balance = ex.fetch_balance() or {}
-    free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
+    free_map = balance.get("free") or {}
+    used_map = balance.get("used") or {}
+    total_map = balance.get("total") or {}
     row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
 
-    def first_number(*values):
+    def number(*values):
         for value in values:
-            if value is None:
+            if value is None or value == "":
                 continue
             try:
                 n = float(value)
                 if np.isfinite(n) and n >= 0:
                     return n
             except (TypeError, ValueError):
-                pass
+                continue
         return None
 
-    free = first_number(row.get("free"), free_map.get("USDT"))
-    used = first_number(row.get("used"), used_map.get("USDT"))
-    total = first_number(row.get("total"), total_map.get("USDT"))
+    # CCXT unified balance fields.
+    free = number(row.get("free"), free_map.get("USDT"))
+    used = number(row.get("used"), used_map.get("USDT"))
+    total = number(row.get("total"), total_map.get("USDT"))
+
+    # Exchange-specific payloads (especially Bitget USDT-M futures).
     info = balance.get("info")
     if isinstance(info, dict):
-        nested = info.get("data")
-        if isinstance(nested, dict):
-            info = {**info, **nested}
+        candidates = []
+        data = info.get("data")
+        if isinstance(data, list):
+            candidates.extend(x for x in data if isinstance(x, dict))
+        elif isinstance(data, dict):
+            candidates.append(data)
+            for key in ("assetList", "assets", "list", "accounts"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    candidates.extend(x for x in value if isinstance(x, dict))
+                elif isinstance(value, dict):
+                    candidates.append(value)
+        for key in ("assetList", "assets", "list", "accounts"):
+            value = info.get(key)
+            if isinstance(value, list):
+                candidates.extend(x for x in value if isinstance(x, dict))
+            elif isinstance(value, dict):
+                candidates.append(value)
+
+        for item in candidates:
+            coin = str(item.get("marginCoin", item.get("coin", item.get("currency", "")))).upper()
+            if coin and coin != "USDT":
+                continue
+            if free is None:
+                free = number(item.get("available"), item.get("availableBalance"),
+                              item.get("availableEquity"), item.get("maxAvailable"))
+            if total is None:
+                total = number(item.get("accountEquity"), item.get("equity"),
+                               item.get("totalEquity"), item.get("totalWalletBalance"),
+                               item.get("total"))
+            if used is None:
+                used = number(item.get("locked"), item.get("used"), item.get("frozen"))
+            if free is not None and total is not None:
+                break
+
         if free is None:
-            free = first_number(info.get("availableBalance"), info.get("available"), info.get("availableUSDT"))
+            free = number(info.get("availableBalance"), info.get("available"),
+                          info.get("availableUSDT"), info.get("availableEquity"))
         if total is None:
-            total = first_number(info.get("accountEquity"), info.get("equity"),
-                                 info.get("totalEquity"), info.get("totalWalletBalance"))
-    free = free if free is not None else 0.0
+            total = number(info.get("accountEquity"), info.get("equity"),
+                           info.get("totalEquity"), info.get("totalWalletBalance"))
+
+    # Use free + used only if the exchange does not provide a total balance.
+    if free is None:
+        free = 0.0
     if total is None:
         total = free + used if used is not None else free
-    # Nie dodajemy nominalnej wartości pozycji do salda. Nie jest ona gotówką.
-    return max(0.0, free), max(0.0, total)
+    # Never add position notional to wallet balance: notional is not cash/equity.
+    return max(0.0, float(free)), max(0.0, float(total))
 
 
 def active_positions(ex):
@@ -643,9 +684,19 @@ elif page == "Połączenie API":
             client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
             free, total = balance_usdt(client)
             st.success("Połączenie działa.")
-            c1, c2 = st.columns(2)
-            c1.metric("Wolne USDT", f"{free:.4f}")
-            c2.metric("Saldo całkowite USDT", f"{total:.4f}")
+            c1, c2 = st.columns(2, gap="medium")
+            with c1:
+                st.markdown(
+                    f'<div class="metric-card green"><div class="metric-label">Wolne środki</div>'
+                    f'<div class="metric-value">{free:.4f} USDT</div>'
+                    f'<div class="metric-note">Dostępne do nowych zleceń</div></div>',
+                    unsafe_allow_html=True)
+            with c2:
+                st.markdown(
+                    f'<div class="metric-card"><div class="metric-label">Saldo Futures</div>'
+                    f'<div class="metric-value">{total:.4f} USDT</div>'
+                    f'<div class="metric-note">Całkowite saldo raportowane przez giełdę</div></div>',
+                    unsafe_allow_html=True)
         except Exception as exc:
             st.error(f"Błąd API: {exc}")
 
@@ -721,14 +772,32 @@ elif page == "Panel Sesji i Kapitału":
         except Exception as exc:
             st.warning(f"Nie udało się pobrać salda lub pozycji: {exc}")
     max_slots = int(cfg["max_positions"])
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Saldo całkowite", f"{total_balance:.2f} USDT", help="Wartość zwrócona przez giełdę.")
-    c1.caption(f"Wolne środki: {free_balance:.2f} USDT")
-    c2.metric("Otwarte pozycje", f"{len(active)} / {max_slots}")
-    c3.metric("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT")
-    c3.caption(f"Raportowany margin: {used_margin:.2f} USDT")
-    c4.metric("Auto-Trade", "WŁĄCZONY" if cfg["auto_trade"] else "WYŁĄCZONY")
-    c4.caption("Tryb: PAPER" if cfg["paper_mode"] else "Tryb: LIVE")
+
+    def metric_card(label, value, note="", tone=""):
+        tone_class = f" {tone}" if tone else ""
+        st.markdown(
+            f'<div class="metric-card{tone_class}">'
+            f'<div class="metric-label">{label}</div>'
+            f'<div class="metric-value">{value}</div>'
+            f'<div class="metric-note">{note}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
+    with c1:
+        metric_card("Saldo Futures", f"{total_balance:.2f} USDT",
+                    "Całkowita wartość portfela raportowana przez giełdę", "gold")
+    with c2:
+        metric_card("Wolne środki", f"{free_balance:.2f} USDT",
+                    "Środki dostępne do otwierania nowych pozycji", "green")
+    with c3:
+        metric_card("Otwarte pozycje", f"{len(active)} / {max_slots}",
+                    f"Zgłoszony margin: {used_margin:.2f} USDT", "blue")
+    with c4:
+        metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
+                    f"Auto-Trade: {'WŁĄCZONY' if cfg['auto_trade'] else 'WYŁĄCZONY'} | "
+                    f"{'PAPER' if cfg['paper_mode'] else 'LIVE'}",
+                    "green" if session_pnl >= 0 else "red")
     st.divider()
     st.markdown("### Aktywne pozycje")
     if active:
