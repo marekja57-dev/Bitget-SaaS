@@ -65,7 +65,7 @@ def db():
     con.execute("PRAGMA busy_timeout=20000")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS user_credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS events ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, subscription TEXT, stripe_paid INTEGER NOT NULL DEFAULT 0, email TEXT UNIQUE)""")
     con.commit()
@@ -123,15 +123,20 @@ def load_creds(user_id):
     if not user_id:
         return ("bitget", "", "", "")
     with db() as con:
-        row = con.execute("SELECT exchange,api_key,secret,password FROM credentials WHERE user_id=?", (user_id,)).fetchone()
+        row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
     return tuple(row) if row else ("bitget", "", "", "")
 
 def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
         return
     with db() as con:
-        con.execute("""INSERT INTO credentials(user_id, exchange, api_key, secret, password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange, api_key=excluded.api_key, secret=excluded.secret, password=excluded.password""",
-                    (user_id, exchange, api_key, secret, passphrase))
+        existing = con.execute("SELECT user_id FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
+        if existing:
+            con.execute("UPDATE user_credentials SET exchange=?, api_key=?, secret=?, password=? WHERE user_id=?",
+                        (exchange, api_key, secret, passphrase, user_id))
+        else:
+            con.execute("INSERT INTO user_credentials(user_id, exchange, api_key, secret, password) VALUES(?,?,?,?,?)",
+                        (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
 def create_stripe_checkout_url():
@@ -872,10 +877,11 @@ elif page == "Panel Administratora" and is_user_admin():
                         con.execute("UPDATE users SET stripe_paid=0 WHERE id=?", (user_id,))
                     else:
                         con.execute("DELETE FROM users WHERE id=?", (user_id,))
-                        con.execute("DELETE FROM credentials WHERE user_id=?", (user_id,))
+                        con.execute("DELETE FROM user_credentials WHERE user_id=?", (user_id,))
                     con.commit()
                 event("ADMIN", f"{action}; user_id={user_id}")
                 st.success("Operacja wykonana.")
                 st.rerun()
     else:
         st.info("Brak użytkowników.")
+
