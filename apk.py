@@ -340,26 +340,17 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     risk_limit = max(0.0, float(cfg.get("risk_usdt", 10.0)))
     max_notional = max(0.0, float(cfg.get("max_notional_usdt", 200.0)))
     sl_roe = float(cfg.get("sl_roe", 20.0))
-    
-    MIN_MARGIN_USDT = 10.0
 
-    if price <= 0 or sl_roe <= 0 or free_usdt < MIN_MARGIN_USDT:
-        return 0.0, 0.0
-
-    min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, MIN_MARGIN_USDT * leverage)
-    margin_budget = free_usdt * 0.90
-    max_allowed_notional = margin_budget * leverage
-
-    if max_allowed_notional < min_required_notional:
+    if price <= 0 or sl_roe <= 0 or free_usdt <= 0:
         return 0.0, 0.0
 
     risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
 
-    target = min(risk_based_notional, max_notional, max_allowed_notional)
-    if target < min_required_notional:
-        target = min_required_notional
+    target = min(risk_based_notional, max_notional, free_usdt * leverage * 0.90)
+    if target < MIN_ORDER_NOTIONAL_USDT:
+        target = MIN_ORDER_NOTIONAL_USDT
 
     try:
         market = ex.market(symbol)
@@ -370,14 +361,11 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     limits = market.get("limits") or {}
     min_amount = asfloat((limits.get("amount") or {}).get("min"))
 
-    # Wyliczenie surowej liczby kontraktów
     raw_qty = target / (price * contract_size)
-    
-    # Bezpieczne formatowanie precyzji ilości zleceń
     try:
         qty = float(ex.amount_to_precision(symbol, raw_qty))
     except Exception:
-        qty = round(raw_qty, 3)
+        qty = round(raw_qty, 4)
 
     if min_amount > 0 and qty < min_amount:
         qty = min_amount
@@ -386,8 +374,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
         return 0.0, 0.0
 
     actual_notional = qty * price * contract_size
-    actual_margin = actual_notional / leverage
-
     if actual_notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
 
@@ -536,108 +522,177 @@ with st.sidebar:
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-# -------------------- Skaner i auto-handel --------------------
+# -------------------- Skaner i auto-handel (PEŁNY PUDPULIT NA ŻYWO) --------------------
 
 if page == "Automatyczny Skaner i Auto-Handel":
-    st.subheader("Automatyczny skaner rynku i cykliczny auto-handel")
-    with st.form("control_form"):
-        auto_trade = st.checkbox("Włącz automatyczny handel", value=bool(cfg["auto_trade"]))
-        paper_mode = st.checkbox("Tryb PAPER - bez zleceń na giełdzie", value=bool(cfg["paper_mode"]))
-        auto_refresh = st.checkbox("Włącz ciągłe skanowanie", value=bool(cfg.get("auto_refresh", True)))
-        refresh_seconds = st.slider("Odstęp między skanami (sekundy)", 10, 300, int(cfg.get("refresh_seconds", 30)))
-        submit_ctrl = st.form_submit_button("ZAPISZ TRYB PRACY", use_container_width=True)
-    if submit_ctrl:
-        cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
-        save_cfg(cfg)
-        st.success("Zapisano ustawienia.")
-        st.rerun()
-
-    st.warning("Futures mogą spowodować utratę kapitału. Najpierw sprawdź tryb PAPER.")
-    if not is_user_paid():
-        st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
+    st.subheader("Główny Pulpit Transakcyjny - Pełny Podgląd Na Żywo")
     
-    if cfg.get("auto_refresh", True):
-        wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Automatyczne skanowanie w tle ustawiono co {wait} s.")
+    with st.expander("Ustawienia trybu pracy i czyszczenie", expanded=False):
+        with st.form("control_form"):
+            c_left, c_right = st.columns(2)
+            with c_left:
+                auto_trade = st.checkbox("Włącz automatyczny handel", value=bool(cfg["auto_trade"]))
+                paper_mode = st.checkbox("Tryb PAPER - bez zleceń na giełdzie", value=bool(cfg["paper_mode"]))
+            with c_right:
+                auto_refresh = st.checkbox("Włącz ciągłe skanowanie na żywo", value=bool(cfg.get("auto_refresh", True)))
+                refresh_seconds = st.slider("Odstęp między odświeżeniami (s)", 10, 120, int(cfg.get("refresh_seconds", 30)))
+            submit_ctrl = st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True)
+        if submit_ctrl:
+            cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
+            save_cfg(cfg)
+            st.success("Zapisano ustawienia.")
+            st.rerun()
 
-    try:
-        ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        
-        scan_limit = int(cfg.get("scan_limit_count", 30))
-        ranked = ranked_symbols(ex, scan_limit)
-        
-        symbols = [item[0] for item in ranked]
-        volume_map = dict(ranked)
-        tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-        st.info(f"Skanowanie {len(symbols)} par, według wolumenu malejąco. Interwały: {', '.join(tfs)}")
-        results = []
-        paper_open_symbols = set()
-        max_slots = max(1, int(cfg["max_positions"]))
-        
-        for symbol in symbols:
-            for tf in tfs:
-                res = signal_for_symbol(cfg, symbol, tf)
-                res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                results.append(res)
-                if res["signal"] not in ("LONG", "SHORT"):
-                    continue
-                event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
-                if not cfg["auto_trade"]:
-                    continue
-                if not is_user_paid():
-                    event("WARNING", "Pominięto zlecenie: brak aktywnej subskrypcji.")
-                    continue
-                if cfg["paper_mode"]:
-                    if symbol in paper_open_symbols:
-                        continue
-                    if len(paper_open_symbols) >= max_slots:
-                        event("WARNING", f"[PAPER] Limit pozycji {max_slots} osiągnięty.")
-                        continue
-                    paper_open_symbols.add(symbol)
-                    event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
-                    continue
-                if not (api_key_saved and secret_saved and res.get("price")):
-                    event("WARNING", f"Pominięto {symbol}: brak kluczy API lub ceny.")
-                    continue
-                try:
-                    positions = active_positions(ex)
-                    current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
-                    
-                    if len(positions) >= max_slots:
-                        event("WARNING", f"Pominięto {symbol}: limit {max_slots} pozycji.")
-                        continue
-                    if symbol in current_symbols:
-                        event("INFO", f"Pominięto {symbol}: pozycja już istnieje.")
-                        continue
-                    
-                    free, total = balance_usdt(ex, positions)
-                    qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
-                    if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
-                        event("WARNING", f"Pominięto {symbol} [{tf}]: depozyt mniejszy niż 10 USDT lub limit ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
-                        continue
-                    
-                    try:
-                        leverage_val = int(cfg["max_leverage"])
-                        ex.set_leverage(leverage_val, symbol)
-                    except Exception as lev_exc:
-                        event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
-                        continue
+    refresh_sec = max(10, int(cfg.get("refresh_seconds", 30)))
 
-                    side = "buy" if res["signal"] == "LONG" else "sell"
-                    order = market_order(ex, symbol, side, qty, reference_price=res["price"])
-                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
-                except Exception as trade_exc:
-                    event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
-                    
-        if results:
-            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+    @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
+    def render_full_dashboard():
+        st.caption(f"Status: Odświeżanie danych na żywo co {refresh_sec} s.")
+        
+        # --- 1. SEKCJA KAPITAŁU I POZYCJI (GÓRA) ---
+        total_balance = free_balance = session_pnl = used_margin = 0.0
+        active = []
+        connected = bool(api_key_saved and secret_saved)
+        api_ok = False
+
+        if connected:
+            try:
+                client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
+                active = active_positions(client)
+                free_balance, total_balance = balance_usdt(client, active)
+                session_pnl = sum(asfloat(p.get("unrealizedPnl")) for p in active)
+                used_margin = sum(asfloat(p.get("initialMargin") or p.get("margin")) for p in active)
+                api_ok = True
+            except Exception as exc:
+                st.warning(f"Błąd połączenia z giełdą / pobierania pozycji: {exc}")
+            finally:
+                gc.collect()
+
+        max_slots = int(cfg["max_positions"])
+
+        def metric_card(label, value, note="", tone=""):
+            tone_class = f" {tone}" if tone else ""
+            st.markdown(
+                f'<div class="metric-card{tone_class}">'
+                f'<div class="metric-label">{label}</div>'
+                f'<div class="metric-value">{value}</div>'
+                f'<div class="metric-note">{note}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        m1, m2, m3, m4 = st.columns(4, gap="medium")
+        with m1:
+            metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT",
+                        "Saldo całkowite / dostępne", "gold")
+        with m2:
+            metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
+                        "Łączny PnL otwartych pozycji", "green" if session_pnl >= 0 else "red")
+        with m3:
+            metric_card("Otwarte pozycje", f"{len(active)} / {max_slots}",
+                        f"Margin w użyciu: {used_margin:.2f} USDT", "blue")
+        with m4:
+            terminal_text = "HANDEL AKTYWNY" if (api_ok and cfg.get("auto_trade")) else "TYLKO SKANER"
+            metric_card("Terminal", terminal_text, f"Odświeżanie co {refresh_sec}s", "green" if api_ok else "red")
+
+        st.divider()
+
+        # --- 2. TABELA AKTYWNYCH POZYCJI NA GIEŁDZIE ---
+        st.markdown("### Aktywne Pozycje na Bitget")
+        if active:
+            st.dataframe(pd.DataFrame([{
+                "Symbol": p.get("symbol"),
+                "Strona": str(p.get("side")).upper(),
+                "Kontrakty": p.get("contracts"),
+                "Cena wejścia": p.get("entryPrice"),
+                "PnL (USDT)": p.get("unrealizedPnl"),
+                "Margin (USDT)": p.get("initialMargin")
+            } for p in active]), use_container_width=True, hide_index=True)
+        elif connected and api_ok:
+            st.info("Brak otwartych pozycji na giełdzie.")
         else:
-            st.info("Brak wyników skanowania.")
-    except Exception as exc:
-        st.error(f"Błąd skanowania giełdy: {exc}")
-        event("ERROR", f"Błąd skanowania: {exc}")
-    finally:
-        gc.collect()
+            st.warning("Brak połączenia API - podaj klucze w zakładce 'Połączenie API'.")
+
+        st.divider()
+
+        # --- 3. SKANER RYNKU I AUTOMATYCZNA EGZEKUCJA (DÓŁ) ---
+        st.markdown("### Wyniki Skanera Rynku i Sygnały")
+        if not is_user_paid():
+            st.error("Subskrypcja nieaktywna. Skaner działa, ale handel LIVE jest zablokowany.")
+
+        try:
+            ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
+            scan_limit = int(cfg.get("scan_limit_count", 30))
+            ranked = ranked_symbols(ex, scan_limit)
+            
+            symbols = [item[0] for item in ranked]
+            volume_map = dict(ranked)
+            tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+            
+            st.caption(f"Przeskanowano {len(symbols)} par według wolumenu. Interwały: {', '.join(tfs)}")
+            
+            results = []
+            paper_open_symbols = set()
+
+            for symbol in symbols:
+                for tf in tfs:
+                    res = signal_for_symbol(cfg, symbol, tf)
+                    res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
+                    results.append(res)
+                    
+                    if res["signal"] not in ("LONG", "SHORT"):
+                        continue
+                        
+                    event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
+                    
+                    if not cfg["auto_trade"] or not is_user_paid():
+                        continue
+                        
+                    if cfg["paper_mode"]:
+                        if symbol in paper_open_symbols or len(paper_open_symbols) >= max_slots:
+                            continue
+                        paper_open_symbols.add(symbol)
+                        event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
+                        continue
+
+                    if not (api_key_saved and secret_saved and res.get("price")):
+                        continue
+
+                    try:
+                        positions = active_positions(ex)
+                        current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
+                        
+                        if len(positions) >= max_slots or symbol in current_symbols:
+                            continue
+                        
+                        free, total = balance_usdt(ex, positions)
+                        qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
+                        
+                        if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+                            event("WARNING", f"Pominięto {symbol}: depozyt < 10 USDT lub limit ryzyka.")
+                            continue
+                        
+                        leverage_val = int(cfg["max_leverage"])
+                        try:
+                            ex.set_leverage(leverage_val, symbol)
+                        except Exception:
+                            pass
+
+                        side = "buy" if res["signal"] == "LONG" else "sell"
+                        order = market_order(ex, symbol, side, qty, reference_price=res["price"])
+                        event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT; ID={order.get('id')}")
+                    except Exception as trade_exc:
+                        event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
+
+            if results:
+                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak wyników skanowania.")
+        except Exception as exc:
+            st.error(f"Błąd skanowania giełdy: {exc}")
+        finally:
+            gc.collect()
+
+    render_full_dashboard()
 
 # -------------------- Ustawienia strategii --------------------
 
