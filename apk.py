@@ -1,4 +1,4 @@
-import os
+mport os
 import json
 import sqlite3
 import time
@@ -57,7 +57,7 @@ DEFAULTS = {
 
 st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card {border:1px solid var(--gold);border-radius:14px;padding:18px 20px;height:150px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98));box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24);overflow:hidden} .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} .metric-card.gold .metric-value {color:#fff2c7} </style> """, unsafe_allow_html=True)
 
-# -------------------- Baza danych --------------------
+# -------------------- Baza danych (Zabezpieczona per user_id) --------------------
 
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
@@ -65,7 +65,7 @@ def db():
     con.execute("PRAGMA busy_timeout=20000")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( k TEXT PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS events ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, subscription TEXT, stripe_paid INTEGER NOT NULL DEFAULT 0, email TEXT UNIQUE)""")
     con.commit()
@@ -119,15 +119,19 @@ def event(level, message):
                     (datetime.now(timezone.utc).isoformat(), str(level), message))
         con.commit()
 
-def load_creds():
+def load_creds(user_id):
+    if not user_id:
+        return ("bitget", "", "", "")
     with db() as con:
-        row = con.execute("SELECT exchange,api_key,secret,password FROM credentials WHERE k='main'").fetchone()
+        row = con.execute("SELECT exchange,api_key,secret,password FROM credentials WHERE user_id=?", (user_id,)).fetchone()
     return tuple(row) if row else ("bitget", "", "", "")
 
-def save_creds(exchange, api_key, secret, passphrase):
+def save_creds(user_id, exchange, api_key, secret, passphrase):
+    if not user_id:
+        return
     with db() as con:
-        con.execute("""INSERT INTO credentials(k,exchange,api_key,secret,password) VALUES('main',?,?,?,?) ON CONFLICT(k) DO UPDATE SET exchange=excluded.exchange,api_key=excluded.api_key,secret=excluded.secret,password=excluded.password""",
-                    (exchange, api_key, secret, passphrase))
+        con.execute("""INSERT INTO credentials(user_id,exchange,api_key,secret,password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange,api_key=excluded.api_key,secret=excluded.secret,password=excluded.password""",
+                    (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
 def create_stripe_checkout_url():
@@ -485,11 +489,11 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 cfg = load_cfg()
-ex_id, api_key_saved, secret_saved, passphrase_saved = load_creds()
+current_user_id = st.session_state.get("user_id")
+ex_id, api_key_saved, secret_saved, passphrase_saved = load_creds(current_user_id)
 
 with st.sidebar:
     st.markdown(f'<div class="brand"><span></span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
-    # Usunięto zbędny Panel Sesji z menu bocznego
     pages = ["Automatyczny Skaner i Auto-Handel",
              "Ustawienia Strategii", "Połączenie API", "Dziennik", "Regulamin i Instrukcja"]
     if is_user_admin():
@@ -800,11 +804,11 @@ elif page == "Połączenie API":
         pass_input = st.text_input("Passphrase (Bitget/OKX)", value=passphrase_saved, type="password")
         save_api = st.form_submit_button("ZAPISZ DANE API")
     if save_api:
-        save_creds(exchange_choice, api_key_input.strip(), secret_input.strip(), pass_input.strip())
+        save_creds(current_user_id, exchange_choice, api_key_input.strip(), secret_input.strip(), pass_input.strip())
         exchange_client.clear()
         st.cache_data.clear()
         gc.collect()
-        st.success("Dane API zapisane.")
+        st.success("Dane API zapisane wyłącznie dla Twojego konta.")
         st.rerun()
     if st.button("Testuj API i pobierz saldo"):
         try:
@@ -868,9 +872,11 @@ elif page == "Panel Administratora" and is_user_admin():
                         con.execute("UPDATE users SET stripe_paid=0 WHERE id=?", (user_id,))
                     else:
                         con.execute("DELETE FROM users WHERE id=?", (user_id,))
+                        con.execute("DELETE FROM credentials WHERE user_id=?", (user_id,))
                     con.commit()
                 event("ADMIN", f"{action}; user_id={user_id}")
                 st.success("Operacja wykonana.")
                 st.rerun()
     else:
         st.info("Brak użytkowników.")
+
