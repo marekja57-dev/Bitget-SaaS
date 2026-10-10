@@ -533,6 +533,7 @@ st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class
 
 # -------------------- Skaner i auto-handel --------------------
 
+
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Automatyczny skaner rynku i cykliczny auto-handel")
     with st.form("control_form"):
@@ -550,91 +551,95 @@ if page == "Automatyczny Skaner i Auto-Handel":
     st.warning("Futures mogą spowodować utratę kapitału. Najpierw sprawdź tryb PAPER.")
     if not is_user_paid():
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
+
+    run_interval = int(cfg.get("refresh_seconds", 30)) if cfg.get("auto_refresh", True) else None
     
-    try:
-        ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        
-        # Pełny zakres suwaka do 200 par (bez sztucznego limitu 20)
-        scan_limit = int(cfg.get("scan_limit_count", 30))
-        ranked = ranked_symbols(ex, scan_limit)
-        
-        symbols = [item[0] for item in ranked]
-        volume_map = dict(ranked)
-        tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-        st.info(f"Skanowanie {len(symbols)} par, według wolumenu malejąco. Interwały: {', '.join(tfs)}")
-        results = []
-        paper_open_symbols = set()
-        opened_this_scan = []
-        max_slots = max(1, int(cfg["max_positions"]))
-        for symbol in symbols:
-            for tf in tfs:
-                res = signal_for_symbol(cfg, symbol, tf)
-                res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                results.append(res)
-                if res["signal"] not in ("LONG", "SHORT"):
-                    continue
-                event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
-                if not cfg["auto_trade"]:
-                    continue
-                if not is_user_paid():
-                    event("WARNING", "Pominięto zlecenie: brak aktywnej subskrypcji.")
-                    continue
-                if cfg["paper_mode"]:
-                    if symbol in paper_open_symbols:
+    @st.fragment(run_every=run_interval)
+    def render_scanner_and_trading():
+        try:
+            ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
+            
+            scan_limit = int(cfg.get("scan_limit_count", 30))
+            ranked = ranked_symbols(ex, scan_limit)
+            
+            symbols = [item[0] for item in ranked]
+            volume_map = dict(ranked)
+            tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+            st.info(f"Ostatni skan: {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC | Skanowanie {len(symbols)} par, według wolumenu malejąco. Interwały: {', '.join(tfs)}")
+            
+            results = []
+            paper_open_symbols = set()
+            opened_this_scan = []
+            max_slots = max(1, int(cfg["max_positions"]))
+            
+            for symbol in symbols:
+                for tf in tfs:
+                    res = signal_for_symbol(cfg, symbol, tf)
+                    res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
+                    results.append(res)
+                    if res["signal"] not in ("LONG", "SHORT"):
                         continue
-                    if len(paper_open_symbols) >= max_slots:
-                        event("WARNING", f"[PAPER] Limit pozycji {max_slots} osiągnięty.")
+                    event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
+                    if not cfg["auto_trade"]:
                         continue
-                    paper_open_symbols.add(symbol)
-                    event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
-                    continue
-                if not (api_key_saved and secret_saved and res.get("price")):
-                    event("WARNING", f"Pominięto {symbol}: brak kluczy API lub ceny.")
-                    continue
-                try:
-                    positions = active_positions(ex)
-                    current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
-                    reserved = [s for s in opened_this_scan if s not in current_symbols]
-                    if len(positions) + len(reserved) >= max_slots:
-                        event("WARNING", f"Pominięto {symbol}: limit {max_slots} pozycji.")
+                    if not is_user_paid():
+                        event("WARNING", "Pominięto zlecenie: brak aktywnej subskrypcji.")
                         continue
-                    if symbol in current_symbols or symbol in opened_this_scan:
-                        event("INFO", f"Pominięto {symbol}: pozycja już istnieje.")
+                    if cfg["paper_mode"]:
+                        if symbol in paper_open_symbols:
+                            continue
+                        if len(paper_open_symbols) >= max_slots:
+                            event("WARNING", f"[PAPER] Limit pozycji {max_slots} osiągnięty.")
+                            continue
+                        paper_open_symbols.add(symbol)
+                        event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
                         continue
-                    free, total = balance_usdt(ex, positions)
-                    qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
-                    if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
-                        event("WARNING", f"Pominięto {symbol} [{tf}]: depozyt mniejszy niż 10 USDT lub limit ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
+                    if not (api_key_saved and secret_saved and res.get("price")):
+                        event("WARNING", f"Pominięto {symbol}: brak kluczy API lub ceny.")
                         continue
-                    
                     try:
-                        leverage_val = int(cfg["max_leverage"])
-                        ex.set_leverage(leverage_val, symbol)
-                    except Exception as lev_exc:
-                        event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
-                        st.warning(f"Zablokowano {symbol}: Giełda odrzuciła ustawienie dźwigni {leverage_val}x ({lev_exc})")
-                        continue
+                        positions = active_positions(ex)
+                        current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
+                        reserved = [s for s in opened_this_scan if s not in current_symbols]
+                        if len(positions) + len(reserved) >= max_slots:
+                            event("WARNING", f"Pominięto {symbol}: limit {max_slots} pozycji.")
+                            continue
+                        if symbol in current_symbols or symbol in opened_this_scan:
+                            event("INFO", f"Pominięto {symbol}: pozycja już istnieje.")
+                            continue
+                        free, total = balance_usdt(ex, positions)
+                        qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
+                        if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+                            event("WARNING", f"Pominięto {symbol} [{tf}]: depozyt mniejszy niż 10 USDT lub limit ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
+                            continue
+                        
+                        try:
+                            leverage_val = int(cfg["max_leverage"])
+                            ex.set_leverage(leverage_val, symbol)
+                        except Exception as lev_exc:
+                            event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
+                            continue
 
-                    side = "buy" if res["signal"] == "LONG" else "sell"
-                    order = market_order(ex, symbol, side, qty, reference_price=res["price"])
-                    opened_this_scan.append(symbol)
-                    event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
-                except Exception as trade_exc:
-                    event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
-                    st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
-        if results:
-            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-        else:
-            st.info("Brak wyników skanowania.")
-    except Exception as exc:
-        st.error(f"Błąd skanowania giełdy: {exc}")
-        event("ERROR", f"Błąd skanowania: {exc}")
-    finally:
-        gc.collect()
+                        side = "buy" if res["signal"] == "LONG" else "sell"
+                        order = market_order(ex, symbol, side, qty, reference_price=res["price"])
+                        opened_this_scan.append(symbol)
+                        event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
+                    except Exception as trade_exc:
+                        event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
+                        
+            if results:
+                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak wyników skanowania.")
+        except Exception as exc:
+            st.error(f"Błąd skanowania giełdy: {exc}")
+            event("ERROR", f"Błąd skanowania: {exc}")
+        finally:
+            gc.collect()
 
-    if cfg.get("auto_refresh"):
-        wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie.")
+    render_scanner_and_trading()
+
+
 
 # -------------------- Ustawienia strategii --------------------
 
