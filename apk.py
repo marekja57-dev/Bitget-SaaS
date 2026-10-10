@@ -533,7 +533,6 @@ st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class
 
 # -------------------- Skaner i auto-handel --------------------
 
-
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Automatyczny skaner rynku i cykliczny auto-handel")
     with st.form("control_form"):
@@ -577,14 +576,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                     results.append(res)
-                    if res["signal"] not in ("LONG", "SHORT"):
+                    
+                    sig = res.get("signal")
+                    if sig not in ("LONG", "SHORT"):
                         continue
-                    event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
+                        
+                    event("INFO", f"Sygnał {sig} {symbol} [{tf}]")
+                    
                     if not cfg["auto_trade"]:
                         continue
-                    if not is_user_paid():
-                        event("WARNING", "Pominięto zlecenie: brak aktywnej subskrypcji.")
-                        continue
+                        
                     if cfg["paper_mode"]:
                         if symbol in paper_open_symbols:
                             continue
@@ -592,23 +593,28 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             event("WARNING", f"[PAPER] Limit pozycji {max_slots} osiągnięty.")
                             continue
                         paper_open_symbols.add(symbol)
-                        event("TRADE", f"[PAPER] {res['signal']} {symbol} [{tf}]")
+                        event("TRADE", f"[PAPER] {sig} {symbol} [{tf}]")
                         continue
+                        
                     if not (api_key_saved and secret_saved and res.get("price")):
                         event("WARNING", f"Pominięto {symbol}: brak kluczy API lub ceny.")
                         continue
+                        
                     try:
                         positions = active_positions(ex)
                         current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
                         reserved = [s for s in opened_this_scan if s not in current_symbols]
+                        
                         if len(positions) + len(reserved) >= max_slots:
                             event("WARNING", f"Pominięto {symbol}: limit {max_slots} pozycji.")
                             continue
                         if symbol in current_symbols or symbol in opened_this_scan:
                             event("INFO", f"Pominięto {symbol}: pozycja już istnieje.")
                             continue
+                            
                         free, total = balance_usdt(ex, positions)
                         qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
+                        
                         if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
                             event("WARNING", f"Pominięto {symbol} [{tf}]: depozyt mniejszy niż 10 USDT lub limit ryzyka. Saldo={total:.2f}, wolne={free:.2f} USDT.")
                             continue
@@ -620,10 +626,10 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
                             continue
 
-                        side = "buy" if res["signal"] == "LONG" else "sell"
+                        side = "buy" if sig == "LONG" else "sell"
                         order = market_order(ex, symbol, side, qty, reference_price=res["price"])
                         opened_this_scan.append(symbol)
-                        event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
+                        event("TRADE", f"Otwarto {sig} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
                     except Exception as trade_exc:
                         event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
                         
@@ -638,7 +644,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
             gc.collect()
 
     render_scanner_and_trading()
-
 
 
 # -------------------- Ustawienia strategii --------------------
