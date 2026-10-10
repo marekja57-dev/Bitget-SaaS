@@ -45,13 +45,13 @@ DEFAULT_TF_SETTINGS = {
     "1d": {"ema_fast": 40, "ema_slow": 140, "adx_threshold": 15.0, "rsi_min": 35.0, "rsi_max": 65.0},
 }
 DEFAULTS = {
-    "exchange": "bitget", "market_type": "swap", "candle_limit": 220,
+    "exchange": "bitget", "market_type": "swap", "candle_limit": 150,
     "refresh_seconds": 30, "risk_usdt": 10.0, "max_positions": 3,
     "max_leverage": 10, "sl_roe": 20.0, "tp_roe": 40.0, "enable_roe": True,
     "timeframes": ["4h", "1d"], "tf_settings": DEFAULT_TF_SETTINGS,
     "auto_refresh": True, "auto_trade": False, "paper_mode": True,
     "max_notional_usdt": 50.0, "cooldown_seconds": 300,
-    "allow_short": True, "allow_long": True, "scan_limit_count": 30,
+    "allow_short": True, "allow_long": True, "scan_limit_count": 10,
     "indicator_multiplier": 100,
 }
 
@@ -162,7 +162,7 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     return cls(opts)
 
 
-@st.cache_data(ttl=30, max_entries=250, show_spinner=False)
+@st.cache_data(ttl=20, max_entries=40, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
@@ -385,31 +385,46 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
 
 
 def ranked_symbols(ex, limit_count):
-    """Cache ticker ranking per Streamlit session to avoid refetching all tickers on every rerun."""
+    """Pobiera tickery partiami i przechowuje tylko najlepsze pary, ograniczając RAM."""
     now = time.time()
-    cache_key = f"ranked_symbols:{ex.id}:{ex.options.get('defaultType', '')}:{int(limit_count)}"
+    limit_count = max(1, int(limit_count))
+    cache_key = f"ranked_symbols:{ex.id}:{ex.options.get('defaultType', '')}:{limit_count}"
     cached = st.session_state.get(cache_key)
-    if cached and now - cached.get("ts", 0) < 120:
+    if cached and now - cached.get("ts", 0) < 180:
         return cached["ranked"]
+
     markets = ex.load_markets()
-    candidates = [symbol for symbol, market in markets.items()
-                  if market.get("active") is not False and market.get("quote") == "USDT"
-                  and market.get("linear") and market.get("swap", False)]
+    candidates = [
+        symbol for symbol, market in markets.items()
+        if market.get("active") is not False
+        and market.get("quote") == "USDT"
+        and market.get("linear")
+        and market.get("swap", False)
+    ]
     if not candidates:
         st.session_state[cache_key] = {"ts": now, "ranked": []}
         return []
-    tickers = ex.fetch_tickers(candidates)
-    ranked = []
-    for symbol in candidates:
-        ticker = tickers.get(symbol) or {}
-        quote_volume = _as_float(ticker.get("quoteVolume"))
-        if quote_volume <= 0:
-            quote_volume = _as_float(ticker.get("baseVolume")) * _as_float(ticker.get("last"))
-        ranked.append((symbol, quote_volume))
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    result = ranked[:max(1, int(limit_count))]
-    st.session_state[cache_key] = {"ts": now, "ranked": result}
-    return result
+
+    # Nie trzymaj jednocześnie tickerów wszystkich kontraktów w pamięci.
+    # Sortujemy każdy mały pakiet i zachowujemy tylko najlepsze N wyników.
+    ranked_top = []
+    batch_size = 40
+    for offset in range(0, len(candidates), batch_size):
+        batch = candidates[offset:offset + batch_size]
+        tickers = ex.fetch_tickers(batch)
+        for symbol in batch:
+            ticker = tickers.get(symbol) or {}
+            quote_volume = _as_float(ticker.get("quoteVolume"))
+            if quote_volume <= 0:
+                quote_volume = _as_float(ticker.get("baseVolume")) * _as_float(ticker.get("last"))
+            if quote_volume > 0:
+                ranked_top.append((symbol, quote_volume))
+        ranked_top.sort(key=lambda item: item[1], reverse=True)
+        del tickers
+        ranked_top = ranked_top[:limit_count]
+
+    st.session_state[cache_key] = {"ts": now, "ranked": ranked_top}
+    return ranked_top
 
 
 # -------------------- Logowanie --------------------
@@ -535,7 +550,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        ranked = ranked_symbols(ex, cfg.get("scan_limit_count", 30))
+        ranked = ranked_symbols(ex, min(20, cfg.get("scan_limit_count", 10)))
         symbols = [item[0] for item in ranked]
         volume_map = dict(ranked)
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
@@ -626,7 +641,7 @@ elif page == "Ustawienia Strategii":
             timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS,
                 default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS])
             multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, int(cfg.get("indicator_multiplier", 100)))
-            candle_limit = st.slider("Liczba świec do analizy", 100, 500, int(cfg.get("candle_limit", 220)))
+            candle_limit = st.slider("Liczba świec do analizy", 100, 250, min(250, int(cfg.get("candle_limit", 150))))
         with right:
             risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg["risk_usdt"]))
             max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg["max_notional_usdt"]))
