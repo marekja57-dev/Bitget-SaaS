@@ -65,7 +65,7 @@ def db():
     con.execute("PRAGMA busy_timeout=20000")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS events ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, subscription TEXT, stripe_paid INTEGER NOT NULL DEFAULT 0, email TEXT UNIQUE)""")
     con.commit()
@@ -130,13 +130,8 @@ def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
         return
     with db() as con:
-        existing = con.execute("SELECT id FROM credentials WHERE user_id=?", (user_id,)).fetchone()
-        if existing:
-            con.execute("UPDATE credentials SET exchange=?, api_key=?, secret=?, password=? WHERE user_id=?",
-                        (exchange, api_key, secret, passphrase, user_id))
-        else:
-            con.execute("INSERT INTO credentials(user_id, exchange, api_key, secret, password) VALUES(?,?,?,?,?)",
-                        (user_id, exchange, api_key, secret, passphrase))
+        con.execute("""INSERT INTO credentials(user_id, exchange, api_key, secret, password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange, api_key=excluded.api_key, secret=excluded.secret, password=excluded.password""",
+                    (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
 def create_stripe_checkout_url():
