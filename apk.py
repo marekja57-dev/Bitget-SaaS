@@ -552,7 +552,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        ranked = ranked_symbols(ex, min(20, cfg.get("scan_limit_count", 10)))
+        ranked = ranked_symbols(ex, min(200, cfg.get("scan_limit_count", 100)))
         symbols = [item[0] for item in ranked]
         volume_map = dict(ranked)
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
