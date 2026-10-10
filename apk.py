@@ -1,4 +1,5 @@
 """Bitget-SaaS Futures - kompletna aplikacja Streamlit. Uwaga: handel futures wiąże się z ryzykiem utraty kapitału. Najpierw testuj w trybie PAPER. Klucze API nie powinny mieć uprawnień wypłat. """
+
 import os
 import json
 import sqlite3
@@ -58,8 +59,8 @@ DEFAULTS = {
 
 st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card {border:1px solid var(--gold);border-radius:14px;padding:18px 20px;height:150px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98));box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24);overflow:hidden} .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} .metric-card.gold .metric-value {color:#fff2c7} </style> """, unsafe_allow_html=True)
 
-
 # -------------------- Baza danych --------------------
+
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
     con.row_factory = sqlite3.Row
@@ -72,12 +73,10 @@ def db():
     con.commit()
     return con
 
-
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 240000).hex()
     return f"pbkdf2${salt}${digest}"
-
 
 def verify_password(stored, password):
     if stored == password:
@@ -90,7 +89,6 @@ def verify_password(stored, password):
         return hmac.compare_digest(check, digest), False
     except Exception:
         return False, False
-
 
 def load_cfg():
     cfg = json.loads(json.dumps(DEFAULTS))
@@ -109,13 +107,11 @@ def load_cfg():
         logging.exception("Nie udało się wczytać ustawień")
     return cfg
 
-
 def save_cfg(cfg):
     with db() as con:
         con.execute("""INSERT INTO settings(k,v) VALUES('main',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v""",
                     (json.dumps(cfg, ensure_ascii=False),))
         con.commit()
-
 
 def event(level, message):
     message = str(message)[:1500]
@@ -125,12 +121,10 @@ def event(level, message):
                     (datetime.now(timezone.utc).isoformat(), str(level), message))
         con.commit()
 
-
 def load_creds():
     with db() as con:
         row = con.execute("SELECT exchange,api_key,secret,password FROM credentials WHERE k='main'").fetchone()
     return tuple(row) if row else ("bitget", "", "", "")
-
 
 def save_creds(exchange, api_key, secret, passphrase):
     with db() as con:
@@ -138,15 +132,14 @@ def save_creds(exchange, api_key, secret, passphrase):
                     (exchange, api_key, secret, passphrase))
         con.commit()
 
-
 def create_stripe_checkout_url():
     url = STRIPE_CHECKOUT_FALLBACK.strip()
     if not url.startswith("https://buy.stripe.com/"):
         raise ValueError("Ustaw prawidłowy aktywny link płatności Stripe.")
     return url
 
-
 # -------------------- Giełda i dane rynkowe --------------------
+
 @st.cache_resource(show_spinner=False)
 def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     if ccxt is None:
@@ -162,13 +155,11 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
         opts["password"] = passphrase
     return cls(opts)
 
-
 @st.cache_data(ttl=30, max_entries=20, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
     return pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
-
 
 def indicators(df, fast, slow):
     d = df.copy()
@@ -197,7 +188,6 @@ def indicators(df, fast, slow):
     d["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
     return d
 
-
 def effective_tf_cfg(cfg, tf):
     base = cfg.get("tf_settings", {}).get(tf, DEFAULT_TF_SETTINGS.get(tf, DEFAULT_TF_SETTINGS["1h"]))
     mult = float(cfg.get("indicator_multiplier", 100)) / 100.0
@@ -209,7 +199,6 @@ def effective_tf_cfg(cfg, tf):
         "rsi_min": max(2.0, min(45.0, float(base["rsi_min"]))),
         "rsi_max": max(55.0, min(98.0, float(base["rsi_max"]))),
     }
-
 
 def signal_for_symbol(cfg, symbol, timeframe):
     try:
@@ -237,14 +226,12 @@ def signal_for_symbol(cfg, symbol, timeframe):
     finally:
         gc.collect()
 
-
-def _as_float(value):
+def asfloat(value):
     try:
         number = float(value)
         return number if np.isfinite(number) else 0.0
     except (TypeError, ValueError):
         return 0.0
-
 
 def balance_usdt(ex, positions=None):
     balance = ex.fetch_balance() or {}
@@ -313,7 +300,7 @@ def balance_usdt(ex, positions=None):
             margin_value = position.get("initialMargin")
             if margin_value is None:
                 margin_value = position.get("margin")
-            position_margin += max(0.0, _as_float(margin_value))
+            position_margin += max(0.0, asfloat(margin_value))
 
     reported_used = max(0.0, float(used or 0.0))
     allocated_margin = max(reported_used, position_margin)
@@ -322,11 +309,9 @@ def balance_usdt(ex, positions=None):
 
     return max(0.0, float(free)), max(0.0, float(total))
 
-
 def active_positions(ex):
     positions = ex.fetch_positions() or []
-    return [p for p in positions if abs(_as_float(p.get("contracts"))) > 0]
-
+    return [p for p in positions if abs(asfloat(p.get("contracts"))) > 0]
 
 def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None):
     qty = float(ex.amount_to_precision(symbol, qty))
@@ -334,11 +319,11 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
         raise ValueError("Ilość zlecenia wynosi zero lub jest nieprawidłowa")
 
     if not reduce_only:
-        price = _as_float(reference_price)
+        price = asfloat(reference_price)
         if price <= 0:
             raise ValueError("Zablokowano otwarcie pozycji: brak prawidłowej ceny do sprawdzenia wartości pozycji.")
         market = ex.market(symbol)
-        contract_size = _as_float(market.get("contractSize")) or 1.0
+        contract_size = asfloat(market.get("contractSize")) or 1.0
         notional = qty * price * contract_size
         if not np.isfinite(notional) or notional < MIN_ORDER_NOTIONAL_USDT:
             raise ValueError(
@@ -350,37 +335,30 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
     return ex.create_order(symbol, "market", side, qty, None, params)
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
-    price = _as_float(price)
-    total_usdt, free_usdt = max(0.0, _as_float(total_usdt)), max(0.0, _as_float(free_usdt))
+    price = asfloat(price)
+    total_usdt, free_usdt = max(0.0, asfloat(total_usdt)), max(0.0, asfloat(free_usdt))
     leverage = max(1, int(cfg.get("max_leverage", 10)))
     risk_limit = max(0.0, float(cfg.get("risk_usdt", 10.0)))
     max_notional = max(0.0, float(cfg.get("max_notional_usdt", 200.0)))
     sl_roe = float(cfg.get("sl_roe", 20.0))
-    
-    # TWARDY WARUNEK: MINIMUM 10 USDT CZYSTEGO DEPOZYTU Z PORTFELA
+   
     MIN_MARGIN_USDT = 10.0
 
     if price <= 0 or sl_roe <= 0 or free_usdt < MIN_MARGIN_USDT:
         return 0.0, 0.0
 
-    # Przeliczamy wymaganą wartość pozycji (Notional) tak, by Margin = 10 USDT
-    # Np. przy dźwigni 10x: 10 USDT * 10 = 100 USDT wartości zlecenia
     min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, MIN_MARGIN_USDT * leverage)
-
     margin_budget = free_usdt * 0.90
     max_allowed_notional = margin_budget * leverage
 
     if max_allowed_notional < min_required_notional:
-        return 0.0, 0.0 # Za mało środków na wyłożenie 10 USDT depozytu
+        return 0.0, 0.0
 
-    # Obliczenie wartości pozycji na podstawie ryzyka
     risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
 
     target = min(risk_based_notional, max_notional, max_allowed_notional)
-
-    # Jeśli wyliczona kwota daje mniej niż 10 USDT depozytu -> podbijamy do 10 USDT depozytu
     if target < min_required_notional:
         target = min_required_notional
 
@@ -389,9 +367,9 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     except Exception:
         return 0.0, 0.0
 
-    contract_size = _as_float(market.get("contractSize")) or 1.0
+    contract_size = asfloat(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
-    min_amount = _as_float((limits.get("amount") or {}).get("min"))
+    min_amount = asfloat((limits.get("amount") or {}).get("min"))
 
     raw_qty = target / (price * contract_size)
     qty = float(ex.amount_to_precision(symbol, raw_qty))
@@ -405,12 +383,10 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     actual_notional = qty * price * contract_size
     actual_margin = actual_notional / leverage
 
-    # OSTATECZNA BLOKADA: Jeśli depozyt z portfela jest mniejszy niż 10 USDT -> REZYGNUJEMY
     if actual_margin < MIN_MARGIN_USDT or actual_margin > margin_budget:
         return 0.0, 0.0
 
     return qty, actual_notional
-
 
 def ranked_symbols(ex, limit_count):
     now = time.time()
@@ -439,9 +415,9 @@ def ranked_symbols(ex, limit_count):
         tickers = ex.fetch_tickers(batch)
         for symbol in batch:
             ticker = tickers.get(symbol) or {}
-            quote_volume = _as_float(ticker.get("quoteVolume"))
+            quote_volume = asfloat(ticker.get("quoteVolume"))
             if quote_volume <= 0:
-                quote_volume = _as_float(ticker.get("baseVolume")) * _as_float(ticker.get("last"))
+                quote_volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
             if quote_volume > 0:
                 ranked_top.append((symbol, quote_volume))
         ranked_top.sort(key=lambda item: item[1], reverse=True)
@@ -452,23 +428,20 @@ def ranked_symbols(ex, limit_count):
     gc.collect()
     return ranked_top
 
-
 # -------------------- Logowanie --------------------
+
 for k, default in {"authenticated": False, "logged_in": False, "username": "",
-                   "user_id": None, "stripe_paid": 0, "user_email": ""}.items():
+                    "user_id": None, "stripe_paid": 0, "user_email": ""}.items():
     if k not in st.session_state:
         st.session_state[k] = default
-
 
 def is_user_admin():
     email = str(st.session_state.get("user_email", "")).strip().lower()
     username = str(st.session_state.get("username", "")).strip().lower()
     return email in ADMIN_EMAILS or username == "admin"
 
-
 def is_user_paid():
     return bool(st.session_state.get("stripe_paid", 0)) or is_user_admin()
-
 
 if st.query_params.get("success") == "true":
     st.info("Powrót z płatności. Administrator potwierdzi płatność przed aktywacją dostępu.")
@@ -558,8 +531,8 @@ with st.sidebar:
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-
 # -------------------- Skaner i auto-handel --------------------
+
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Automatyczny skaner rynku i cykliczny auto-handel")
     with st.form("control_form"):
@@ -577,9 +550,14 @@ if page == "Automatyczny Skaner i Auto-Handel":
     st.warning("Futures mogą spowodować utratę kapitału. Najpierw sprawdź tryb PAPER.")
     if not is_user_paid():
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
+    
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        ranked = ranked_symbols(ex, min(200, cfg.get("scan_limit_count", 100)))
+        
+        # Pełny zakres suwaka do 200 par (bez sztucznego limitu 20)
+        scan_limit = int(cfg.get("scan_limit_count", 30))
+        ranked = ranked_symbols(ex, scan_limit)
+        
         symbols = [item[0] for item in ranked]
         volume_map = dict(ranked)
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
@@ -658,8 +636,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
         wait = max(10, int(cfg.get("refresh_seconds", 30)))
         st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie.")
 
-
 # -------------------- Ustawienia strategii --------------------
+
 elif page == "Ustawienia Strategii":
     st.subheader("Ustawienia strategii i ryzyka")
     if "selected_tf_edit" not in st.session_state:
@@ -674,7 +652,7 @@ elif page == "Ustawienia Strategii":
             exchange_name = st.selectbox("Giełda", ["bitget", "binanceusdm", "bybit", "okx"],
                 index=["bitget", "binanceusdm", "bybit", "okx"].index(cfg["exchange"]) if cfg["exchange"] in ["bitget", "binanceusdm", "bybit", "okx"] else 0)
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
-            scan_limit = st.slider("Liczba skanowanych par", 5, 100, int(cfg.get("scan_limit_count", 30)))
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, int(cfg.get("scan_limit_count", 30)))
             timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS,
                 default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS])
             multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, int(cfg.get("indicator_multiplier", 100)))
@@ -722,8 +700,8 @@ elif page == "Ustawienia Strategii":
             st.success("Zapisano ustawienia.")
             st.rerun()
 
-
 # -------------------- Połączenie API --------------------
+
 elif page == "Połączenie API":
     st.subheader("Połączenie z giełdą")
     with st.form("credentials"):
@@ -755,8 +733,8 @@ elif page == "Połączenie API":
         finally:
             gc.collect()
 
-
 # -------------------- Dziennik --------------------
+
 elif page == "Dziennik":
     st.subheader("Zdarzenia i zlecenia bota")
     with db() as con:
@@ -767,8 +745,8 @@ elif page == "Dziennik":
     else:
         st.info("Brak zdarzeń.")
 
-
 # -------------------- Instrukcja i regulamin --------------------
+
 elif page == "Regulamin i Instrukcja":
     st.subheader("Instrukcja obsługi i regulamin")
     tab_help, tab_terms = st.tabs(["Instrukcja", "Regulamin"])
@@ -777,8 +755,8 @@ elif page == "Regulamin i Instrukcja":
     with tab_terms:
         st.markdown("""**Regulamin Bitget-SaaS Futures** 1. Serwis udostępnia narzędzia programowe do analizy rynku i składania zleceń. 2. Użytkownik odpowiada za klucze API, konfigurację ryzyka i decyzje inwestycyjne. 3. Handel futures wiąże się z ryzykiem utraty kapitału. Wyniki nie są gwarantowane. 4. Dostęp płatny kosztuje 49 PLN miesięcznie.""")
 
-
 # -------------------- Panel administratora --------------------
+
 elif page == "Panel Administratora" and is_user_admin():
     st.subheader("Zarządzanie użytkownikami i subskrypcjami")
     with db() as con:
@@ -809,8 +787,8 @@ elif page == "Panel Administratora" and is_user_admin():
     else:
         st.info("Brak użytkowników.")
 
-
 # -------------------- Panel kapitału --------------------
+
 elif page == "Panel Sesji i Kapitału":
     st.subheader("Saldo, pozycje i kapitał")
     total_balance = free_balance = session_pnl = used_margin = 0.0
@@ -822,8 +800,8 @@ elif page == "Panel Sesji i Kapitału":
             client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
             active = active_positions(client)
             free_balance, total_balance = balance_usdt(client, active)
-            session_pnl = sum(_as_float(p.get("unrealizedPnl")) for p in active)
-            used_margin = sum(_as_float(p.get("initialMargin") or p.get("margin")) for p in active)
+            session_pnl = sum(asfloat(p.get("unrealizedPnl")) for p in active)
+            used_margin = sum(asfloat(p.get("initialMargin") or p.get("margin")) for p in active)
             api_ok = True
         except Exception as exc:
             st.warning(f"Nie udało się pobrać salda lub pozycji: {exc}")
@@ -882,7 +860,7 @@ elif page == "Panel Sesji i Kapitału":
             positions = active_positions(client)
             outcomes = []
             for pos in positions:
-                qty = abs(_as_float(pos.get("contracts")))
+                qty = abs(asfloat(pos.get("contracts")))
                 symbol = pos.get("symbol")
                 if qty <= 0 or not symbol:
                     continue
