@@ -28,7 +28,7 @@ LOG_PATH = APP_DIR / "trading.log"
 logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03"
+STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
