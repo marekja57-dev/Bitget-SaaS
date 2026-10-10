@@ -331,10 +331,25 @@ def active_positions(ex):
     return [p for p in positions if abs(_as_float(p.get("contracts"))) > 0]
 
 
-def market_order(ex, symbol, side, qty, reduce_only=False):
+def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None):
+    """Send a market order; opening orders must be worth at least 10 USDT. Reduce-only closing orders are exempt so small residual positions can be closed. """
     qty = float(ex.amount_to_precision(symbol, qty))
-    if qty <= 0:
-        raise ValueError("Ilość zlecenia wynosi zero")
+    if not np.isfinite(qty) or qty <= 0:
+        raise ValueError("Ilość zlecenia wynosi zero lub jest nieprawidłowa")
+
+    if not reduce_only:
+        price = _as_float(reference_price)
+        if price <= 0:
+            raise ValueError("Zablokowano otwarcie pozycji: brak prawidłowej ceny do sprawdzenia minimum 10 USDT.")
+        market = ex.market(symbol)
+        contract_size = _as_float(market.get("contractSize")) or 1.0
+        notional = qty * price * contract_size
+        if not np.isfinite(notional) or notional < MIN_ORDER_NOTIONAL_USDT:
+            raise ValueError(
+                f"Zablokowano zlecenie: wartość po zaokrągleniu ilości wynosi "
+                f"{notional:.4f} USDT, a minimum to {MIN_ORDER_NOTIONAL_USDT:.2f} USDT."
+            )
+
     params = {"reduceOnly": True} if reduce_only else {}
     return ex.create_order(symbol, "market", side, qty, None, params)
 
@@ -574,7 +589,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     except Exception as lev_exc:
                         event("WARNING", f"Nie udało się ustawić dźwigni dla {symbol}: {lev_exc}")
                     side = "buy" if res["signal"] == "LONG" else "sell"
-                    order = market_order(ex, symbol, side, qty)
+                    order = market_order(ex, symbol, side, qty, reference_price=res["price"])
                     opened_this_scan.append(symbol)
                     event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT; order={order.get('id')}")
                 except Exception as trade_exc:
