@@ -349,50 +349,66 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
     params = {"reduceOnly": True} if reduce_only else {}
     return ex.create_order(symbol, "market", side, qty, None, params)
 
-
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     price = _as_float(price)
     total_usdt, free_usdt = max(0.0, _as_float(total_usdt)), max(0.0, _as_float(free_usdt))
-    leverage = max(1, int(cfg["max_leverage"]))
-    risk_limit, max_notional = max(0.0, float(cfg["risk_usdt"])), max(0.0, float(cfg["max_notional_usdt"]))
-    sl_roe = float(cfg["sl_roe"])
-    if price <= 0 or sl_roe <= 0:
+    leverage = max(1, int(cfg.get("max_leverage", 10)))
+    risk_limit = max(0.0, float(cfg.get("risk_usdt", 10.0)))
+    max_notional = max(0.0, float(cfg.get("max_notional_usdt", 200.0)))
+    sl_roe = float(cfg.get("sl_roe", 20.0))
+    
+    if price <= 0 or sl_roe <= 0 or free_usdt < MIN_MARGIN_USDT:
         return 0.0, 0.0
 
-    # Poprawka: Obliczamy kwotę z ryzyka i wymuszamy MINIMUM 10 USDT depozytu zabezpieczającego (Margin)
+    # 1. Określenie dostępnego budżetu depozytu
+    margin_budget = free_usdt * 0.85 # Zostawiamy 15% bufora
+    max_allowed_notional = margin_budget * leverage
+
+    # 2. Celowana wartość zlecenia (Notional)
     risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
-    margin_budget = free_usdt * 0.90
-    
-    target = min(risk_based_notional, max_notional, margin_budget * leverage)
-    
-    # Wymóg: Wartość pozycji MUSI wynosić co najmniej (MIN_MARGIN_USDT * dźwignia), np. 10 USDT * 10x = 100 USDT pozycji
-    min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, MIN_MARGIN_USDT * leverage)
-    
-    market = ex.market(symbol)
+
+    target = min(risk_based_notional, max_notional, max_allowed_notional)
+
+    # 3. Odczyt wymogów giełdy (min amount i min cost)
+    try:
+        market = ex.market(symbol)
+    except Exception:
+        return 0.0, 0.0
+
     contract_size = _as_float(market.get("contractSize")) or 1.0
     limits = market.get("limits") or {}
     min_cost = _as_float((limits.get("cost") or {}).get("min"))
     min_amount = _as_float((limits.get("amount") or {}).get("min"))
-    
-    required = max(min_required_notional, min_cost)
-    
-    if target < required:
+
+    min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, min_cost)
+
+    # Jeśli wyliczona wartość jest za mała, ale mamy dość wolnych środków, podbijamy do minimum
+    if target < min_required_notional and max_allowed_notional >= min_required_notional:
+        target = min_required_notional
+
+    if target < min_required_notional:
         return 0.0, 0.0
-        
-    qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
-    if not np.isfinite(qty) or qty <= 0 or qty < min_amount:
+
+    # 4. Przeliczenie na kontrakty z uwzględnieniem precyzji giełdy
+    raw_qty = target / (price * contract_size)
+    qty = float(ex.amount_to_precision(symbol, raw_qty))
+
+    if not np.isfinite(qty) or qty <= 0:
         return 0.0, 0.0
-        
-    actual = qty * price * contract_size
-    actual_margin = actual / leverage
-    
-    # Ostateczne sprawdzenie czy czysty margin nie jest mniejszy niż 10 USDT
-    if actual < required or actual_margin < MIN_MARGIN_USDT or actual_margin > margin_budget:
+
+    if min_amount > 0 and qty < min_amount:
+        qty = min_amount
+
+    actual_notional = qty * price * contract_size
+    actual_margin = actual_notional / leverage
+
+    # Ostateczna weryfikacja czy depozyt nie przekracza salda
+    if actual_margin > margin_budget:
         return 0.0, 0.0
-        
-    return qty, actual
+
+    return qty, actual_notional
 
 
 def ranked_symbols(ex, limit_count):
