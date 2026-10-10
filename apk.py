@@ -1,5 +1,3 @@
-"""Bitget-SaaS Futures - kompletna aplikacja Streamlit. Uwaga: handel futures wiąże się z ryzykiem utraty kapitału. Najpierw testuj w trybie PAPER. Klucze API nie powinny mieć uprawnień wypłat. """
-
 import os
 import json
 import sqlite3
@@ -341,7 +339,7 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     risk_limit = max(0.0, float(cfg.get("risk_usdt", 10.0)))
     max_notional = max(0.0, float(cfg.get("max_notional_usdt", 200.0)))
     sl_roe = float(cfg.get("sl_roe", 20.0))
-   
+    
     MIN_MARGIN_USDT = 10.0
 
     if price <= 0 or sl_roe <= 0 or free_usdt < MIN_MARGIN_USDT:
@@ -550,17 +548,26 @@ if page == "Automatyczny Skaner i Auto-Handel":
     st.warning("Futures mogą spowodować utratę kapitału. Najpierw sprawdź tryb PAPER.")
     if not is_user_paid():
         st.error("Subskrypcja nie jest aktywna. Skaner jest dostępny, ale handel LIVE jest zablokowany.")
+    
+    if cfg.get("auto_refresh", True):
+        wait = max(10, int(cfg.get("refresh_seconds", 30)))
+        st.markdown(f'<meta http-equiv="refresh" content="{wait}">', unsafe_allow_html=True)
+        st.caption(f"Strona odświeży się automatycznie za {wait} sekund...")
+
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-        ranked = ranked_symbols(ex, min(200, cfg.get("scan_limit_count", 100)))
+        
+        scan_limit = int(cfg.get("scan_limit_count", 30))
+        ranked = ranked_symbols(ex, scan_limit)
+        
         symbols = [item[0] for item in ranked]
         volume_map = dict(ranked)
         tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
         st.info(f"Skanowanie {len(symbols)} par, według wolumenu malejąco. Interwały: {', '.join(tfs)}")
         results = []
         paper_open_symbols = set()
-        opened_this_scan = []
         max_slots = max(1, int(cfg["max_positions"]))
+        
         for symbol in symbols:
             for tf in tfs:
                 res = signal_for_symbol(cfg, symbol, tf)
@@ -589,13 +596,14 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 try:
                     positions = active_positions(ex)
                     current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
-                    reserved = [s for s in opened_this_scan if s not in current_symbols]
-                    if len(positions) + len(reserved) >= max_slots:
+                    
+                    if len(positions) >= max_slots:
                         event("WARNING", f"Pominięto {symbol}: limit {max_slots} pozycji.")
                         continue
-                    if symbol in current_symbols or symbol in opened_this_scan:
+                    if symbol in current_symbols:
                         event("INFO", f"Pominięto {symbol}: pozycja już istnieje.")
                         continue
+                    
                     free, total = balance_usdt(ex, positions)
                     qty, notional = calc_qty(ex, symbol, total, free, res["price"], cfg)
                     if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
@@ -607,16 +615,14 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         ex.set_leverage(leverage_val, symbol)
                     except Exception as lev_exc:
                         event("ERROR", f"Zablokowano pozycję {symbol}: Nie udało się ustawić dźwigni {leverage_val}x: {lev_exc}")
-                        st.warning(f"Zablokowano {symbol}: Giełda odrzuciła ustawienie dźwigni {leverage_val}x ({lev_exc})")
                         continue
 
                     side = "buy" if res["signal"] == "LONG" else "sell"
                     order = market_order(ex, symbol, side, qty, reference_price=res["price"])
-                    opened_this_scan.append(symbol)
                     event("TRADE", f"Otwarto {res['signal']} {symbol} qty={qty} wartość={notional:.2f} USDT (Margin: ~{notional/leverage_val:.2f} USDT); order={order.get('id')}")
                 except Exception as trade_exc:
                     event("ERROR", f"Nie otwarto pozycji {symbol}: {trade_exc}")
-                    st.warning(f"Nie otwarto pozycji {symbol}: {trade_exc}")
+                    
         if results:
             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
         else:
@@ -626,12 +632,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
         event("ERROR", f"Błąd skanowania: {exc}")
     finally:
         gc.collect()
-
-    if cfg.get("auto_refresh"):
-        wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.caption(f"Automatyczne odświeżanie ustawiono na {wait} s. Odśwież stronę lub uruchom ponownie skan ręcznie.")
-
-
 
 # -------------------- Ustawienia strategii --------------------
 
