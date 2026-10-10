@@ -29,7 +29,11 @@ LOG_PATH = APP_DIR / "trading.log"
 logging.basicConfig(filename=str(LOG_PATH), level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03"
+# Poprawny link Stripe z Twojego roboczego kodu
+STRIPE_CHECKOUT_FALLBACK = os.getenv(
+    "STRIPE_CHECKOUT_FALLBACK",
+    "https://buy.stripe.com/8x2dRa4CbdaxfSAF6V3oA03",
+)
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
@@ -140,7 +144,7 @@ def save_creds(exchange, api_key, secret, passphrase):
         con.commit()
 
 
-def create_stripe_checkout_url():
+def create_stripe_checkout_url(email):
     url = STRIPE_CHECKOUT_FALLBACK.strip()
     if not url.startswith("https://buy.stripe.com/"):
         raise ValueError("Ustaw prawidłowy aktywny link płatności Stripe.")
@@ -360,7 +364,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     if price <= 0 or sl_roe <= 0:
         return 0.0, 0.0
 
-    # Poprawka: Obliczamy kwotę z ryzyka i wymuszamy MINIMUM 10 USDT depozytu zabezpieczającego (Margin)
     risk_budget = min(risk_limit, total_usdt * 0.05)
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     risk_based_notional = risk_budget / stop_fraction
@@ -368,7 +371,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     
     target = min(risk_based_notional, max_notional, margin_budget * leverage)
     
-    # Wymóg: Wartość pozycji MUSI wynosić co najmniej (MIN_MARGIN_USDT * dźwignia), np. 10 USDT * 10x = 100 USDT pozycji
     min_required_notional = max(MIN_ORDER_NOTIONAL_USDT, MIN_MARGIN_USDT * leverage)
     
     market = ex.market(symbol)
@@ -389,7 +391,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg):
     actual = qty * price * contract_size
     actual_margin = actual / leverage
     
-    # Ostateczne sprawdzenie czy czysty margin nie jest mniejszy niż 10 USDT
     if actual < required or actual_margin < MIN_MARGIN_USDT or actual_margin > margin_budget:
         return 0.0, 0.0
         
@@ -523,7 +524,8 @@ with st.sidebar:
     else:
         st.warning("Subskrypcja nieopłacona")
     try:
-        st.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", create_stripe_checkout_url(), use_container_width=True)
+        checkout_url = create_stripe_checkout_url(st.session_state.get("user_email", ""))
+        st.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", checkout_url, use_container_width=True)
     except Exception as exc:
         st.error(f"Błąd linku Stripe: {exc}")
     st.caption("Po płatności administrator potwierdza transakcję.")
@@ -883,4 +885,3 @@ elif page == "Panel Sesji i Kapitału":
             st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
         finally:
             gc.collect()
-
