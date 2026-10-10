@@ -57,7 +57,7 @@ DEFAULTS = {
 
 st.markdown(""" <style> .stApp {background: radial-gradient(ellipse at 40% -20%, #103e78 0%, #071a36 42%, #050e20 100%); color:#eaf3ff} [data-testid="stHeader"] {background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container {padding-top:2rem;max-width:1600px} [data-testid="stSidebar"] {background:linear-gradient(180deg,#06152d,#081f42)} .brand {font-weight:900;font-size:clamp(24px,2.5vw,34px);color:#eaf5ff;margin:.5rem 0} .brand span {color:#28a8ff} .subbrand {color:#7da9d8;font-size:11px;letter-spacing:1.5px;margin-bottom:1.5rem} div.stButton>button {border:1px solid #278be8;background:linear-gradient(180deg,#1689ff,#0759c8);color:white;font-weight:700} :root { --gold:#d8ad52; --gold-soft:#f3d88a; } .metric-card {border:1px solid var(--gold);border-radius:14px;padding:18px 20px;height:150px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,rgba(27,43,68,.96),rgba(6,18,37,.98));box-shadow:0 0 0 1px rgba(216,173,82,.12),0 8px 24px rgba(0,0,0,.24);overflow:hidden} .metric-card .metric-label {color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-card .metric-value {color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-card .metric-note {color:#a9bdd7;font-size:12px;margin-top:8px} .metric-card.green .metric-value {color:#70e0ae} .metric-card.blue .metric-value {color:#83c7ff} .metric-card.red .metric-value {color:#ff9696} .metric-card.gold .metric-value {color:#fff2c7} </style> """, unsafe_allow_html=True)
 
-# -------------------- Baza danych (Zabezpieczona per user_id) --------------------
+# -------------------- Baza danych --------------------
 
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
@@ -65,16 +65,9 @@ def db():
     con.execute("PRAGMA busy_timeout=20000")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( user_id INTEGER PRIMARY KEY, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS credentials ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE, exchange TEXT, api_key TEXT, secret TEXT, password TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS events ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, subscription TEXT, stripe_paid INTEGER NOT NULL DEFAULT 0, email TEXT UNIQUE)""")
-    
-    # Bezpieczna migracja: jeśli tabela credentials powstała wcześniej w starej wersji, dodaj brakującą kolumnę user_id bez utraty danych
-    try:
-        con.execute("ALTER TABLE credentials ADD COLUMN user_id INTEGER")
-    except Exception:
-        pass
-        
     con.commit()
     return con
 
@@ -137,8 +130,13 @@ def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
         return
     with db() as con:
-        con.execute("""INSERT INTO credentials(user_id,exchange,api_key,secret,password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange,api_key=excluded.api_key,secret=excluded.secret,password=excluded.password""",
-                    (user_id, exchange, api_key, secret, passphrase))
+        existing = con.execute("SELECT id FROM credentials WHERE user_id=?", (user_id,)).fetchone()
+        if existing:
+            con.execute("UPDATE credentials SET exchange=?, api_key=?, secret=?, password=? WHERE user_id=?",
+                        (exchange, api_key, secret, passphrase, user_id))
+        else:
+            con.execute("INSERT INTO credentials(user_id, exchange, api_key, secret, password) VALUES(?,?,?,?,?)",
+                        (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
 def create_stripe_checkout_url():
@@ -886,4 +884,3 @@ elif page == "Panel Administratora" and is_user_admin():
                 st.rerun()
     else:
         st.info("Brak użytkowników.")
-
