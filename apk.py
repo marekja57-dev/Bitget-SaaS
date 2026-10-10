@@ -1,4 +1,3 @@
-
 import os
 import json
 import sqlite3
@@ -490,7 +489,8 @@ ex_id, api_key_saved, secret_saved, passphrase_saved = load_creds()
 
 with st.sidebar:
     st.markdown(f'<div class="brand"><span></span> Bitget-SaaS</div><div class="subbrand">Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
-    pages = ["Automatyczny Skaner i Auto-Handel", "Panel Sesji i Kapitału",
+    # Usunięto zbędny Panel Sesji z menu bocznego
+    pages = ["Automatyczny Skaner i Auto-Handel",
              "Ustawienia Strategii", "Połączenie API", "Dziennik", "Regulamin i Instrukcja"]
     if is_user_admin():
         pages.append("Panel Administratora")
@@ -522,7 +522,7 @@ with st.sidebar:
 
 st.markdown('<div class="brand"><span>Bitget</span>-SaaS Futures</div><div class="subbrand">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-# -------------------- Skaner i auto-handel (PEŁNY PUDPULIT NA ŻYWO) --------------------
+# -------------------- Główny Pulpit Transakcyjny na Żywo --------------------
 
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Główny Pulpit Transakcyjny - Pełny Podgląd Na Żywo")
@@ -694,6 +694,36 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
     render_full_dashboard()
 
+    st.divider()
+    st.markdown("### Awaryjne zamknięcie wszystkich pozycji")
+    st.warning("To polecenie wysyła prawdziwe zlecenia rynkowe zamykające pozycje.")
+    if st.button("ZAMKNIJ WSZYSTKIE POZYCJE", type="secondary"):
+        try:
+            connected = bool(api_key_saved and secret_saved)
+            if not connected:
+                raise RuntimeError("Brak kluczy API.")
+            client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
+            positions = active_positions(client)
+            outcomes = []
+            for pos in positions:
+                qty = abs(asfloat(pos.get("contracts")))
+                symbol = pos.get("symbol")
+                if qty <= 0 or not symbol:
+                    continue
+                side = "sell" if str(pos.get("side") or "").lower() in ("long", "buy") else "buy"
+                try:
+                    order = market_order(client, symbol, side, qty, reduce_only=True)
+                    outcomes.append(f"{symbol}: wysłano zamknięcie {qty}; order={order.get('id')}")
+                except Exception as exc:
+                    outcomes.append(f"{symbol}: BŁĄD: {exc}")
+            for line in outcomes:
+                event("KILL", line)
+            st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
+        except Exception as exc:
+            st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
+        finally:
+            gc.collect()
+
 # -------------------- Ustawienia strategii --------------------
 
 elif page == "Ustawienia Strategii":
@@ -844,94 +874,3 @@ elif page == "Panel Administratora" and is_user_admin():
                 st.rerun()
     else:
         st.info("Brak użytkowników.")
-
-# -------------------- Panel kapitału --------------------
-
-elif page == "Panel Sesji i Kapitału":
-    st.subheader("Saldo, pozycje i kapitał")
-    total_balance = free_balance = session_pnl = used_margin = 0.0
-    active = []
-    connected = bool(api_key_saved and secret_saved)
-    api_ok = False
-    if connected:
-        try:
-            client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-            active = active_positions(client)
-            free_balance, total_balance = balance_usdt(client, active)
-            session_pnl = sum(asfloat(p.get("unrealizedPnl")) for p in active)
-            used_margin = sum(asfloat(p.get("initialMargin") or p.get("margin")) for p in active)
-            api_ok = True
-        except Exception as exc:
-            st.warning(f"Nie udało się pobrać salda lub pozycji: {exc}")
-        finally:
-            gc.collect()
-    max_slots = int(cfg["max_positions"])
-
-    def metric_card(label, value, note="", tone=""):
-        tone_class = f" {tone}" if tone else ""
-        st.markdown(
-            f'<div class="metric-card{tone_class}">'
-            f'<div class="metric-label">{label}</div>'
-            f'<div class="metric-value">{value}</div>'
-            f'<div class="metric-note">{note}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-    terminal_active = bool(api_ok and cfg.get("auto_refresh", True))
-    terminal_text = "AKTYWNY" if terminal_active else "NIEAKTYWNY"
-    terminal_note = "API działa; ciągłe skanowanie włączone" if terminal_active else "Brak połączenia API lub skanowanie wyłączone"
-    c1, c2, c3, c4 = st.columns(4, gap="medium")
-    with c1:
-        metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT",
-                    "Saldo całkowite / środki dostępne", "gold")
-    with c2:
-        metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
-                    "Łączny PnL otwartych pozycji", "green" if session_pnl >= 0 else "red")
-    with c3:
-        metric_card("Otwarte pozycje", f"{len(active)} / {max_slots}",
-                    f"Zgłoszony margin: {used_margin:.2f} USDT", "blue")
-    with c4:
-        metric_card("Terminal", terminal_text, terminal_note,
-                    "green" if terminal_active else "red")
-
-    st.divider()
-    st.markdown("### Aktywne pozycje")
-    if active:
-        st.dataframe(pd.DataFrame([{
-            "Symbol": p.get("symbol"), "Strona": p.get("side"),
-            "Kontrakty": p.get("contracts"), "Cena wejścia": p.get("entryPrice"),
-            "PnL (USDT)": p.get("unrealizedPnl"), "Margin": p.get("initialMargin")
-        } for p in active]), use_container_width=True, hide_index=True)
-    elif connected and api_ok:
-        st.info("Brak otwartych pozycji.")
-    else:
-        st.info("Zapisz klucze API, aby wyświetlić saldo i pozycje.")
-
-    st.divider()
-    st.markdown("### Awaryjne zamknięcie wszystkich pozycji")
-    st.warning("To polecenie wysyła prawdziwe zlecenia rynkowe zamykające pozycje.")
-    if st.button("ZAMKNIJ WSZYSTKIE POZYCJE", type="secondary"):
-        try:
-            if not connected:
-                raise RuntimeError("Brak kluczy API.")
-            client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
-            positions = active_positions(client)
-            outcomes = []
-            for pos in positions:
-                qty = abs(asfloat(pos.get("contracts")))
-                symbol = pos.get("symbol")
-                if qty <= 0 or not symbol:
-                    continue
-                side = "sell" if str(pos.get("side") or "").lower() in ("long", "buy") else "buy"
-                try:
-                    order = market_order(client, symbol, side, qty, reduce_only=True)
-                    outcomes.append(f"{symbol}: wysłano zamknięcie {qty}; order={order.get('id')}")
-                except Exception as exc:
-                    outcomes.append(f"{symbol}: BŁĄD: {exc}")
-            for line in outcomes:
-                event("KILL", line)
-            st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
-        except Exception as exc:
-            st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
-        finally:
-            gc.collect()
