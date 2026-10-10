@@ -304,6 +304,25 @@ def balance_usdt(ex, positions=None):
         free = 0.0
     if total is None:
         total = free + used if used is not None else free
+
+    # Some exchange/account modes return the available USDT amount in both
+    # the unified "free" and "total" fields. If live positions clearly have
+    # allocated margin, do not display all wallet equity as freely available.
+    # Prefer exchange-reported used margin; otherwise infer allocated margin
+    # from the actual open positions passed by the caller.
+    position_margin = 0.0
+    if positions:
+        for position in positions:
+            margin_value = position.get("initialMargin")
+            if margin_value is None:
+                margin_value = position.get("margin")
+            position_margin += max(0.0, _as_float(margin_value))
+
+    reported_used = max(0.0, float(used or 0.0))
+    allocated_margin = max(reported_used, position_margin)
+    if total > 0 and free >= total - max(0.01, total * 0.001) and allocated_margin > 0:
+        free = max(0.0, float(total) - allocated_margin)
+
     return max(0.0, float(free)), max(0.0, float(total))
 
 
@@ -753,7 +772,7 @@ elif page == "Panel Sesji i Kapitału":
     c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1:
         metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT",
-                    "Saldo całkowite / środki dostępne", "gold")
+                    "Saldo całkowite / środki dostępne po uwzględnieniu margin", "gold")
     with c2:
         metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT",
                     "Łączny PnL otwartych pozycji", "green" if session_pnl >= 0 else "red")
