@@ -1,3 +1,4 @@
+
 import os
 import json
 import sqlite3
@@ -31,7 +32,7 @@ STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
-MIN_MARGIN_USDT = 10.0 # Twardy wymóg: minimum 10 USDT czystego depozytu z portfela
+MIN_MARGIN_USDT = 10.0
 
 DEFAULT_TF_SETTINGS = {
     "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25.0, "rsi_min": 25.0, "rsi_max": 75.0},
@@ -551,8 +552,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
     
     if cfg.get("auto_refresh", True):
         wait = max(10, int(cfg.get("refresh_seconds", 30)))
-        st.markdown(f'<meta http-equiv="refresh" content="{wait}">', unsafe_allow_html=True)
-        st.caption(f"Strona odświeży się automatycznie za {wait} sekund...")
+        st.caption(f"Automatyczne skanowanie w tle ustawiono co {wait} s.")
 
     try:
         ex = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
