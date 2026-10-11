@@ -66,6 +66,7 @@ def db():
     con.execute("CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT NOT NULL)")
     con.execute("""CREATE TABLE IF NOT EXISTS user_credentials( user_id INTEGER PRIMARY KEY,exchange TEXT,api_key TEXT,secret TEXT,password TEXT)""")
     con.execute("CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,level TEXT,message TEXT)")
+    con.execute("""CREATE TABLE IF NOT EXISTS pair_cooldowns( symbol TEXT PRIMARY KEY, closed_at REAL NOT NULL, reason TEXT NOT NULL )""")
     con.execute("""CREATE TABLE IF NOT EXISTS users( id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL, subscription TEXT,stripe_paid INTEGER NOT NULL DEFAULT 0,email TEXT UNIQUE)""")
     con.commit()
     return con
@@ -120,6 +121,42 @@ def event(level, message):
         con.execute("INSERT INTO events(ts,level,message) VALUES(?,?,?)",
                     (datetime.now(timezone.utc).isoformat(), str(level), message))
         con.commit()
+
+
+def set_pair_cooldown(symbol, reason, seconds=600):
+    """Zapisuje blokadę ponownego wejścia na parę po zamknięciu SL/TP."""
+    if not symbol:
+        return
+    with db() as con:
+        con.execute(
+            """INSERT INTO pair_cooldowns(symbol, closed_at, reason) VALUES(?,?,?) ON CONFLICT(symbol) DO UPDATE SET closed_at=excluded.closed_at, reason=excluded.reason""",
+            (str(symbol), time.time(), str(reason))
+        )
+        con.commit()
+
+
+def pair_cooldown_remaining(symbol, seconds=600):
+    """Zwraca liczbę sekund blokady dla pary; 0 oznacza brak aktywnej blokady."""
+    if not symbol:
+        return 0
+    try:
+        with db() as con:
+            row = con.execute(
+                "SELECT closed_at FROM pair_cooldowns WHERE symbol=?",
+                (str(symbol),)
+            ).fetchone()
+        if not row:
+            return 0
+        remaining = int(max(0, float(seconds) - (time.time() - float(row["closed_at"]))))
+        if remaining <= 0:
+            with db() as con:
+                con.execute("DELETE FROM pair_cooldowns WHERE symbol=?", (str(symbol),))
+                con.commit()
+        return remaining
+    except Exception:
+        logging.exception("Nie udało się sprawdzić blokady pary %s", symbol)
+        # Fail closed: jeśli nie można sprawdzić blokady, nie otwieraj nowej pozycji.
+        return int(seconds)
 
 
 def load_creds(user_id):
@@ -331,6 +368,7 @@ def manage_position_exits(ex, positions, cfg):
                 f"ROE={roe:.2f}%; order_id={order.get('id')}"
             )
             event("TRADE", msg)
+            set_pair_cooldown(symbol, reason, 600)
             closed.append(msg)
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
@@ -598,6 +636,12 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         continue
                     try:
                         live = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, cfg["market_type"])
+                        # Blokada ponownego wejścia na tę samą parę przez 10 minut po SL/TP.
+                        cooldown_left = pair_cooldown_remaining(symbol, 600)
+                        if cooldown_left > 0:
+                            event("INFO", f"Pominięto {symbol}: blokada po SL/TP, pozostało {cooldown_left}s.")
+                            continue
+
                         positions = active_positions(live)
                         current_symbols = {str(p.get("symbol")) for p in positions if p.get("symbol")}
                         if len(positions) >= int(cfg["max_positions"]) or symbol in current_symbols:
