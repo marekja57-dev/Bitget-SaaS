@@ -33,15 +33,15 @@ TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
 
 DEFAULT_TF_SETTINGS = {
-    "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_min": 25., "rsi_max": 75.},
-    "3m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_min": 25., "rsi_max": 75.},
-    "5m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_min": 25., "rsi_max": 75.},
-    "15m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_min": 25., "rsi_max": 75.},
-    "30m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_min": 25., "rsi_max": 75.},
-    "1h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 22., "rsi_min": 30., "rsi_max": 70.},
-    "2h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 20., "rsi_min": 30., "rsi_max": 70.},
-    "4h": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 20., "rsi_min": 30., "rsi_max": 70.},
-    "1d": {"ema_fast": 40, "ema_slow": 140, "adx_threshold": 15., "rsi_min": 35., "rsi_max": 65.},
+    "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 25., "rsi_max": 75.},
+    "3m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 25., "rsi_max": 75.},
+    "5m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 25., "rsi_max": 75.},
+    "15m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 25., "rsi_max": 75.},
+    "30m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 25., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 25., "rsi_max": 75.},
+    "1h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 22., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 30., "rsi_max": 70.},
+    "2h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 20., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 30., "rsi_max": 70.},
+    "4h": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 30., "rsi_max": 70.},
+    "1d": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 18., "rsi_period": 14, "rsi_long_min": 52., "rsi_long_max": 68., "rsi_short_min": 32., "rsi_short_max": 48., "rsi_min": 30., "rsi_max": 70.},
 }
 DEFAULTS = {
     "exchange": "bitget", "market_type": "swap", "candle_limit": 150,
@@ -103,6 +103,15 @@ def load_cfg():
             if tf in merged and isinstance(vals, dict):
                 merged[tf].update(vals)
         cfg["tf_settings"] = merged
+        # Migracja dawnych wartości domyślnych; nie nadpisuj ustawień
+        # użytkownika, jeśli różnią się od wcześniejszych ustawień bazowych.
+        old_defaults = {
+            "4h": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 20.0, "rsi_min": 30.0, "rsi_max": 70.0},
+            "1d": {"ema_fast": 40, "ema_slow": 140, "adx_threshold": 15.0, "rsi_min": 35.0, "rsi_max": 65.0},
+        }
+        for tf, old_values in old_defaults.items():
+            if merged.get(tf) == old_values:
+                merged[tf] = dict(DEFAULT_TF_SETTINGS[tf])
     except Exception:
         logging.exception("Nie udało się wczytać ustawień")
     return cfg
@@ -207,7 +216,7 @@ def get_candles(ex_id, market_type, symbol, timeframe, limit):
     return pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
 
 
-def indicators(df, fast, slow):
+def indicators(df, fast, slow, rsi_period=14):
     d = df.copy()
     for col in ["open", "high", "low", "close", "volume"]:
         d[col] = pd.to_numeric(d[col], errors="coerce")
@@ -215,8 +224,9 @@ def indicators(df, fast, slow):
     d["ema_fast"] = d["close"].ewm(span=int(fast), adjust=False).mean()
     d["ema_slow"] = d["close"].ewm(span=int(slow), adjust=False).mean()
     delta = d["close"].diff()
-    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+    rsi_period = max(2, int(rsi_period))
+    gain = delta.clip(lower=0).ewm(alpha=1/rsi_period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/rsi_period, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     d["rsi"] = 100 - 100 / (1 + rs)
     tr = pd.concat([(d["high"]-d["low"]).abs(),
@@ -236,36 +246,75 @@ def indicators(df, fast, slow):
 def effective_tf_cfg(cfg, tf):
     base = cfg.get("tf_settings", {}).get(tf, DEFAULT_TF_SETTINGS.get(tf, DEFAULT_TF_SETTINGS["1h"]))
     mult = float(cfg.get("indicator_multiplier", 100)) / 100
-    fast = max(2, int(round(float(base["ema_fast"]) * mult)))
-    slow = max(fast + 1, int(round(float(base["ema_slow"]) * mult)))
+    # Mnożnik opisany w panelu jako próg ADX zmienia wyłącznie próg ADX,
+    # a nie okresy EMA.
+    fast = max(2, int(round(float(base["ema_fast"]))))
+    slow = max(fast + 1, int(round(float(base["ema_slow"]))))
+    rsi_long_min = float(base.get("rsi_long_min", 52.0))
+    rsi_long_max = float(base.get("rsi_long_max", 68.0))
+    rsi_short_min = float(base.get("rsi_short_min", 32.0))
+    rsi_short_max = float(base.get("rsi_short_max", 48.0))
     return {"ema_fast": fast, "ema_slow": slow,
             "adx_threshold": max(2., min(90., float(base["adx_threshold"]) * mult)),
-            "rsi_min": max(2., min(45., float(base["rsi_min"]))),
-            "rsi_max": max(55., min(98., float(base["rsi_max"])))}
+            "rsi_period": max(2, min(100, int(base.get("rsi_period", 14)))),
+            "rsi_long_min": max(0., min(100., rsi_long_min)),
+            "rsi_long_max": max(0., min(100., rsi_long_max)),
+            "rsi_short_min": max(0., min(100., rsi_short_min)),
+            "rsi_short_max": max(0., min(100., rsi_short_max)),
+            "rsi_min": max(0., min(100., float(base.get("rsi_min", 30.)))),
+            "rsi_max": max(0., min(100., float(base.get("rsi_max", 70.))))}
 
 
 def signal_for_symbol(cfg, symbol, timeframe):
     try:
         t = effective_tf_cfg(cfg, timeframe)
         raw = get_candles(cfg["exchange"], cfg["market_type"], symbol, timeframe, cfg["candle_limit"])
-        d = indicators(raw, t["ema_fast"], t["ema_slow"])
-        if len(d) < max(35, t["ema_slow"] + 5):
+        d = indicators(raw, t["ema_fast"], t["ema_slow"], t["rsi_period"])
+        if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY",
                     "price": None, "adx": None, "rsi": None, "reason": "Za mało świec"}
-        r = d.iloc[-1]
+        # Ostatnia świeca OHLCV bywa jeszcze otwarta; sygnał licz z zamkniętej.
+        r = d.iloc[-2]
         if not all(pd.notna(r[x]) and np.isfinite(float(r[x]))
                    for x in ["close", "ema_fast", "ema_slow", "adx", "rsi"]):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY",
                     "price": asfloat(r["close"]), "adx": None, "rsi": None, "reason": "Brak danych wskaźników"}
         trend = r["ema_fast"] > r["ema_slow"]
-        filters = r["adx"] >= t["adx_threshold"] and t["rsi_min"] <= r["rsi"] <= t["rsi_max"]
-        long_ok = bool(cfg["allow_long"] and trend and filters and r["close"] > r["ema_fast"])
-        short_ok = bool(cfg["allow_short"] and not trend and filters and r["close"] < r["ema_fast"])
+        # ADX filtruje słaby trend; zakresy RSI LONG/SHORT są w pełni regulowane w panelu.
+        adx_ok = r["adx"] >= t["adx_threshold"]
+        long_rsi_ok = t["rsi_long_min"] <= float(r["rsi"]) <= t["rsi_long_max"]
+        short_rsi_ok = t["rsi_short_min"] <= float(r["rsi"]) <= t["rsi_short_max"]
+        long_ok = bool(cfg["allow_long"] and trend and adx_ok and long_rsi_ok
+                       and r["close"] > r["ema_fast"])
+        short_ok = bool(cfg["allow_short"] and not trend and adx_ok and short_rsi_ok
+                        and r["close"] < r["ema_fast"])
         return {"symbol": symbol, "tf": timeframe, "signal": "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY",
                 "price": float(r["close"]), "adx": float(r["adx"]), "rsi": float(r["rsi"]), "reason": "OK"}
     except Exception as exc:
         return {"symbol": symbol, "tf": timeframe, "signal": "BŁĄD", "price": None,
                 "adx": None, "rsi": None, "reason": str(exc)[:180]}
+    finally:
+        gc.collect()
+
+
+def trend_direction_for_symbol(cfg, symbol, timeframe="1d"):
+    """Zwraca kierunek trendu z EMA na ostatniej zamkniętej świecy."""
+    try:
+        t = effective_tf_cfg(cfg, timeframe)
+        raw = get_candles(cfg["exchange"], cfg["market_type"], symbol, timeframe, cfg["candle_limit"])
+        d = indicators(raw, t["ema_fast"], t["ema_slow"], t["rsi_period"])
+        if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
+            return None
+        r = d.iloc[-2]
+        if pd.isna(r["ema_fast"]) or pd.isna(r["ema_slow"]):
+            return None
+        if r["ema_fast"] > r["ema_slow"] and r["close"] > r["ema_fast"]:
+            return "LONG"
+        if r["ema_fast"] < r["ema_slow"] and r["close"] < r["ema_fast"]:
+            return "SHORT"
+        return None
+    except Exception:
+        return None
     finally:
         gc.collect()
 
@@ -632,6 +681,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     event("INFO", f"Sygnał {res['signal']} {symbol} [{tf}]")
                     if not cfg["auto_trade"] or not is_user_paid() or cfg["paper_mode"]:
                         continue
+                    # Gdy wybrane są 1D i 4H, 1D pełni rolę filtra trendu,
+                    # a zlecenia otwieramy na sygnale 4H.
+                    if "1d" in tfs and "4h" in tfs:
+                        if tf == "1d":
+                            continue
+                        if tf == "4h":
+                            daily_trend = trend_direction_for_symbol(cfg, symbol, "1d")
+                            if daily_trend != res["signal"]:
+                                event("INFO", f"Pominięto {symbol} [{tf}]: sygnał {res['signal']} niezgodny z trendem 1D ({daily_trend or 'brak'}).")
+                                continue
                     if not (api_key_saved and secret_saved and res.get("price")):
                         continue
                     try:
@@ -728,23 +787,35 @@ if page == "Ustawienia Strategii":
             allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]))
             allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]))
         st.markdown(f"### Parametry bazowe dla {selected_tf}")
-        c1, c2, c3, c4, c5 = st.columns(5)
+        # EMA pozostają regulowane przez użytkownika — nie są narzucane na stałe.
+        c1, c2, c3 = st.columns(3)
         with c1:
-            fast = st.number_input("EMA szybka", 2, 100, int(base["ema_fast"]))
+            fast = st.slider("EMA szybka", 2, 100, int(base["ema_fast"]), 1)
         with c2:
-            slow = st.number_input("EMA wolna", 3, 300, int(base["ema_slow"]))
+            slow = st.slider("EMA wolna", 3, 300, int(base["ema_slow"]), 1)
         with c3:
             adx = st.number_input("Minimalny ADX", 0., 100., float(base["adx_threshold"]))
-        with c4:
-            rmin = st.number_input("RSI minimum", 0., 100., float(base["rsi_min"]))
-        with c5:
-            rmax = st.number_input("RSI maksimum", 0., 100., float(base["rsi_max"]))
+        st.markdown("#### Ustawienia RSI")
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1)
+        with r2:
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0., 100., float(base.get("rsi_long_min", 52.)), 1.)
+        with r3:
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0., 100., float(base.get("rsi_long_max", 68.)), 1.)
+        r4, r5 = st.columns(2)
+        with r4:
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0., 100., float(base.get("rsi_short_min", 32.)), 1.)
+        with r5:
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0., 100., float(base.get("rsi_short_max", 48.)), 1.)
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
         if save:
             if fast >= slow:
                 st.error("EMA szybka musi być mniejsza od EMA wolnej.")
-            if rmin >= rmax:
-                st.error("RSI minimum musi być mniejsze od RSI maksimum.")
+            elif rsi_long_min >= rsi_long_max:
+                st.error("RSI LONG: minimum musi być mniejsze od maksimum.")
+            elif rsi_short_min >= rsi_short_max:
+                st.error("RSI SHORT: minimum musi być mniejsze od maksimum.")
             else:
                 cfg.update(exchange=exchange_name, market_type=market_type, scan_limit_count=scan_limit,
                            timeframes=timeframes or ["4h", "1d"], indicator_multiplier=multiplier,
@@ -752,8 +823,13 @@ if page == "Ustawienia Strategii":
                            max_positions=int(max_positions), max_leverage=int(max_leverage),
                            sl_roe=float(sl_roe), tp_roe=float(tp_roe),
                            allow_long=allow_long, allow_short=allow_short)
-                cfg["tf_settings"][selected_tf] = {"ema_fast": int(fast), "ema_slow": int(slow),
-                    "adx_threshold": float(adx), "rsi_min": float(rmin), "rsi_max": float(rmax)}
+                cfg["tf_settings"][selected_tf] = {
+                    "ema_fast": int(fast), "ema_slow": int(slow),
+                    "adx_threshold": float(adx), "rsi_period": int(rsi_period),
+                    "rsi_long_min": float(rsi_long_min), "rsi_long_max": float(rsi_long_max),
+                    "rsi_short_min": float(rsi_short_min), "rsi_short_max": float(rsi_short_max),
+                    "rsi_min": float(base.get("rsi_min", 30.)), "rsi_max": float(base.get("rsi_max", 70.))
+                }
                 save_cfg(cfg)
                 exchange_client.clear()
                 get_candles.clear()
