@@ -1,4 +1,3 @@
-
 import gc
 import hashlib
 import hmac
@@ -595,11 +594,10 @@ def market_order(
       {"reduceOnly": True} if reduce_only else {},
   )
 
-
 def manage_position_exits(ex, positions, cfg):
   sl_roe = max(0.1, float(cfg.get("sl_roe", 20.0)))
-  tp_roe = max(0.1, float(cfg.get("tp_roe", 40.0)))
   closed = []
+  
   for pos in positions:
     symbol = pos.get("symbol")
     side = str(pos.get("side") or "").lower()
@@ -609,34 +607,39 @@ def manage_position_exits(ex, positions, cfg):
     if margin_value is None or asfloat(margin_value) <= 0:
       margin_value = pos.get("margin")
     margin = asfloat(margin_value)
-    if (
-        not symbol
-        or qty <= 0
-        or side not in ("long", "short")
-        or margin <= 0
-        or pnl_value is None
-    ):
+    
+    if (not symbol or qty <= 0 or side not in ("long", "short") or margin <= 0 or pnl_value is None):
       continue
+      
     roe = asfloat(pnl_value) / margin * 100.0
     reason = None
+    
+    # Stop Loss chroni kapitał w razie niekorzystnego ruchu
     if roe <= -sl_roe:
-      reason = "STOP LOSS"
-    if roe >= tp_roe:
-      reason = "TAKE PROFIT"
+      reason = "STOP LOSS (Ochrona kapitału)"
+    else:
+      # Dynamiczne sprawdzanie trendu dla pozycji "do oporu"
+      # Sprawdzamy aktualny stan trendu na interwale bazowym (np. 4h lub 1d)
+      current_trend = trend_direction_for_symbol(cfg, symbol, "4h")
+      if current_trend:
+        # Jeśli strona pozycji nie zgadza się z aktualnym trendem (trend się odwrócił)
+        if (side == "long" and current_trend == "SHORT") or (side == "short" and current_trend == "LONG"):
+          if roe > 0: # Zamykamy tylko wtedy, gdy pozycja jest na plusie (wyciągamy maksimum zysku)
+            reason = f"MAX ZYSK / ODWRÓCENIE TRENDU (ROE: {roe:.2f}%)"
+
     if reason is None:
       continue
+
     close_side = "sell" if side == "long" else "buy"
     try:
       order = market_order(ex, symbol, close_side, qty, reduce_only=True)
-      msg = (
-          f"{reason}: {side.upper()} {symbol}; ROE={roe:.2f}%;"
-          f" order_id={order.get('id')}"
-      )
+      msg = f"{reason}: {side.upper()} {symbol}; ROE={roe:.2f}%; order_id={order.get('id')}"
       event("TRADE", msg)
       set_pair_cooldown(symbol, reason, 600)
       closed.append(msg)
     except Exception as exc:
       event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
+      
   return closed
 
 
