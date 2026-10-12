@@ -1414,3 +1414,37 @@ if page == "Połączenie API":
             st.success("Klucze API zostały zapisane pomyślnie.")
             st.rerun()
 
+# -------------------- Dziennik --------------------
+
+if page == "Dziennik":
+    st.subheader("Dziennik Zdarzeń i Logi Systemowe")
+    st.write("Podgląd pliku dziennika zdarzeń tła (`trading.log`):")
+    if LOG_PATH.exists():
+        with open(LOG_PATH, "r", encoding="utf-8") as f:
+            log_lines = f.readlines()
+        st.code("".join(log_lines[-150:]), language="text")
+    else:
+        st.info("Brak pliku dziennika zdarzeń.")
+
+# -------------------- Regulamin i Instrukcja --------------------
+
+if page == "Regulamin i Instrukcja":
+    st.subheader("Regulamin i Instrukcja Obsługi")
+    st.markdown("""
+    ### Witaj w systemie Bitget-SaaS Futures
+    1. **Autonomiczny Skaner i Handel:** System automatycznie przeszukuje giełdę według wskaźników EMA, ADX oraz RSI na wybranym interwale.
+    2. **Zarządzanie Pozycjami:** Wątek w tle na bieżąco monitoruje otwarte pozycje i realizuje ochronę kapitału (Stop Loss / Take Profit / Odwrócenie trendu).
+    3. **Subskrypcja:** Dostęp do handlu na żywo wymaga aktywnej subskrypcji.
+    
+    ---
+    *Ryzyko: Handel kontraktami futures wiąże się z możliwością utraty środków.*
+    """)
+
+# -------------------- Panel Administratora --------------------
+
+if page == "Panel Administratora" and is_user_admin():
+    st.subheader("Panel Administratora SaaS")
+    with db() as con:
+        users = con.execute("SELECT id, username, email, stripe_paid, subscription FROM users").fetchall()
+    st.dataframe(pd.DataFrame([dict(u) for u in users]), use_container_width=True)
+
