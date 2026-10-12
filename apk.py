@@ -1,3 +1,4 @@
+
 import gc
 import hashlib
 import hmac
@@ -684,7 +685,6 @@ def ranked_symbols(ex, limit_count):
     return ranked
 
 # -------------------- Wątek Tła (Background Worker 24/7) --------------------
-
 def background_trading_worker():
     while True:
         try:
@@ -919,9 +919,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.cache_resource.clear()
         st.success("Cache wyczyszczony. Odśwież stronę.")
-    
-    # Naprawiona stopka w sidebarze (bez zepsutych znaczników i uciętych linii)
-    st.markdown(
-        '<div class="brand" style="font-size: 0.9rem; margin-top: 20px;">Bitget-SaaS Futures</div><div style="font-size: 0.75rem; color: #a9bdd7;">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>',
-        unsafe_allow_html=True
-    )
+    st.markdown()
+    '<div class="brand">Bitget-SaaS Futures</div><div>AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>',
+        
+
