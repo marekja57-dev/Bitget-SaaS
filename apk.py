@@ -918,6 +918,9 @@ with st.sidebar:
         st.cache_data.clear()
         st.cache_resource.clear()
         st.success("Cache wyczyszczony. Odśwież stronę.")
-    st.markdown()
-    '<div class="brand">Bitget-SaaS Futures</div><div>AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>',
+    st.markdown(
+        '<div class="brand">Bitget-SaaS Futures</div><div>AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>',
+        unsafe_allow_html=True,
+    )
+
         
