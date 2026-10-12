@@ -914,9 +914,14 @@ with st.sidebar:
             st.session_state[key] = default
         st.rerun()
     if st.button("Wyczyść cache danych", use_container_width=True):
-        get_candles.clear()
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.success("Cache wyczyszczony. Odśwież stronę.")
-st.markdown("Bitget-SaaS Futures - Autonomiczny System Transakcyjny")
+       get_candles.clear()
+       st.cache_data.clear()
+       st.cache_resource.clear()
+       st.success("Cache wyczyszczony. Odśwież stronę.")
+
+st.markdown(
+    '<div class="brand">Bitget-SaaS Futures</div><div>AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>',
+    unsafe_allow_html=True
+)
+
  
