@@ -422,7 +422,10 @@ def signal_for_symbol(cfg, symbol, timeframe):
                 "rsi": None,
                 "reason": "Za mało świec",
             }
+            
         r = d.iloc[-2]
+        prev = d.iloc[-3]
+        
         if not all(
             pd.notna(r[x]) and np.isfinite(float(r[x]))
             for x in ["close", "ema_fast", "ema_slow", "adx", "rsi"]
@@ -436,20 +439,34 @@ def signal_for_symbol(cfg, symbol, timeframe):
                 "rsi": None,
                 "reason": "Brak danych wskaźników",
             }
-        trend = r["ema_fast"] > r["ema_slow"]
+            
+        trend_up = r["ema_fast"] > r["ema_slow"]
+        trend_down = r["ema_fast"] < r["ema_slow"]
+        
+        # Filtry pędu kierunkowego (zapobiegają wejściom pod prąd lokalnych odbić)
+        ema_rising = r["ema_fast"] > prev["ema_fast"]
+        ema_falling = r["ema_fast"] < prev["ema_fast"]
+        price_growing = r["close"] > prev["close"]
+        price_falling = r["close"] < prev["close"]
+        
         adx_ok = r["adx"] >= t["adx_threshold"]
         long_rsi_ok = t["rsi_long_min"] <= float(r["rsi"]) <= t["rsi_long_max"]
         short_rsi_ok = t["rsi_short_min"] <= float(r["rsi"]) <= t["rsi_short_max"]
+        
         long_ok = bool(
             cfg["allow_long"]
-            and trend
+            and trend_up
+            and ema_rising
+            and price_growing
             and adx_ok
             and long_rsi_ok
             and r["close"] > r["ema_fast"]
         )
         short_ok = bool(
             cfg["allow_short"]
-            and not trend
+            and trend_down
+            and ema_falling
+            and price_falling
             and adx_ok
             and short_rsi_ok
             and r["close"] < r["ema_fast"]
@@ -490,11 +507,12 @@ def trend_direction_for_symbol(cfg, symbol, timeframe="1d"):
         if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
             return None
         r = d.iloc[-2]
+        prev = d.iloc[-3]
         if pd.isna(r["ema_fast"]) or pd.isna(r["ema_slow"]):
             return None
-        if r["ema_fast"] > r["ema_slow"] and r["close"] > r["ema_fast"]:
+        if r["ema_fast"] > r["ema_slow"] and r["close"] > r["ema_fast"] and r["ema_fast"] > prev["ema_fast"]:
             return "LONG"
-        if r["ema_fast"] < r["ema_slow"] and r["close"] < r["ema_fast"]:
+        if r["ema_fast"] < r["ema_slow"] and r["close"] < r["ema_fast"] and r["ema_fast"] < prev["ema_fast"]:
             return "SHORT"
         return None
     except Exception:
@@ -578,7 +596,7 @@ def manage_position_exits(ex, positions, cfg):
     sl_roe = max(5.0, float(cfg.get("sl_roe", 20.0)))
     tp_roe = max(5.0, float(cfg.get("tp_roe", 40.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
-    # Używamy zawsze dźwigni skonfigurowanej w panelu użytkownika, a nie z API giełdy
+    # Wymuszenie użycia dźwigni skonfigurowanej w panelu, aby uniknąć błędów API giełdy
     leverage = float(cfg.get("max_leverage", 10))
     closed = []
     
@@ -626,7 +644,6 @@ def manage_position_exits(ex, positions, cfg):
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
     return closed
-     
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
@@ -1486,4 +1503,3 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
-
