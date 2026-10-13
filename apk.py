@@ -9,7 +9,6 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
-import threading
 from datetime import datetime, timezone
 
 import numpy as np
@@ -157,8 +156,8 @@ DEFAULTS = {
     "risk_usdt": 10.0,
     "max_positions": 3,
     "max_leverage": 10,
-    "sl_roe": 20.0,
-    "tp_roe": 40.0,
+    "sl_roe": 25.0,
+    "tp_roe": 60.0,
     "enable_roe": True,
     "timeframes": ["4h", "1d"],
     "tf_settings": DEFAULT_TF_SETTINGS,
@@ -576,10 +575,13 @@ def market_order(
     )
 
 def manage_position_exits(ex, positions, cfg):
-    sl_roe = max(0.1, float(cfg.get("sl_roe", 20.0)))
-    tp_roe = float(cfg.get("tp_roe", 40.0))
+    sl_roe = max(0.1, float(cfg.get("sl_roe", 25.0)))
+    tp_roe = max(0.1, float(cfg.get("tp_roe", 60.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
     closed = []
+    
+    if not enable_roe:
+        return closed
 
     for pos in positions:
         symbol = pos.get("symbol")
@@ -590,26 +592,16 @@ def manage_position_exits(ex, positions, cfg):
         if margin_value is None or asfloat(margin_value) <= 0:
             margin_value = pos.get("margin")
         margin = asfloat(margin_value)
-
-        if not symbol or qty <= 0 or side not in ("long", "short") or margin <= 0 or pnl_value is None:
+        if (not symbol or qty <= 0 or side not in ("long", "short") or margin <= 0 or pnl_value is None):
             continue
-
         roe = asfloat(pnl_value) / margin * 100.0
         reason = None
-
-        if enable_roe:
-            # 1. Twarda ochrona kapitału (Stop Loss)
-            if roe <= -sl_roe:
-                reason = f"STOP LOSS (ROE: {roe:.2f}%)"
-            # 2. Twardy cel zysku (Take Profit)
-            elif roe >= tp_roe:
-                reason = f"TAKE PROFIT (ROE: {roe:.2f}%)"
-            # 3. Wcześniejsza realizacja zysku przy odwróceniu trendu (TYLKO na plusie!)
-            elif roe > 0:
-                current_trend = trend_direction_for_symbol(cfg, symbol, "4h")
-                if current_trend:
-                    if (side == "long" and current_trend == "SHORT") or (side == "short" and current_trend == "LONG"):
-                        reason = f"ODWRÓCENIE TRENDU / ZYSK ZABEZPIECZONY (ROE: {roe:.2f}%)"
+        
+        # Poprawiona logika: sztywne respektowanie progów SL i TP bez nerwowego zamykania przy małych korektach
+        if roe <= -sl_roe:
+            reason = f"STOP LOSS (Ochrona kapitału, ROE: {roe:.2f}%)"
+        elif roe >= tp_roe:
+            reason = f"TAKE PROFIT (Realizacja zysku, ROE: {roe:.2f}%)"
 
         if reason is None:
             continue
@@ -617,15 +609,13 @@ def manage_position_exits(ex, positions, cfg):
         close_side = "sell" if side == "long" else "buy"
         try:
             order = market_order(ex, symbol, close_side, qty, reduce_only=True)
-            msg = f"{reason}: {side.upper()} {symbol}; ROE={roe:.2f}%; order_id={order.get('id')}"
+            msg = f"{reason}: {side.upper()} {symbol}; order_id={order.get('id')}"
             event("TRADE", msg)
             set_pair_cooldown(symbol, reason, 600)
             closed.append(msg)
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
-
     return closed
-
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
@@ -637,7 +627,7 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
             max(0.0, float(cfg.get("risk_usdt", 10.0))), max(0.0, total_usdt) * 0.05
         )
     )
-    sl_roe = float(cfg.get("sl_roe", 20.0))
+    sl_roe = float(cfg.get("sl_roe", 25.0))
     if price <= 0 or sl_roe <= 0 or free_usdt <= 0:
         return 0.0, 0.0
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
@@ -697,80 +687,6 @@ def ranked_symbols(ex, limit_count):
     st.session_state[cache_key] = {"ts": now, "ranked": ranked}
     gc.collect()
     return ranked
-
-# -------------------- Wątek Tła (Background Worker 24/7) --------------------
-
-def background_trading_worker():
-    while True:
-        try:
-            cfg = load_cfg()
-            if cfg.get("auto_trade") and not cfg.get("paper_mode"):
-                with db() as con:
-                    creds = con.execute("SELECT user_id, exchange, api_key, secret, password FROM user_credentials WHERE api_key != '' AND secret != '' LIMIT 1").fetchone()
-                if creds:
-                    ex_id = creds["exchange"]
-                    api_key = creds["api_key"]
-                    secret = creds["secret"]
-                    passphrase = creds["password"]
-                    
-                    ex = exchange_client(ex_id, api_key, secret, passphrase, cfg["market_type"])
-                    active = active_positions(ex)
-                    
-                    manage_position_exits(ex, active, cfg)
-                    active = active_positions(ex)
-                    
-                    max_pos = int(cfg.get("max_positions", 3))
-                    if len(active) < max_pos:
-                        free, total = balance_usdt(ex, active)
-                        ranked = ranked_symbols(ex, int(cfg.get("scan_limit_count", 30)))
-                        symbols = [x[0] for x in ranked]
-                        volume_map = dict(ranked)
-                        tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-                        
-                        all_signals = []
-                        for symbol in symbols:
-                            for tf in tfs:
-                                res = signal_for_symbol(cfg, symbol, tf)
-                                res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                                adx_val = res.get("adx") or 0.0
-                                res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
-                                all_signals.append(res)
-                        
-                        valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
-                        valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
-                        
-                        for item in valid_signals:
-                            if len(active) >= max_pos:
-                                break
-                            sym = item["symbol"]
-                            sig = item["signal"]
-                            price = item["price"]
-                            
-                            if any(p.get("symbol") == sym for p in active):
-                                continue
-                            if pair_cooldown_remaining(sym) > 0:
-                                continue
-                            
-                            qty, notional = calc_qty(ex, sym, total, free, price, cfg)
-                            if qty > 0:
-                                try:
-                                    ex.set_leverage(int(cfg["max_leverage"]), sym)
-                                except Exception:
-                                    pass
-                                order_side = "buy" if sig == "LONG" else "sell"
-                                ord_res = market_order(ex, sym, order_side, qty, reference_price=price)
-                                msg = f"AUTO-TRADE (BG): Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
-                                event("TRADE", msg)
-                                set_pair_cooldown(sym, "AUTO_OPEN", cfg.get("cooldown_seconds", 300))
-                                active = active_positions(ex)
-        except Exception as exc:
-            logging.error(f"Błąd w tle (Background Worker): {exc}")
-        time.sleep(max(15, int(load_cfg().get("refresh_seconds", 30))))
-
-if "bg_worker_started" not in st.session_state:
-    st.session_state["bg_worker_started"] = True
-    t = threading.Thread(target=background_trading_worker, daemon=True)
-    t.start()
 
 # -------------------- Sesja / logowanie --------------------
 
@@ -1002,11 +918,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 api_ok = True
             except Exception as exc:
                 st.warning(f"Błąd połączenia z giełdą / pozycjami: {exc}")
-                client = None
-        else:
-            client = None
-
-        def metric_card(label, value, note="", tone=""):
+        
+        def metric_card(label, value, note=""):
             st.markdown(
                 f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div><div class="metric-note">{note}</div></div>',
                 unsafe_allow_html=True,
@@ -1058,37 +971,103 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 use_container_width=True,
                 hide_index=True,
             )
-        if connected and api_ok and not active:
+        elif connected and api_ok and not active:
             st.info("Brak otwartych pozycji.")
         elif not connected:
-            st.warning(
-                "Brak połączenia API - podaj klucze w zakładce Połączenie API."
-            )
+            st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
 
         st.divider()
-        st.markdown("### 🏆 Top 3 Najlepsze Okazje Rynkowe")
-        if not is_user_paid():
-            st.error("Subskrypcja nieaktywna. Handel LIVE jest zablokowany.")
+        st.markdown("### 🏆 Skaner Rynku i Najlepsze Okazje")
+        
         try:
             ex = exchange_client(cfg["exchange"], "", "", "", cfg["market_type"])
             ranked = ranked_symbols(ex, int(cfg.get("scan_limit_count", 30)))
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+            
             all_signals = []
             for symbol in symbols:
                 for tf in tfs:
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                    if res["signal"] in ("LONG", "SHORT"):
-                        adx_val = res.get("adx") or 0.0
-                        score = adx_val * np.log1p(res["volume_24h_usdt"])
-                        res["score"] = score
-                        all_signals.append(res)
+                    adx_val = res.get("adx") or 0.0
+                    res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
+                    all_signals.append(res)
 
+            df_scanner = pd.DataFrame([
+                {
+                    "Symbol": item["symbol"],
+                    "Interwał": item["tf"],
+                    "Sygnał": item["signal"],
+                    "Cena": item["price"],
+                    "ADX": round(item["adx"], 1) if item["adx"] is not None else 0.0,
+                    "RSI": round(item["rsi"], 1) if item["rsi"] is not None else 0.0,
+                    "Komunikat": item["reason"]
+                }
+                for item in all_signals
+            ])
+            
+            if not df_scanner.empty:
+                st.markdown("#### Pełne zestawienie skanera")
+                st.dataframe(df_scanner, use_container_width=True, hide_index=True)
+
+            if cfg["auto_trade"] and is_user_paid() and not cfg["paper_mode"]:
+                if connected and api_ok:
+                    try:
+                        live_client = exchange_client(
+                            ex_id,
+                            api_key_saved,
+                            secret_saved,
+                            passphrase_saved,
+                            cfg["market_type"],
+                        )
+                        current_positions = active_positions(live_client)
+                        max_pos = int(cfg.get("max_positions", 3))
+                        
+                        if len(current_positions) < max_pos:
+                            free, total = balance_usdt(live_client, current_positions)
+                            valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
+                            valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+                            
+                            for item in valid_signals:
+                                if len(current_positions) >= max_pos:
+                                    break
+                                sym = item["symbol"]
+                                sig = item["signal"]
+                                price = item["price"]
+                                
+                                if any(p.get("symbol") == sym for p in current_positions):
+                                    continue
+                                if pair_cooldown_remaining(sym) > 0:
+                                    continue
+                                
+                                qty, notional = calc_qty(
+                                    live_client, sym, total, free, price, cfg
+                                )
+                                if qty > 0:
+                                    try:
+                                        live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                    except Exception:
+                                        pass
+                                    order_side = "buy" if sig == "LONG" else "sell"
+                                    ord_res = market_order(
+                                        live_client, sym, order_side, qty, reference_price=price
+                                    )
+                                    msg = f"AUTO-TRADE: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
+                                    event("TRADE", msg)
+                                    set_pair_cooldown(sym, "AUTO_OPEN", cfg.get("cooldown_seconds", 300))
+                                    current_positions = active_positions(live_client)
+                    except Exception as exc:
+                        event("ERROR", f"Błąd w pętli Auto-Trade: {exc}")
+
+            st.markdown("### 🌟 Top 3 Najlepsze Okazje Rynkowe")
             top_3_list = sorted(
-                all_signals, key=lambda x: x.get("score", 0), reverse=True
+                [s for s in all_signals if s["signal"] in ("LONG", "SHORT")],
+                key=lambda x: x.get("score", 0),
+                reverse=True
             )[:3]
+
             if top_3_list:
                 for i, item in enumerate(top_3_list, 1):
                     sym = item["symbol"]
@@ -1122,9 +1101,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             if not is_user_paid():
                                 st.error("Musisz posiadać aktywną subskrypcję.")
                             elif not (api_key_saved and secret_saved):
-                                st.error(
-                                    "Brak kluczy API! Uzupełnij je w zakładce 'Połączenie API'."
-                                )
+                                st.error("Brak kluczy API! Uzupełnij je w zakładce 'Połączenie API'.")
                             else:
                                 try:
                                     live_client = exchange_client(
@@ -1146,25 +1123,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                         custom_usdt=invest_amount,
                                     )
                                     if qty <= 0:
-                                        st.error(
-                                            "Wyliczona ilość jest za mała lub brak wolnych środków."
-                                        )
+                                        st.error("Wyliczona ilość jest za mała lub brak wolnych środków.")
                                     else:
                                         try:
-                                            live_client.set_leverage(
-                                                int(cfg["max_leverage"]), sym
-                                            )
+                                            live_client.set_leverage(int(cfg["max_leverage"]), sym)
                                         except Exception:
                                             pass
                                         order_side = "buy" if sig == "LONG" else "sell"
                                         if cfg["paper_mode"]:
-                                            st.success(
-                                                f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!"
-                                            )
-                                            event(
-                                                "TRADE",
-                                                f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT",
-                                            )
+                                            st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
+                                            event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
                                         else:
                                             ord_res = market_order(
                                                 live_client,
@@ -1173,21 +1141,14 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                                 qty,
                                                 reference_price=price,
                                             )
-                                            st.success(
-                                                f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})"
-                                            )
-                                            event(
-                                                "TRADE",
-                                                f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT",
-                                            )
+                                            st.success(f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})")
+                                            event("TRADE", f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT")
                                 except Exception as exc:
                                     st.error(f"Błąd składania zlecenia dla {sym}: {exc}")
             else:
-                st.info(
-                    "Brak par spełniających rygorystyczne kryteria wskaźnikowe w tej chwili."
-                )
+                st.info("Brak par spełniających kryteria wskaźnikowe w tej chwili.")
         except Exception as exc:
-            st.error(f"Błąd analizy rynków pod Top 3: {exc}")
+            st.error(f"Błąd analizy rynków: {exc}")
         finally:
             gc.collect()
 
@@ -1292,13 +1253,14 @@ if page == "Ustawienia Strategii":
             max_leverage = st.number_input(
                 "Maksymalna dźwignia", 1, 50, int(cfg["max_leverage"])
             )
+            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)))
             sl_roe = st.slider(
                 "Stop Loss — ROE (%)",
                 1,
                 95,
                 int(cfg["sl_roe"]),
                 1,
-                help="Próba zamknięcia pozycji przy ROE równym minus tej wartości.",
+                help="Zamknięcie pozycji przy ROE równym minus tej wartości.",
             )
             tp_roe = st.slider(
                 "Take Profit — ROE (%)",
@@ -1306,7 +1268,7 @@ if page == "Ustawienia Strategii":
                 500,
                 int(cfg["tp_roe"]),
                 1,
-                help="Próba zamknięcia pozycji przy ROE równym tej dodatniej wartości.",
+                help="Zamknięcie pozycji przy ROE równym tej dodatniej wartości zysku.",
             )
             allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]))
             allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]))
@@ -1380,6 +1342,7 @@ if page == "Ustawienia Strategii":
                     max_notional_usdt=max_notional,
                     max_positions=int(max_positions),
                     max_leverage=int(max_leverage),
+                    enable_roe=enable_roe,
                     sl_roe=float(sl_roe),
                     tp_roe=float(tp_roe),
                     allow_long=allow_long,
@@ -1421,45 +1384,88 @@ if page == "Połączenie API":
         )
         api_key_input = st.text_input("API Key", value=api_key_saved, type="password")
         secret_input = st.text_input("Secret Key", value=secret_saved, type="password")
-        passphrase_input = st.text_input("Passphrase / Hasło giełdy", value=passphrase_saved, type="password")
-        
+        passphrase_input = st.text_input("Passphrase / Hasło", value=passphrase_saved, type="password")
         submit_creds = st.form_submit_button("ZAPISZ KLUCZE API", use_container_width=True)
         if submit_creds:
-            save_creds(current_user_id, exchange_choice, api_key_input, secret_input, passphrase_input)
-            st.success("Klucze API zostały zapisane pomyślnie.")
-            st.rerun()
+            if not current_user_id:
+                st.error("Musisz być zalogowany, aby zapisać klucze.")
+            else:
+                save_creds(
+                    current_user_id,
+                    exchange_choice,
+                    api_key_input.strip(),
+                    secret_input.strip(),
+                    passphrase_input.strip(),
+                )
+                exchange_client.clear()
+                st.success("Klucze API zostały zapisane pomyślnie.")
+                st.rerun()
 
 # -------------------- Dziennik --------------------
 
 if page == "Dziennik":
-    st.subheader("Dziennik Zdarzeń i Logi Systemowe")
-    st.write("Podgląd pliku dziennika zdarzeń tła (`trading.log`):")
-    if LOG_PATH.exists():
-        with open(LOG_PATH, "r", encoding="utf-8") as f:
-            log_lines = f.readlines()
-        st.code("".join(log_lines[-150:]), language="text")
-    else:
-        st.info("Brak pliku dziennika zdarzeń.")
+    st.subheader("Dziennik zdarzeń i transakcji bota")
+    
+    col_del1, col_del2 = st.columns([4, 1])
+    with col_del2:
+        if st.button("🗑️ Wyczyść dziennik", use_container_width=True):
+            try:
+                with db() as con:
+                    con.execute("DELETE FROM events")
+                    con.commit()
+                st.success("Wyczyszczono dziennik zdarzeń.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Nie udało się wyczyścić dziennika: {exc}")
+
+    try:
+        with db() as con:
+            rows = con.execute(
+                "SELECT ts, level, message FROM events ORDER BY id DESC LIMIT 100"
+            ).fetchall()
+        if rows:
+            st.dataframe(
+                pd.DataFrame([dict(r) for r in rows]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("Brak wpisów w dzienniku.")
+    except Exception as exc:
+        st.error(f"Nie udało się wczytać dziennika: {exc}")
 
 # -------------------- Regulamin i Instrukcja --------------------
 
 if page == "Regulamin i Instrukcja":
     st.subheader("Regulamin i Instrukcja Obsługi")
     st.markdown("""
-    ### Witaj w systemie Bitget-SaaS Futures
-    1. **Autonomiczny Skaner i Handel:** System automatycznie przeszukuje giełdę według wskaźników EMA, ADX oraz RSI na wybranym interwale.
-    2. **Zarządzanie Pozycjami:** Wątek w tle na bieżąco monitoruje otwarte pozycje i realizuje ochronę kapitału (Stop Loss / Take Profit / Odwrócenie trendu).
-    3. **Subskrypcja:** Dostęp do handlu na żywo wymaga aktywnej subskrypcji.
-    
-    ---
-    *Ryzyko: Handel kontraktami futures wiąże się z możliwością utraty środków.*
+    ### Witaj w Bitget-SaaS Futures
+    System automatycznego handlu kontraktami futures.
+    - Tryb Paper: Pozwala testować sygnały bez otwierania prawdziwych pozycji na giełdzie.
+    - Auto-Trade: Po włączeniu i wyłączeniu trybu Paper bot sam otwiera zlecenia na podstawie wykrytych trendów.
+    - Zarządzanie ryzykiem: Automatyczny Stop Loss oraz Take Profit pilnują otwartych pozycji zgodnie z ustawieniami.
     """)
 
 # -------------------- Panel Administratora --------------------
 
 if page == "Panel Administratora" and is_user_admin():
-    st.subheader("Panel Administratora SaaS")
-    with db() as con:
-        users = con.execute("SELECT id, username, email, stripe_paid, subscription FROM users").fetchall()
-    st.dataframe(pd.DataFrame([dict(u) for u in users]), use_container_width=True)
+    st.subheader("Panel Administratora - Zarządzanie Użytkownikami")
+    try:
+        with db() as con:
+            users = con.execute("SELECT id, username, email, stripe_paid, subscription FROM users").fetchall()
+        if users:
+            df_users = pd.DataFrame([dict(u) for u in users])
+            st.dataframe(df_users, use_container_width=True, hide_index=True)
+            
+            selected_uid = st.number_input("ID użytkownika do aktywacji subskrypcji", min_value=1, step=1)
+            if st.button("Aktywuj subskrypcję dla wybranego ID"):
+                with db() as con:
+                    con.execute("UPDATE users SET stripe_paid=1 WHERE id=?", (selected_uid,))
+                    con.commit()
+                st.success(f"Aktywowano subskrypcję dla użytkownika ID: {selected_uid}")
+                st.rerun()
+        else:
+            st.info("Brak zarejestrowanych użytkowników.")
+    except Exception as exc:
+        st.error(f"Błąd panelu admina: {exc}")
 
