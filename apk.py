@@ -580,35 +580,40 @@ def manage_position_exits(ex, positions, cfg):
     tp_roe = float(cfg.get("tp_roe", 40.0))
     enable_roe = bool(cfg.get("enable_roe", True))
     closed = []
-    
+
     for pos in positions:
         symbol = pos.get("symbol")
         side = str(pos.get("side") or "").lower()
         qty = abs(asfloat(pos.get("contracts")))
         pnl_value = pos.get("unrealizedPnl")
         margin_value = pos.get("initialMargin")
-        
         if margin_value is None or asfloat(margin_value) <= 0:
             margin_value = pos.get("margin")
-            
         margin = asfloat(margin_value)
+
         if not symbol or qty <= 0 or side not in ("long", "short") or margin <= 0 or pnl_value is None:
             continue
-            
+
         roe = asfloat(pnl_value) / margin * 100.0
         reason = None
-        
+
         if enable_roe:
-            # 1. Twardy Stop Loss bazujący na ROE
+            # 1. Twarda ochrona kapitału (Stop Loss)
             if roe <= -sl_roe:
                 reason = f"STOP LOSS (ROE: {roe:.2f}%)"
-            # 2. Twardy Take Profit bazujący na ROE
+            # 2. Twardy cel zysku (Take Profit)
             elif roe >= tp_roe:
                 reason = f"TAKE PROFIT (ROE: {roe:.2f}%)"
-                
+            # 3. Wcześniejsza realizacja zysku przy odwróceniu trendu (TYLKO na plusie!)
+            elif roe > 0:
+                current_trend = trend_direction_for_symbol(cfg, symbol, "4h")
+                if current_trend:
+                    if (side == "long" and current_trend == "SHORT") or (side == "short" and current_trend == "LONG"):
+                        reason = f"ODWRÓCENIE TRENDU / ZYSK ZABEZPIECZONY (ROE: {roe:.2f}%)"
+
         if reason is None:
             continue
-            
+
         close_side = "sell" if side == "long" else "buy"
         try:
             order = market_order(ex, symbol, close_side, qty, reduce_only=True)
@@ -618,7 +623,7 @@ def manage_position_exits(ex, positions, cfg):
             closed.append(msg)
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
-            
+
     return closed
 
 
