@@ -165,7 +165,7 @@ DEFAULTS = {
     "auto_trade": False,
     "paper_mode": True,
     "max_notional_usdt": 200.0,
-    "cooldown_seconds": 300,
+    "cooldown_seconds": 600,
     "allow_short": True,
     "allow_long": True,
     "scan_limit_count": 10,
@@ -257,7 +257,7 @@ def event(level, message):
         )
         con.commit()
 
-def set_pair_cooldown(symbol, reason, seconds=600):
+def set_pair_cooldown(symbol, reason, seconds=1800):
     if not symbol:
         return
     with db() as con:
@@ -267,7 +267,7 @@ def set_pair_cooldown(symbol, reason, seconds=600):
         )
         con.commit()
 
-def pair_cooldown_remaining(symbol, seconds=600):
+def pair_cooldown_remaining(symbol, seconds=1800):
     if not symbol:
         return 0
     try:
@@ -575,8 +575,8 @@ def market_order(
     )
 
 def manage_position_exits(ex, positions, cfg):
-    sl_roe = max(0.1, float(cfg.get("sl_roe", 20.0)))
-    tp_roe = max(0.1, float(cfg.get("tp_roe", 40.0)))
+    sl_roe = max(5.0, float(cfg.get("sl_roe", 20.0)))
+    tp_roe = max(5.0, float(cfg.get("tp_roe", 40.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
     closed = []
     
@@ -591,7 +591,7 @@ def manage_position_exits(ex, positions, cfg):
             continue
 
         entry_price = asfloat(pos.get("entryPrice"))
-        mark_price = asfloat(pos.get("markPrice") or pos.get("lastPrice"))
+        mark_price = asfloat(pos.get("markPrice") or pos.get("lastPrice") or entry_price)
         leverage = asfloat(pos.get("leverage")) or float(cfg.get("max_leverage", 10))
 
         if entry_price > 0 and mark_price > 0:
@@ -608,9 +608,9 @@ def manage_position_exits(ex, positions, cfg):
 
         reason = None
         if roe <= -sl_roe:
-            reason = f"STOP LOSS (Ochrona kapitału, ROE: {roe:.2f}%)"
+            reason = f"STOP LOSS (ROE: {roe:.2f}% <= -{sl_roe}%)"
         elif roe >= tp_roe:
-            reason = f"TAKE PROFIT (Realizacja zysku, ROE: {roe:.2f}%)"
+            reason = f"TAKE PROFIT (ROE: {roe:.2f}% >= {tp_roe}%)"
 
         if reason is None:
             continue
@@ -620,7 +620,7 @@ def manage_position_exits(ex, positions, cfg):
             order = market_order(ex, symbol, close_side, qty, reduce_only=True)
             msg = f"{reason}: {side.upper()} {symbol}; order_id={order.get('id')}"
             event("TRADE", msg)
-            set_pair_cooldown(symbol, reason, 900)
+            set_pair_cooldown(symbol, reason, 1800)
             closed.append(msg)
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
@@ -1039,7 +1039,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
                             valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
                             
-                            # Deduplikacja par - każda para tylko raz na cykl
                             seen_symbols = set()
                             unique_valid_signals = []
                             for s in valid_signals:
@@ -1073,7 +1072,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                     )
                                     msg = f"AUTO-TRADE: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
                                     event("TRADE", msg)
-                                    set_pair_cooldown(sym, "AUTO_OPEN", cfg.get("cooldown_seconds", 300))
+                                    set_pair_cooldown(sym, "AUTO_OPEN", 1800)
                                     current_positions = active_positions(live_client)
                     except Exception as exc:
                         event("ERROR", f"Błąd w pętli Auto-Trade: {exc}")
