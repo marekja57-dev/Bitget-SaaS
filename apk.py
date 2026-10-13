@@ -578,6 +578,8 @@ def manage_position_exits(ex, positions, cfg):
     sl_roe = max(5.0, float(cfg.get("sl_roe", 20.0)))
     tp_roe = max(5.0, float(cfg.get("tp_roe", 40.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
+    # Używamy zawsze dźwigni skonfigurowanej w panelu użytkownika, a nie z API giełdy
+    leverage = float(cfg.get("max_leverage", 10))
     closed = []
     
     if not enable_roe:
@@ -592,7 +594,6 @@ def manage_position_exits(ex, positions, cfg):
 
         entry_price = asfloat(pos.get("entryPrice"))
         mark_price = asfloat(pos.get("markPrice") or pos.get("lastPrice") or entry_price)
-        leverage = asfloat(pos.get("leverage")) or float(cfg.get("max_leverage", 10))
 
         if entry_price > 0 and mark_price > 0:
             if side == "long":
@@ -625,6 +626,7 @@ def manage_position_exits(ex, positions, cfg):
         except Exception as exc:
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
     return closed
+     
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
