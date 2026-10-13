@@ -1185,6 +1185,38 @@ if page == "Automatyczny Skaner i Auto-Handel":
             st.error(f"Błąd analizy rynków pod Top 3: {exc}")
         finally:
             gc.collect()
+               # -------------------- Pełna Tabela Skanera --------------------
+            st.divider()
+            st.markdown("### 🔍 Pełny Skaner Rynku (Wszystkie analizowane pary)")
+            
+            if all_signals:
+                df_signals = pd.DataFrame([
+                    {
+                        "Symbol": s.get("symbol"),
+                        "Interwał": s.get("tf"),
+                        "Sygnał": s.get("signal"),
+                        "Cena ($)": s.get("price"),
+                        "ADX": round(s.get("adx"), 2) if s.get("adx") is not None else None,
+                        "RSI": round(s.get("rsi"), 2) if s.get("rsi") is not None else None,
+                        "Wolumen 24h (USDT)": f"{s.get('volume_24h_usdt', 0):,.0f}",
+                        "Status / Powód": s.get("reason"),
+                    }
+                    for s in all_signals
+                ])
+                
+                # Kolorowanie sygnałów w tabeli
+                st.dataframe(
+                    df_signals.style.map(
+                        lambda val: 'background-color: rgba(46, 160, 67, 0.2); color: #2ea043; font-weight: bold;' if val == 'LONG'
+                        else ('background-color: rgba(218, 54, 51, 0.2); color: #da3633; font-weight: bold;' if val == 'SHORT' else ''),
+                        subset=['Sygnał']
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Brak danych skanera w tej chwili.")
+
 
     render_full_dashboard()
 
