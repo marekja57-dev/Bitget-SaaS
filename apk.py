@@ -597,7 +597,8 @@ def manage_position_exits(ex, positions, cfg):
         roe = asfloat(pnl_value) / margin * 100.0
         reason = None
         
-        # Poprawiona logika: sztywne respektowanie progów SL i TP bez nerwowego zamykania przy małych korektach
+        # Poprawiona logika: wyłączono całkowicie zamykanie z powodu odwrócenia trendu 4h.
+        # Teraz pozycje są zamykane WYŁĄCZNIE po osiągnięciu żądanego SL lub TP.
         if roe <= -sl_roe:
             reason = f"STOP LOSS (Ochrona kapitału, ROE: {roe:.2f}%)"
         elif roe >= tp_roe:
