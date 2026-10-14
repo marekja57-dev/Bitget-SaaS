@@ -1061,8 +1061,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                 unique_valid_signals.append(s)
                         
                         for item in unique_valid_signals:
-                            # [FIX] Sprawdzanie i pobieranie aktualnych pozycji na bieżąco w iteracji,
-                            # aby nigdy nie przekroczyć limitu zdefiniowanego w ustawieniach (max_positions).
+                            # [FIX] Pobieranie rzeczywistej liczby pozycji z giełdy i twarda blokada limitu z suwaka
                             current_positions = active_positions(live_client)
                             if len(current_positions) >= max_pos:
                                 break
@@ -1151,7 +1150,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                     )
                                     positions = active_positions(live_client)
                                     
-                                    # [FIX] Dodatkowa weryfikacja limitu również przy inwestycji ręcznej z Top 3
+                                    # [FIX] Blokada ręcznej inwestycji z uwzględnieniem limitu z suwaka
                                     if len(positions) >= int(cfg.get("max_positions", 3)):
                                         st.error(f"Osiągnięto maksymalną liczbę otwartych pozycji ({cfg.get('max_positions')}): nie można otworzyć kolejnej.")
                                     else:
@@ -1515,4 +1514,3 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
-
