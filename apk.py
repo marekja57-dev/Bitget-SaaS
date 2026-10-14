@@ -646,11 +646,6 @@ def manage_position_exits(ex, positions, cfg):
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
-    
-    # TWARDA BLOKADA: jeśli dostępne wolne środki są mniejsze niż 10 USDT, zakaz otwierania
-    if free_usdt < MIN_ORDER_NOTIONAL_USDT:
-        return 0.0, 0.0
-
     risk_budget = (
         float(custom_usdt)
         if custom_usdt is not None
@@ -659,16 +654,15 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
         )
     )
     sl_roe = float(cfg.get("sl_roe", 20.0))
-    if price <= 0 or sl_roe <= 0:
+    if price <= 0 or sl_roe <= 0 or free_usdt <= 0:
         return 0.0, 0.0
-
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     target = min(
         risk_budget / stop_fraction,
         max(0.0, float(cfg.get("max_notional_usdt", 200.0))),
         free_usdt * leverage * 0.90,
     )
-
+    target = max(MIN_ORDER_NOTIONAL_USDT, target)
     market = ex.market(symbol)
     contract_size = asfloat(market.get("contractSize")) or 1.0
     min_amount = asfloat(
@@ -679,13 +673,9 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     )
     if min_amount > qty:
         qty = float(ex.amount_to_precision(symbol, min_amount))
-
     notional = qty * price * contract_size
-    required_margin = notional / leverage
-
-    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or required_margin > free_usdt:
+    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
-
     return qty, notional
 
 def ranked_symbols(ex, limit_count):
@@ -1071,7 +1061,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                 unique_valid_signals.append(s)
                         
                         for item in unique_valid_signals:
-                            # TWARDA BLOKADA: Sprawdzamy liczbę pozycji PRZED KAŻDYM OTWARIEM
+                            # [FIX] Sprawdzanie i pobieranie aktualnych pozycji na bieżąco w iteracji,
+                            # aby nigdy nie przekroczyć limitu zdefiniowanego w ustawieniach (max_positions).
                             current_positions = active_positions(live_client)
                             if len(current_positions) >= max_pos:
                                 break
@@ -1087,8 +1078,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             
                             free, total = balance_usdt(live_client, current_positions)
                             if free < MIN_ORDER_NOTIONAL_USDT:
-                                event("WARN", f"Auto-trade wstrzymany: za mało wolnych środków ({free:.2f} USDT).")
-                                break
+                                event("WARN", f"Auto-trade pominięty dla {sym}: za mało wolnych środków ({free:.2f} USDT < {MIN_ORDER_NOTIONAL_USDT} USDT).")
+                                continue
 
                             qty, notional = calc_qty(
                                 live_client, sym, total, free, price, cfg
@@ -1160,46 +1151,45 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                     )
                                     positions = active_positions(live_client)
                                     
-                                    # TWARDA BLOKADA RĘCZNA: limit pozycji
+                                    # [FIX] Dodatkowa weryfikacja limitu również przy inwestycji ręcznej z Top 3
                                     if len(positions) >= int(cfg.get("max_positions", 3)):
-                                        st.error(f"Osiągnięto limit pozycji ({len(positions)}/{int(cfg.get('max_positions', 3))}). Nie można otworzyć kolejnej.")
-                                        st.stop()
-
-                                    free, total = balance_usdt(live_client, positions)
-                                    
-                                    if free < MIN_ORDER_NOTIONAL_USDT:
-                                        st.error(f"Za mało wolnych środków na koncie: {free:.2f} USDT (minimum to {MIN_ORDER_NOTIONAL_USDT} USDT).")
+                                        st.error(f"Osiągnięto maksymalną liczbę otwartych pozycji ({cfg.get('max_positions')}): nie można otworzyć kolejnej.")
                                     else:
-                                        qty, notional = calc_qty(
-                                            live_client,
-                                            sym,
-                                            total,
-                                            free,
-                                            price,
-                                            cfg,
-                                            custom_usdt=invest_amount,
-                                        )
-                                        if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
-                                            st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum {MIN_ORDER_NOTIONAL_USDT} USDT lub brak środków.")
+                                        free, total = balance_usdt(live_client, positions)
+                                        
+                                        if free < MIN_ORDER_NOTIONAL_USDT:
+                                            st.error(f"Za mało wolnych środków na koncie: {free:.2f} USDT (minimum to {MIN_ORDER_NOTIONAL_USDT} USDT).")
                                         else:
-                                            try:
-                                                live_client.set_leverage(int(cfg["max_leverage"]), sym)
-                                            except Exception:
-                                                pass
-                                            order_side = "buy" if sig == "LONG" else "sell"
-                                            if cfg["paper_mode"]:
-                                                st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
-                                                event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
+                                            qty, notional = calc_qty(
+                                                live_client,
+                                                sym,
+                                                total,
+                                                free,
+                                                price,
+                                                cfg,
+                                                custom_usdt=invest_amount,
+                                            )
+                                            if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+                                                st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum {MIN_ORDER_NOTIONAL_USDT} USDT lub brak środków.")
                                             else:
-                                                ord_res = market_order(
-                                                    live_client,
-                                                    sym,
-                                                    order_side,
-                                                    qty,
-                                                    reference_price=price,
-                                                )
-                                                st.success(f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})")
-                                                event("TRADE", f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT")
+                                                try:
+                                                    live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                                except Exception:
+                                                    pass
+                                                order_side = "buy" if sig == "LONG" else "sell"
+                                                if cfg["paper_mode"]:
+                                                    st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
+                                                    event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
+                                                else:
+                                                    ord_res = market_order(
+                                                        live_client,
+                                                        sym,
+                                                        order_side,
+                                                        qty,
+                                                        reference_price=price,
+                                                    )
+                                                    st.success(f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})")
+                                                    event("TRADE", f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT")
                                 except Exception as exc:
                                     st.error(f"Błąd składania zlecenia dla {sym}: {exc}")
             else:
