@@ -367,8 +367,8 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
     return ex.create_order(symbol, "market", side, qty, None, {"reduceOnly": True} if reduce_only else {})
 
 def manage_position_exits(ex, positions, cfg):
-    sl_roe = max(10.0, float(cfg.get("sl_roe", 30.0)))
-    tp_roe = max(10.0, float(cfg.get("tp_roe", 60.0)))
+    sl_roe = max(5.0, float(cfg.get("sl_roe", 30.0)))
+    tp_roe = max(5.0, float(cfg.get("tp_roe", 60.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
     leverage = float(cfg.get("max_leverage", 10))
     closed = []
@@ -392,11 +392,7 @@ def manage_position_exits(ex, positions, cfg):
             else:
                 roe = ((entry_price - mark_price) / entry_price) * leverage * 100.0
         else:
-            pnl_value = asfloat(pos.get("unrealizedPnl"))
-            margin_value = asfloat(pos.get("initialMargin") or pos.get("margin"))
-            if margin_value <= 0:
-                continue
-            roe = (pnl_value / margin_value) * 100.0
+            continue
 
         reason = None
         if roe <= -sl_roe:
@@ -404,19 +400,20 @@ def manage_position_exits(ex, positions, cfg):
         elif roe >= tp_roe:
             reason = f"TAKE PROFIT (ROE: {roe:.2f}% >= {tp_roe}%)"
 
-        if reason is None:
-            continue
-
-        close_side = "sell" if side == "long" else "buy"
-        try:
-            order = market_order(ex, symbol, close_side, qty, reduce_only=True)
-            msg = f"{reason}: {side.upper()} {symbol}; order_id={order.get('id')}"
-            event("TRADE", msg)
-            set_pair_cooldown(symbol, reason, int(cfg.get("cooldown_seconds", 900)))
-            closed.append(msg)
-        except Exception as exc:
-            event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
+        # Zamykamy TYLKO wtedy, gdy faktycznie przebito SL lub TP
+        if reason is not None:
+            close_side = "sell" if side == "long" else "buy"
+            try:
+                order = market_order(ex, symbol, close_side, qty, reduce_only=True)
+                msg = f"{reason}: {side.upper()} {symbol}; order_id={order.get('id')}"
+                event("TRADE", msg)
+                # Nakładamy blokadę 1800s (30 minut) po wyjściu z pozycji
+                set_pair_cooldown(symbol, reason, int(cfg.get("cooldown_seconds", 1800)))
+                closed.append(msg)
+            except Exception as exc:
+                event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
     return closed
+
 
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
