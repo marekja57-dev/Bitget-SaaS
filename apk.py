@@ -443,7 +443,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
         trend_up = r["ema_fast"] > r["ema_slow"]
         trend_down = r["ema_fast"] < r["ema_slow"]
         
-        # Filtry pędu kierunkowego (zapobiegają wejściom pod prąd lokalnych odbić)
         ema_rising = r["ema_fast"] > prev["ema_fast"]
         ema_falling = r["ema_fast"] < prev["ema_fast"]
         price_growing = r["close"] > prev["close"]
@@ -596,7 +595,6 @@ def manage_position_exits(ex, positions, cfg):
     sl_roe = max(5.0, float(cfg.get("sl_roe", 20.0)))
     tp_roe = max(5.0, float(cfg.get("tp_roe", 40.0)))
     enable_roe = bool(cfg.get("enable_roe", True))
-    # Wymuszenie użycia dźwigni skonfigurowanej w panelu, aby uniknąć błędów API giełdy
     leverage = float(cfg.get("max_leverage", 10))
     closed = []
     
@@ -1050,49 +1048,53 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             passphrase_saved,
                             cfg["market_type"],
                         )
-                        current_positions = active_positions(live_client)
                         max_pos = int(cfg.get("max_positions", 3))
                         
-                        if len(current_positions) < max_pos:
+                        valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
+                        valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+                        
+                        seen_symbols = set()
+                        unique_valid_signals = []
+                        for s in valid_signals:
+                            if s["symbol"] not in seen_symbols:
+                                seen_symbols.add(s["symbol"])
+                                unique_valid_signals.append(s)
+                        
+                        for item in unique_valid_signals:
+                            # Bieżące odświeżenie pozycji wewnątrz pętli zapobiegające przekroczeniu limitu
+                            current_positions = active_positions(live_client)
+                            if len(current_positions) >= max_pos:
+                                break
+
+                            sym = item["symbol"]
+                            sig = item["signal"]
+                            price = item["price"]
+                            
+                            if any(p.get("symbol") == sym for p in current_positions):
+                                continue
+                            if pair_cooldown_remaining(sym) > 0:
+                                continue
+                            
                             free, total = balance_usdt(live_client, current_positions)
-                            valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
-                            valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
-                            
-                            seen_symbols = set()
-                            unique_valid_signals = []
-                            for s in valid_signals:
-                                if s["symbol"] not in seen_symbols:
-                                    seen_symbols.add(s["symbol"])
-                                    unique_valid_signals.append(s)
-                            
-                            for item in unique_valid_signals:
-                                if len(current_positions) >= max_pos:
-                                    break
-                                sym = item["symbol"]
-                                sig = item["signal"]
-                                price = item["price"]
-                                
-                                if any(p.get("symbol") == sym for p in current_positions):
-                                    continue
-                                if pair_cooldown_remaining(sym) > 0:
-                                    continue
-                                
-                                qty, notional = calc_qty(
-                                    live_client, sym, total, free, price, cfg
+                            if free < MIN_ORDER_NOTIONAL_USDT:
+                                event("WARN", f"Auto-trade pominięty dla {sym}: za mało wolnych środków ({free:.2f} USDT < {MIN_ORDER_NOTIONAL_USDT} USDT).")
+                                continue
+
+                            qty, notional = calc_qty(
+                                live_client, sym, total, free, price, cfg
+                            )
+                            if qty > 0 and notional >= MIN_ORDER_NOTIONAL_USDT:
+                                try:
+                                    live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                except Exception:
+                                    pass
+                                order_side = "buy" if sig == "LONG" else "sell"
+                                ord_res = market_order(
+                                    live_client, sym, order_side, qty, reference_price=price
                                 )
-                                if qty > 0:
-                                    try:
-                                        live_client.set_leverage(int(cfg["max_leverage"]), sym)
-                                    except Exception:
-                                        pass
-                                    order_side = "buy" if sig == "LONG" else "sell"
-                                    ord_res = market_order(
-                                        live_client, sym, order_side, qty, reference_price=price
-                                    )
-                                    msg = f"AUTO-TRADE: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
-                                    event("TRADE", msg)
-                                    set_pair_cooldown(sym, "AUTO_OPEN", 1800)
-                                    current_positions = active_positions(live_client)
+                                msg = f"AUTO-TRADE: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
+                                event("TRADE", msg)
+                                set_pair_cooldown(sym, "AUTO_OPEN", 1800)
                     except Exception as exc:
                         event("ERROR", f"Błąd w pętli Auto-Trade: {exc}")
 
@@ -1148,36 +1150,40 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                     )
                                     positions = active_positions(live_client)
                                     free, total = balance_usdt(live_client, positions)
-                                    qty, notional = calc_qty(
-                                        live_client,
-                                        sym,
-                                        total,
-                                        free,
-                                        price,
-                                        cfg,
-                                        custom_usdt=invest_amount,
-                                    )
-                                    if qty <= 0:
-                                        st.error("Wyliczona ilość jest za mała lub brak wolnych środków.")
+                                    
+                                    if free < MIN_ORDER_NOTIONAL_USDT:
+                                        st.error(f"Za mało wolnych środków na koncie: {free:.2f} USDT (minimum to {MIN_ORDER_NOTIONAL_USDT} USDT).")
                                     else:
-                                        try:
-                                            live_client.set_leverage(int(cfg["max_leverage"]), sym)
-                                        except Exception:
-                                            pass
-                                        order_side = "buy" if sig == "LONG" else "sell"
-                                        if cfg["paper_mode"]:
-                                            st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
-                                            event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
+                                        qty, notional = calc_qty(
+                                            live_client,
+                                            sym,
+                                            total,
+                                            free,
+                                            price,
+                                            cfg,
+                                            custom_usdt=invest_amount,
+                                        )
+                                        if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+                                            st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum {MIN_ORDER_NOTIONAL_USDT} USDT lub brak środków.")
                                         else:
-                                            ord_res = market_order(
-                                                live_client,
-                                                sym,
-                                                order_side,
-                                                qty,
-                                                reference_price=price,
-                                            )
-                                            st.success(f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})")
-                                            event("TRADE", f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT")
+                                            try:
+                                                live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                            except Exception:
+                                                pass
+                                            order_side = "buy" if sig == "LONG" else "sell"
+                                            if cfg["paper_mode"]:
+                                                st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
+                                                event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
+                                            else:
+                                                ord_res = market_order(
+                                                    live_client,
+                                                    sym,
+                                                    order_side,
+                                                    qty,
+                                                    reference_price=price,
+                                                )
+                                                st.success(f"Sukces! Otwarto pozycję {sig} na {sym} (ID: {ord_res.get('id')})")
+                                                event("TRADE", f"Ręczna inwestycja Top 3: {sig} {sym} qty={qty} notional={notional:.2f} USDT")
                                 except Exception as exc:
                                     st.error(f"Błąd składania zlecenia dla {sym}: {exc}")
             else:
@@ -1503,3 +1509,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
+
