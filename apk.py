@@ -646,6 +646,11 @@ def manage_position_exits(ex, positions, cfg):
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
+    
+    # TWARDA BLOKADA: jeśli dostępne wolne środki są mniejsze niż 10 USDT, zakaz otwierania
+    if free_usdt < MIN_ORDER_NOTIONAL_USDT:
+        return 0.0, 0.0
+
     risk_budget = (
         float(custom_usdt)
         if custom_usdt is not None
@@ -654,15 +659,16 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
         )
     )
     sl_roe = float(cfg.get("sl_roe", 20.0))
-    if price <= 0 or sl_roe <= 0 or free_usdt <= 0:
+    if price <= 0 or sl_roe <= 0:
         return 0.0, 0.0
+
     stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     target = min(
         risk_budget / stop_fraction,
         max(0.0, float(cfg.get("max_notional_usdt", 200.0))),
         free_usdt * leverage * 0.90,
     )
-    target = max(MIN_ORDER_NOTIONAL_USDT, target)
+
     market = ex.market(symbol)
     contract_size = asfloat(market.get("contractSize")) or 1.0
     min_amount = asfloat(
@@ -673,9 +679,13 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     )
     if min_amount > qty:
         qty = float(ex.amount_to_precision(symbol, min_amount))
+
     notional = qty * price * contract_size
-    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+    required_margin = notional / leverage
+
+    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or required_margin > free_usdt:
         return 0.0, 0.0
+
     return qty, notional
 
 def ranked_symbols(ex, limit_count):
@@ -1061,7 +1071,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                 unique_valid_signals.append(s)
                         
                         for item in unique_valid_signals:
-                            # Bieżące odświeżenie pozycji wewnątrz pętli zapobiegające przekroczeniu limitu
+                            # TWARDA BLOKADA: Sprawdzamy liczbę pozycji PRZED KAŻDYM OTWARIEM
                             current_positions = active_positions(live_client)
                             if len(current_positions) >= max_pos:
                                 break
@@ -1077,8 +1087,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             
                             free, total = balance_usdt(live_client, current_positions)
                             if free < MIN_ORDER_NOTIONAL_USDT:
-                                event("WARN", f"Auto-trade pominięty dla {sym}: za mało wolnych środków ({free:.2f} USDT < {MIN_ORDER_NOTIONAL_USDT} USDT).")
-                                continue
+                                event("WARN", f"Auto-trade wstrzymany: za mało wolnych środków ({free:.2f} USDT).")
+                                break
 
                             qty, notional = calc_qty(
                                 live_client, sym, total, free, price, cfg
@@ -1149,6 +1159,12 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                         cfg["market_type"],
                                     )
                                     positions = active_positions(live_client)
+                                    
+                                    # TWARDA BLOKADA RĘCZNA: limit pozycji
+                                    if len(positions) >= int(cfg.get("max_positions", 3)):
+                                        st.error(f"Osiągnięto limit pozycji ({len(positions)}/{int(cfg.get('max_positions', 3))}). Nie można otworzyć kolejnej.")
+                                        st.stop()
+
                                     free, total = balance_usdt(live_client, positions)
                                     
                                     if free < MIN_ORDER_NOTIONAL_USDT:
