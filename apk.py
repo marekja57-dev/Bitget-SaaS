@@ -376,12 +376,24 @@ def manage_position_exits(ex, positions, cfg):
     if not enable_roe:
         return closed
 
+    import time
+    current_time = time.time()
+
     for pos in positions:
         symbol = pos.get("symbol")
         side = str(pos.get("side") or "").lower()
         qty = abs(asfloat(pos.get("contracts")))
         if not symbol or qty <= 0 or side not in ("long", "short"):
             continue
+
+        # BEZPIECZNIK CZASOWY: Ignorujemy pozycje otwarte w ciągu ostatnich 300 sekund (5 minut)
+        # Bitget podaje czas otwarcia w milisekundach lub sekundach, sprawdzamy bezpiecznie:
+        open_time = asfloat(pos.get("cTime") or pos.get("uTime") or 0)
+        if open_time > 1e12: # jeśli to milisekundy
+            open_time /= 1000.0
+            
+        if open_time > 0 and (current_time - open_time) < 300:
+            continue # Daj pozycji oddychać przez pierwsze 5 minut!
 
         entry_price = asfloat(pos.get("entryPrice"))
         mark_price = asfloat(pos.get("markPrice") or pos.get("lastPrice") or entry_price)
@@ -400,14 +412,12 @@ def manage_position_exits(ex, positions, cfg):
         elif roe >= tp_roe:
             reason = f"TAKE PROFIT (ROE: {roe:.2f}% >= {tp_roe}%)"
 
-        # Zamykamy TYLKO wtedy, gdy faktycznie przebito SL lub TP
         if reason is not None:
             close_side = "sell" if side == "long" else "buy"
             try:
                 order = market_order(ex, symbol, close_side, qty, reduce_only=True)
                 msg = f"{reason}: {side.upper()} {symbol}; order_id={order.get('id')}"
                 event("TRADE", msg)
-                # Nakładamy blokadę 1800s (30 minut) po wyjściu z pozycji
                 set_pair_cooldown(symbol, reason, int(cfg.get("cooldown_seconds", 1800)))
                 closed.append(msg)
             except Exception as exc:
