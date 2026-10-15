@@ -1032,9 +1032,54 @@ if page == "Dziennik":
 
 # -------------------- Regulamin i Instrukcja --------------------
 
-if page == "Regulamin i Instrukcja":
-    st.subheader("Regulamin i instrukcja obsługi")
-    st.markdown(""" ### Witaj w Bitget-SaaS Futures System analizuje rynek kontraktów i może składać zlecenia, jeśli włączysz handel rzeczywisty. - **Tryb PAPER:** służy do testowania; nie wysyła nowych zleceń otwierających. - **Auto-Trade:** wymaga aktywnej subskrypcji, skonfigurowanego API i wyłączenia trybu PAPER. - **TP/SL aplikacji:** kontrola działa tylko wtedy, gdy aplikacja jest uruchomiona i odpytywanie działa poprawnie. To nie jest gwarantowany stop na giełdzie. - **Ryzyko:** futures i dźwignia mogą doprowadzić do utraty środków. Najpierw testuj na koncie demo. - **API:** nie przyznawaj kluczom uprawnień do wypłat. Ogranicz je do niezbędnych uprawnień. - **Płatności:** powrót z linku Stripe sam w sobie nie potwierdza płatności; status jest aktywowany ręcznie przez administratora. """)
+import streamlit as st
+
+def show_terms_and_manual():
+    st.title("Regulamin i Instrukcja Obsługi")
+    st.subheader("Witaj w Bitget-SaaS Futures")
+    st.write("System automatycznego handlu kontraktami futures na rynkach kryptowalutowych.")
+
+    st.markdown("---")
+
+    st.subheader("1. Instrukcja Obsługi i Tryby Pracy")
+    
+    st.markdown("""
+    * **Tryb Paper Trading (Symulacja / Demo):**
+      * Pozwala na bezpieczne testować sygnały i strategie bez otwierania prawdziwych pozycji na giełdzie.
+      * Pozycje są otwierane wirtualnie, co pozwala zweryfikować skuteczność ustawień wskaźników (EMA, RSI, ADX) przed zaangażowaniem kapitału.
+    
+    * **Tryb Auto-Trade (Handel Rzeczywisty):**
+      * Po wyłączeniu trybu Paper Trading i poprawnym skonfigurowaniu kluczy API, bot sam otwiera i zamyka zlecenia bezpośrednio na Twoim koncie giełdowym.
+      * Skanning i automatyczna egzekucja odbywają się w oparciu o wykryte trendy na wybranych interwałach czasowych (od 1m do 1d).
+    
+    * **Zarządzanie Ryzykiem i Ochrona Kapitału:**
+      * Automatyczny **Stop Loss** oraz **Take Profit** (w tym funkcja **ROE Guard**) pilnują otwartych pozycji zgodnie z przyjętymi ustawieniami.
+      * Możesz elastycznie dostosowywać wielkość dźwigni, maksymalną liczbę otwartych pozycji oraz podział kapitału.
+    """)
+
+    st.markdown("---")
+
+    st.subheader("2. Bezpieczeństwo i Konfiguracja API")
+    
+    st.markdown("""
+    * **Uprawnienia Kluczy API:** Do poprawnego działania bota wymagane są klucze API z giełdy z uprawnieniami do **Odczytu (Read)** oraz **Handlu Futures (Trade)**. **Nigdy nie włączaj uprawnień do wypłat (Transfer / Withdrawal)**.
+    * **Ochrona Danych:** Twoje dane dostępowe oraz klucze API są szyfrowane i bezpiecznie przechowywane w bazie danych.
+    """)
+
+    st.markdown("---")
+
+    st.subheader("3. Regulamin i Wyłączenie Odpowiedzialności (Disclaimer)")
+    
+    st.markdown("""
+    1. **Ostrzeżenie o Ryzyku:** Handel kontraktami pochodnymi (Futures) z użyciem dźwigni finansowej wiąże się z wysokim ryzykiem utraty kapitału. Ceny kryptowalut charakteryzują się wysoką zmiennością.
+    2. **Brak Porady Inwestycyjnej:** Oprogramowanie *Bitget-SaaS Futures* jest narzędziem technologicznym i nie stanowi porady inwestycyjnej ani finansowej.
+    3. **Odpowiedzialność Użytkownika:** Użytkownik ponosi pełną odpowiedzialność za dobór parametrów handlowych (dźwignia, Stop Loss, wskaźniki) oraz za wszelkie zyski lub straty wynikające z pracy bota.
+    4. **Ciągłość Działania:** Twórcy bota nie ponoszą odpowiedzialności za opóźnienia w realizacji zleceń wynikające z prac konserwacyjnych lub awarii po stronie API giełdy.
+    """)
+
+# Wywołanie funkcji w odpowiedniej zakładce/stronie aplikacji:
+show_terms_and_manual()
+
 
 # -------------------- Panel Administratora --------------------
 
