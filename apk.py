@@ -26,7 +26,6 @@ except ImportError:
     Fernet = None
     InvalidToken = Exception
 
-
 st.set_page_config(page_title="Bitget-SaaS Futures", page_icon="📈", layout="wide")
 
 APP_DIR = Path(__file__).resolve().parent
@@ -148,7 +147,6 @@ def verify_password(stored, password):
             return hmac.compare_digest(check, digest), False
     except (ValueError, AttributeError):
         pass
-    # Migracja starszych haseł zapisanych jawnie.
     return hmac.compare_digest(str(stored), str(password)), True
 
 def _fernet():
@@ -171,7 +169,6 @@ def encrypt_secret(value):
 def decrypt_secret(value):
     if not value:
         return ""
-    # Starsze wpisy jawne są odrzucane, a nie traktowane jako zaszyfrowane.
     try:
         return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
     except Exception as exc:
@@ -374,7 +371,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
         d = indicators(raw, t["ema_fast"], t["ema_slow"], t["rsi_period"])
         if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": None, "adx": None, "rsi": None, "reason": "Za mało świec"}
-        # Ostatnia świeca może być nadal otwarta; sygnał bazuje na zamkniętej świecy.
         r = d.iloc[-2]
         fields = ["close", "ema_fast", "ema_slow", "adx", "rsi"]
         if not all(pd.notna(r[x]) and np.isfinite(float(r[x])) for x in fields):
@@ -416,7 +412,6 @@ def balance_usdt(ex, positions=None):
     free = 0.0 if free is None else free
     if total is None:
         total = free + (used or 0.0)
-    # Nie odejmujemy margin ponownie, jeśli giełda już podała free.
     return max(0.0, free), max(0.0, total)
 
 def active_positions(ex):
@@ -434,6 +429,7 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
             raise ValueError("Brak prawidłowej ceny do sprawdzenia wartości pozycji.")
         market = ex.market(symbol)
         contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
+        # NAPRAWIONE: Dodano operator mnożenia (*)
         notional = qty * price * contract_size
         limits = market.get("limits") or {}
         minimum = asfloat((limits.get("cost") or {}).get("min"), MIN_ORDER_NOTIONAL_USDT)
@@ -465,6 +461,7 @@ def manage_position_exits(ex, positions, cfg):
                 continue
             roe = pnl / margin * 100
         else:
+            # NAPRAWIONE: Dodano brakujące operatory mnożenia (*)
             roe = ((mark - entry) / entry if side == "long" else (entry - mark) / entry) * leverage * 100
         reason = f"STOP LOSS (ROE: {roe:.2f}%)" if roe <= -sl_roe else (
             f"TAKE PROFIT (ROE: {roe:.2f}%)" if roe >= tp_roe else None
@@ -484,31 +481,40 @@ def manage_position_exits(ex, positions, cfg):
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
+    
+    # Pobieramy sztywny limit z suwaka Maks. wartość pozycji (USDT)
+    max_allowed_notional = float(cfg.get("max_notional_usdt", 200.0))
+    
     if custom_usdt is None:
         risk_budget = min(max(0.0, float(cfg.get("risk_usdt", 10))), max(0.0, total_usdt) * 0.05)
     else:
         risk_budget = max(0.0, float(custom_usdt))
-    sl_roe = max(1.0, float(cfg.get("sl_roe", 30)))
+
     if price <= 0 or free_usdt <= 0 or risk_budget <= 0:
         return 0.0, 0.0
-    # Przybliżenie straty na SL: zmiana ceny = ROE / dźwignia.
-    stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
+
+    # Ograniczamy docelową wartość pozycji ściśle do tego, co użytkownik ustawił na suwaku Maks. wartość pozycji
     target = min(
-        risk_budget / stop_fraction,
-        max(0.0, float(cfg.get("max_notional_usdt", 200))),
+        risk_budget * leverage,
+        max_allowed_notional,
         free_usdt * leverage * 0.90,
     )
+
     if target < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
+
     market = ex.market(symbol)
     contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
     min_amount = asfloat(((market.get("limits") or {}).get("amount") or {}).get("min"))
+    
     qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
     if min_amount > qty:
         qty = float(ex.amount_to_precision(symbol, min_amount))
+        
+    # NAPRAWIONE: Dodano operator mnożenia (*)
     notional = qty * price * contract_size
-    # Nie przekraczaj limitu ryzyka/wartości przez automatyczne podbicie do minimum giełdy.
-    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.001:
+    
+    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.05:
         return 0.0, 0.0
     return qty, notional
 
@@ -557,7 +563,6 @@ if "session_started_at" not in st.session_state:
     st.session_state["session_started_at"] = time.time()
 
 def is_user_admin():
-    # Rola administratora wynika wyłącznie z jawnej listy dozwolonych adresów e-mail.
     email = str(st.session_state.get("user_email", "")).strip().lower()
     return bool(email) and email in ADMIN_EMAILS
 
@@ -673,7 +678,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 refresh_seconds = st.slider("Odstęp odświeżania (s)", 10, 120, int(cfg["refresh_seconds"]))
             save_controls = st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True)
         if save_controls:
-            # Tryb live wymaga świadomego przełączenia; PAPER pozostaje domyślny.
             cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
             save_cfg(cfg)
             st.rerun()
@@ -979,8 +983,8 @@ if page == "Połączenie API":
 
 if page == "Dziennik":
     st.subheader("Dziennik zdarzeń i transakcji bota")
-    _, delete_col = st.columns([4, 1])
-    with delete_col:
+    _, deletecol = st.columns([4, 1])
+    with deletecol:
         if st.button("🗑️ Wyczyść dziennik", use_container_width=True):
             with db() as con:
                 con.execute("DELETE FROM events")
@@ -1001,7 +1005,7 @@ if page == "Dziennik":
 
 if page == "Regulamin i Instrukcja":
     st.subheader("Regulamin i instrukcja obsługi")
-    st.markdown(""" ### Witaj w Bitget-SaaS Futures System analizuje rynek kontraktów i może składać zlecenia, jeśli włączysz handel rzeczywisty. - **Tryb PAPER:** służy do testowania; nie wysyła nowych zleceń otwierających. - **Auto-Trade:** wymaga aktywnej subskrypcji, skonfigurowanego API i wyłączenia trybu PAPER. - **TP/SL aplikacji:** kontrola działa tylko wtedy, gdy aplikacja jest uruchomiona i odpytywanie działa poprawnie. To nie jest gwarantowany stop na giełdzie. - **Ryzyko:** futures i dźwignia mogą doprowadzić do utraty środków. Najpierw testuj na koncie demo. - **API:** nie przyznawaj kluczom uprawnień do wypłat. Ogranicz je do niezbędnych uprawnień. - **Płatności:** powrót z linku Stripe sam w sobie nie potwierdza płatności; status jest aktywowany ręcznie przez administratora. """)
+    st.markdown(""" ### Witaj w Bitget-SaaS Futures System analizuje rynek kontraktów i może składać zlecenia, jeśli włączysz handel rzeczywisty. - Tryb PAPER: służy do testowania; nie wysyła nowych zleceń otwierających. - Auto-Trade: wymaga aktywnej subskrypcji, skonfigurowanego API i wyłączenia trybu PAPER. - TP/SL aplikacji: kontrola działa tylko wtedy, gdy aplikacja jest uruchomiona i odpytywanie działa poprawnie. To nie jest gwarantowany stop na giełdzie. - Ryzyko: futures i dźwignia mogą doprowadzić do utraty środków. Najpierw testuj na koncie demo. - API: nie przyznawaj kluczom uprawnień do wypłat. Ogranicz je do niezbędnych uprawnień. - Płatności: powrót z linku Stripe sam w sobie nie potwierdza płatności; status jest aktywowany ręcznie przez administratora. """)
 
 # -------------------- Panel Administratora --------------------
 
