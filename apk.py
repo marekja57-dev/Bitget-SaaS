@@ -1076,7 +1076,7 @@ def show_terms_and_manual():
     """)
 
 # Zmień "Regulamin" w cudzysłowie poniżej na dokładnie taki tekst, jaki masz w menu bocznym (sidebarze) dla tej zakładki:
-if page == "Regulamin":
+if page == "Regulamin Instrukcja":
     show_terms_and_manual()
 
 
