@@ -879,81 +879,114 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
 if page == "Ustawienia Strategii":
     st.subheader("Ustawienia strategii i ryzyka")
-    if "selected_tf_edit" not in st.session_state:
-        st.session_state["selected_tf_edit"] = "1d"
-    selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]))
-    st.session_state["selected_tf_edit"] = selected_tf
+    
+    # Wybór interwału do edycji z użyciem st.selectbox i callbacka / klucza
+    selected_tf = st.selectbox(
+        "Interwał do edycji", 
+        TF_OPTIONS, 
+        index=TF_OPTIONS.index(cfg.get("timeframes", ["4h", "1d"])[0] if cfg.get("timeframes") else "1d") if cfg.get("timeframes", ["4h", "1d"])[0] in TF_OPTIONS else 0,
+        key="strategy_edit_tf"
+    )
+    
     defaults = get_dynamic_default_tf_settings()
-    base = cfg["tf_settings"].get(selected_tf, defaults[selected_tf])
+    # Pobieramy aktualne ustawienia dla wybranego interwału (z uwzględnieniem zapisu w cfg)
+    base = cfg.get("tf_settings", {}).get(selected_tf, defaults.get(selected_tf, defaults["1h"]))
+
     with st.form("cfgform"):
         left, right = st.columns(2)
         with left:
-            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]))
+            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]) if cfg["exchange"] in EXCHANGE_OPTIONS else 0)
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
-            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg["scan_limit_count"]))))
-            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg["timeframes"])
-            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg["indicator_multiplier"]))))
-            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg["candle_limit"]))))
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg.get("scan_limit_count", 10)))))
+            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg.get("timeframes", ["4h", "1d"]))
+            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg.get("indicator_multiplier", 100)))))
+            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg.get("candle_limit", 150)))))
         with right:
-            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg["risk_usdt"]))
-            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg["max_notional_usdt"]))
-            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg["max_positions"]))
-            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg["max_leverage"]))
-            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg["enable_roe"]))
-            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg["sl_roe"]))), help="Zamknięcie przy ROE równym minus tej wartości.")
-            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg["tp_roe"]))), help="Zamknięcie przy ROE równym tej wartości.")
-            allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]))
-            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]))
-        st.markdown(f"### Parametry bazowe dla {selected_tf}")
+            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg.get("risk_usdt", 10.0)))
+            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg.get("max_notional_usdt", 200.0)))
+            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg.get("max_positions", 3)))
+            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg.get("max_leverage", 10)))
+            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)))
+            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg.get("sl_roe", 30)))))
+            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg.get("tp_roe", 60)))))
+            allow_long = st.checkbox("Pozwól na LONG", bool(cfg.get("allow_long", True)))
+            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg.get("allow_short", True)))
+
+        st.markdown(f"### Parametry wskaźników dla interwału: {selected_tf}")
         c1, c2, c3 = st.columns(3)
         with c1:
-            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base["ema_fast"]))))
+            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base.get("ema_fast", 9)))), key=f"form_fast_{selected_tf}")
         with c2:
-            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base["ema_slow"]))))
+            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base.get("ema_slow", 21)))), key=f"form_slow_{selected_tf}")
         with c3:
-            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base["adx_threshold"]))
+            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base.get("adx_threshold", 20.0)), key=f"form_adx_{selected_tf}")
+
         st.markdown("#### Ustawienia RSI")
         r1, r2, r3 = st.columns(3)
         with r1:
-            rsi_period = st.number_input("RSI okres", 2, 100, int(base["rsi_period"]), 1)
+            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1, key=f"form_rsi_p_{selected_tf}")
         with r2:
-            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base["rsi_long_min"]), 1.0)
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 50.0)), 1.0, key=f"form_rl_min_{selected_tf}")
         with r3:
-            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base["rsi_long_max"]), 1.0)
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 70.0)), 1.0, key=f"form_rl_max_{selected_tf}")
+
         r4, r5 = st.columns(2)
         with r4:
-            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base["rsi_short_min"]), 1.0)
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 30.0)), 1.0, key=f"form_rs_min_{selected_tf}")
         with r5:
-            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base["rsi_short_max"]), 1.0)
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 50.0)), 1.0, key=f"form_rs_max_{selected_tf}")
+
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
+
     if save:
         if fast >= slow:
             st.error("EMA szybka musi być mniejsza od EMA wolnej.")
         elif rsi_long_min >= rsi_long_max or rsi_short_min >= rsi_short_max:
             st.error("W każdym zakresie RSI minimum musi być mniejsze od maksimum.")
         else:
+            # Upewniamy się, że struktura słownika tf_settings istnieje
+            if "tf_settings" not in cfg:
+                cfg["tf_settings"] = get_dynamic_default_tf_settings()
+            
             cfg.update(
-                exchange=exchange_name, market_type=market_type, scan_limit_count=scan_limit,
-                timeframes=timeframes or ["4h", "1d"], indicator_multiplier=multiplier,
-                candle_limit=candle_limit, risk_usdt=risk, max_notional_usdt=max_notional,
-                max_positions=int(max_positions), max_leverage=int(max_leverage),
-                enable_roe=enable_roe, sl_roe=float(sl_roe), tp_roe=float(tp_roe),
-                allow_long=allow_long, allow_short=allow_short,
+                exchange=exchange_name, 
+                market_type=market_type, 
+                scan_limit_count=scan_limit,
+                timeframes=timeframes or ["4h", "1d"], 
+                indicator_multiplier=multiplier,
+                candle_limit=candle_limit, 
+                risk_usdt=risk, 
+                max_notional_usdt=max_notional,
+                max_positions=int(max_positions), 
+                max_leverage=int(max_leverage),
+                enable_roe=enable_roe, 
+                sl_roe=float(sl_roe), 
+                tp_roe=float(tp_roe),
+                allow_long=allow_long, 
+                allow_short=allow_short,
             )
+            
             cfg["tf_settings"][selected_tf] = {
-                "ema_fast": int(fast), "ema_slow": int(slow), "adx_threshold": float(adx),
-                "rsi_period": int(rsi_period), "rsi_long_min": float(rsi_long_min),
-                "rsi_long_max": float(rsi_long_max), "rsi_short_min": float(rsi_short_min),
-                "rsi_short_max": float(rsi_short_max), "rsi_min": float(base.get("rsi_min", 25)),
+                "ema_fast": int(fast), 
+                "ema_slow": int(slow), 
+                "adx_threshold": float(adx),
+                "rsi_period": int(rsi_period), 
+                "rsi_long_min": float(rsi_long_min),
+                "rsi_long_max": float(rsi_long_max), 
+                "rsi_short_min": float(rsi_short_min),
+                "rsi_short_max": float(rsi_short_max), 
+                "rsi_min": float(base.get("rsi_min", 25)),
                 "rsi_max": float(base.get("rsi_max", 75)),
             }
+            
             save_cfg(cfg)
             exchange_client.clear()
             get_candles.clear()
             st.cache_data.clear()
-            st.success("Zapisano ustawienia.")
+            st.success(f"Zapisano ustawienia dla interwału {selected_tf}.")
             st.rerun()
 
+       
 # -------------------- Połączenie API --------------------
 
 if page == "Połączenie API":
