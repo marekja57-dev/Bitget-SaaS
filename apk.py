@@ -1032,8 +1032,6 @@ if page == "Dziennik":
 
 # -------------------- Regulamin i Instrukcja --------------------
 
-import streamlit as st
-
 def show_terms_and_manual():
     st.title("Regulamin i Instrukcja Obsługi")
     st.subheader("Witaj w Bitget-SaaS Futures")
@@ -1045,7 +1043,7 @@ def show_terms_and_manual():
     
     st.markdown("""
     * **Tryb Paper Trading (Symulacja / Demo):**
-      * Pozwala na bezpieczne testować sygnały i strategie bez otwierania prawdziwych pozycji na giełdzie.
+      * Pozwala bezpiecznie testować sygnały i strategie bez otwierania prawdziwych pozycji na giełdzie.
       * Pozycje są otwierane wirtualnie, co pozwala zweryfikować skuteczność ustawień wskaźników (EMA, RSI, ADX) przed zaangażowaniem kapitału.
     
     * **Tryb Auto-Trade (Handel Rzeczywisty):**
@@ -1077,8 +1075,9 @@ def show_terms_and_manual():
     4. **Ciągłość Działania:** Twórcy bota nie ponoszą odpowiedzialności za opóźnienia w realizacji zleceń wynikające z prac konserwacyjnych lub awarii po stronie API giełdy.
     """)
 
-# Wywołanie funkcji w odpowiedniej zakładce/stronie aplikacji:
-show_terms_and_manual()
+# Zmień "Regulamin" w cudzysłowie poniżej na dokładnie taki tekst, jaki masz w menu bocznym (sidebarze) dla tej zakładki:
+if page == "Regulamin":
+    show_terms_and_manual()
 
 
 # -------------------- Panel Administratora --------------------
