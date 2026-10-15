@@ -393,26 +393,32 @@ def signal_for_symbol(cfg, symbol, timeframe):
         gc.collect()
 
 def balance_usdt(ex, positions=None):
-    balance = ex.fetch_balance() or {}
-    row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
-    free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
+    try:
+        balance = ex.fetch_balance() or {}
+        usdt_info = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
+        
+        # Pobieramy bezpośrednio z surowych danych giełdy jeśli dostępne, lub z standardowych struktur ccxt
+        free = asfloat(usdt_info.get("free"), -1.0)
+        total = asfloat(usdt_info.get("total"), -1.0)
+        
+        if free < 0 or total < 0:
+            free = asfloat((balance.get("free") or {}).get("USDT"), 0.0)
+            total = asfloat((balance.get("total") or {}).get("total" if "total" in balance else "USDT"), free)
 
-    def number(*values):
-        for value in values:
-            if value is None or value == "":
-                continue
-            n = asfloat(value, -1)
-            if n >= 0:
-                return n
-        return None
+        # Jeśli giełda nie odjęła marginu od 'free', obliczamy go z aktywnych pozycji
+        used_margin = 0.0
+        if positions:
+            for p in positions:
+                used_margin += asfloat(p.get("initialMargin") or p.get("margin") or 0.0)
+        
+        # Jeśli wolne środki są równe całkowitym, korygujemy je o faktyczny margin pozycji
+        if free >= total and used_margin > 0:
+            free = max(0.0, total - used_margin)
 
-    free = number(row.get("free"), free_map.get("USDT"))
-    used = number(row.get("used"), used_map.get("USDT"))
-    total = number(row.get("total"), total_map.get("USDT"))
-    free = 0.0 if free is None else free
-    if total is None:
-        total = free + (used or 0.0)
-    return max(0.0, free), max(0.0, total)
+        return max(0.0, free), max(0.0, total)
+    except Exception:
+        logging.exception("Błąd pobierania salda USDT")
+        return 0.0, 0.0
 
 def active_positions(ex):
     return [p for p in (ex.fetch_positions() or []) if abs(asfloat(p.get("contracts"))) > 0]
