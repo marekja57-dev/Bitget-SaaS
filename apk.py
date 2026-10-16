@@ -380,7 +380,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
         adx_ok = r["adx"] >= t["adx_threshold"]
         rsi = float(r["rsi"])
         
-        # Poprawiona logika wejścia zapobiegająca wchodzeniu pod koniec ruchu
         long_ok = bool(
             cfg["allow_long"] 
             and trend_up 
@@ -628,7 +627,11 @@ if not st.session_state["authenticated"]:
                     st.error("Taki login lub adres e-mail już istnieje.")
     st.stop()
 
-cfg = load_cfg()
+# Synchronizacja konfiguracji w sesji
+if "cfg" not in st.session_state:
+    st.session_state["cfg"] = load_cfg()
+cfg = st.session_state["cfg"]
+
 current_user_id = st.session_state.get("user_id")
 ex_id, api_key_saved, secret_saved, passphrase_saved = load_creds(current_user_id)
 
@@ -681,6 +684,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         if save_controls:
             cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
             save_cfg(cfg)
+            st.session_state["cfg"] = cfg
             st.rerun()
 
     refresh_sec = max(10, int(cfg.get("refresh_seconds", 30)))
@@ -968,6 +972,7 @@ if page == "Ustawienia Strategii":
                 "rsi_max": float(base.get("rsi_max", 75)),
             }
             save_cfg(cfg)
+            st.session_state["cfg"] = cfg
             exchange_client.clear()
             get_candles.clear()
             st.cache_data.clear()
@@ -1055,3 +1060,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu administratora: {exc}")
+
