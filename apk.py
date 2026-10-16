@@ -60,8 +60,8 @@ def get_dynamic_default_tf_settings():
             "adx_threshold": 20.0,
             "rsi_period": 14,
             "rsi_long_min": 50.0,
-            "rsi_long_max": 70.0,
-            "rsi_short_min": 30.0,
+            "rsi_long_max": 65.0,
+            "rsi_short_min": 35.0,
             "rsi_short_max": 50.0,
             "rsi_min": 25.0,
             "rsi_max": 75.0,
@@ -350,8 +350,8 @@ def effective_tf_cfg(cfg, tf):
         "adx_threshold": max(2.0, min(90.0, float(base.get("adx_threshold", 20)) * mult)),
         "rsi_period": max(2, min(100, int(base.get("rsi_period", 14)))),
         "rsi_long_min": max(0.0, min(100.0, float(base.get("rsi_long_min", 50)))),
-        "rsi_long_max": max(0.0, min(100.0, float(base.get("rsi_long_max", 70)))),
-        "rsi_short_min": max(0.0, min(100.0, float(base.get("rsi_short_min", 30)))),
+        "rsi_long_max": max(0.0, min(100.0, float(base.get("rsi_long_max", 65)))),
+        "rsi_short_min": max(0.0, min(100.0, float(base.get("rsi_short_min", 35)))),
         "rsi_short_max": max(0.0, min(100.0, float(base.get("rsi_short_max", 50)))),
         "rsi_min": max(0.0, min(100.0, float(base.get("rsi_min", 25)))),
         "rsi_max": max(0.0, min(100.0, float(base.get("rsi_max", 75)))),
@@ -379,8 +379,22 @@ def signal_for_symbol(cfg, symbol, timeframe):
         trend_down = r["ema_fast"] < r["ema_slow"]
         adx_ok = r["adx"] >= t["adx_threshold"]
         rsi = float(r["rsi"])
-        long_ok = bool(cfg["allow_long"] and trend_up and adx_ok and t["rsi_long_min"] <= rsi <= t["rsi_long_max"] and r["close"] > r["ema_fast"])
-        short_ok = bool(cfg["allow_short"] and trend_down and adx_ok and t["rsi_short_min"] <= rsi <= t["rsi_short_max"] and r["close"] < r["ema_fast"])
+        
+        # Poprawiona logika wejścia zapobiegająca wchodzeniu pod koniec ruchu
+        long_ok = bool(
+            cfg["allow_long"] 
+            and trend_up 
+            and adx_ok 
+            and t["rsi_long_min"] <= rsi <= t["rsi_long_max"] 
+            and r["close"] >= r["ema_fast"]
+        )
+        short_ok = bool(
+            cfg["allow_short"] 
+            and trend_down 
+            and adx_ok 
+            and t["rsi_short_min"] <= rsi <= t["rsi_short_max"] 
+            and r["close"] <= r["ema_fast"]
+        )
         return {
             "symbol": symbol, "tf": timeframe,
             "signal": "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY",
@@ -393,32 +407,26 @@ def signal_for_symbol(cfg, symbol, timeframe):
         gc.collect()
 
 def balance_usdt(ex, positions=None):
-    try:
-        balance = ex.fetch_balance() or {}
-        usdt_info = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
-        
-        # Pobieramy bezpośrednio z surowych danych giełdy jeśli dostępne, lub z standardowych struktur ccxt
-        free = asfloat(usdt_info.get("free"), -1.0)
-        total = asfloat(usdt_info.get("total"), -1.0)
-        
-        if free < 0 or total < 0:
-            free = asfloat((balance.get("free") or {}).get("USDT"), 0.0)
-            total = asfloat((balance.get("total") or {}).get("total" if "total" in balance else "USDT"), free)
+    balance = ex.fetch_balance() or {}
+    row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
+    free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
 
-        # Jeśli giełda nie odjęła marginu od 'free', obliczamy go z aktywnych pozycji
-        used_margin = 0.0
-        if positions:
-            for p in positions:
-                used_margin += asfloat(p.get("initialMargin") or p.get("margin") or 0.0)
-        
-        # Jeśli wolne środki są równe całkowitym, korygujemy je o faktyczny margin pozycji
-        if free >= total and used_margin > 0:
-            free = max(0.0, total - used_margin)
+    def number(*values):
+        for value in values:
+            if value is None or value == "":
+                continue
+            n = asfloat(value, -1)
+            if n >= 0:
+                return n
+        return None
 
-        return max(0.0, free), max(0.0, total)
-    except Exception:
-        logging.exception("Błąd pobierania salda USDT")
-        return 0.0, 0.0
+    free = number(row.get("free"), free_map.get("USDT"))
+    used = number(row.get("used"), used_map.get("USDT"))
+    total = number(row.get("total"), total_map.get("USDT"))
+    free = 0.0 if free is None else free
+    if total is None:
+        total = free + (used or 0.0)
+    return max(0.0, free), max(0.0, total)
 
 def active_positions(ex):
     return [p for p in (ex.fetch_positions() or []) if abs(asfloat(p.get("contracts"))) > 0]
@@ -435,7 +443,6 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
             raise ValueError("Brak prawidłowej ceny do sprawdzenia wartości pozycji.")
         market = ex.market(symbol)
         contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
-        # NAPRAWIONE: Dodano operator mnożenia (*)
         notional = qty * price * contract_size
         limits = market.get("limits") or {}
         minimum = asfloat((limits.get("cost") or {}).get("min"), MIN_ORDER_NOTIONAL_USDT)
@@ -467,7 +474,6 @@ def manage_position_exits(ex, positions, cfg):
                 continue
             roe = pnl / margin * 100
         else:
-            # NAPRAWIONE: Dodano brakujące operatory mnożenia (*)
             roe = ((mark - entry) / entry if side == "long" else (entry - mark) / entry) * leverage * 100
         reason = f"STOP LOSS (ROE: {roe:.2f}%)" if roe <= -sl_roe else (
             f"TAKE PROFIT (ROE: {roe:.2f}%)" if roe >= tp_roe else None
@@ -487,40 +493,29 @@ def manage_position_exits(ex, positions, cfg):
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
-    
-    # Pobieramy sztywny limit z suwaka Maks. wartość pozycji (USDT)
-    max_allowed_notional = float(cfg.get("max_notional_usdt", 200.0))
-    
     if custom_usdt is None:
         risk_budget = min(max(0.0, float(cfg.get("risk_usdt", 10))), max(0.0, total_usdt) * 0.05)
     else:
         risk_budget = max(0.0, float(custom_usdt))
-
+    sl_roe = max(1.0, float(cfg.get("sl_roe", 30)))
     if price <= 0 or free_usdt <= 0 or risk_budget <= 0:
         return 0.0, 0.0
-
-    # Ograniczamy docelową wartość pozycji ściśle do tego, co użytkownik ustawił na suwaku Maks. wartość pozycji
+    stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     target = min(
-        risk_budget * leverage,
-        max_allowed_notional,
+        risk_budget / stop_fraction,
+        max(0.0, float(cfg.get("max_notional_usdt", 200))),
         free_usdt * leverage * 0.90,
     )
-
     if target < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
-
     market = ex.market(symbol)
     contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
     min_amount = asfloat(((market.get("limits") or {}).get("amount") or {}).get("min"))
-    
     qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
     if min_amount > qty:
         qty = float(ex.amount_to_precision(symbol, min_amount))
-        
-    # NAPRAWIONE: Dodano operator mnożenia (*)
     notional = qty * price * contract_size
-    
-    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.05:
+    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.001:
         return 0.0, 0.0
     return qty, notional
 
@@ -889,53 +884,68 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
 if page == "Ustawienia Strategii":
     st.subheader("Ustawienia strategii i ryzyka")
+    
     if "selected_tf_edit" not in st.session_state:
         st.session_state["selected_tf_edit"] = "1d"
+        
     selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]))
     st.session_state["selected_tf_edit"] = selected_tf
+
     defaults = get_dynamic_default_tf_settings()
-    base = cfg["tf_settings"].get(selected_tf, defaults[selected_tf])
+    
+    if "tf_settings" not in cfg:
+        cfg["tf_settings"] = defaults
+    if selected_tf not in cfg["tf_settings"]:
+        cfg["tf_settings"][selected_tf] = defaults.get(selected_tf, defaults["1h"])
+        
+    base = cfg["tf_settings"][selected_tf]
+
     with st.form("cfgform"):
         left, right = st.columns(2)
         with left:
-            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]))
+            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]) if cfg["exchange"] in EXCHANGE_OPTIONS else 0)
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
-            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg["scan_limit_count"]))))
-            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg["timeframes"])
-            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg["indicator_multiplier"]))))
-            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg["candle_limit"]))))
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg.get("scan_limit_count", 10)))))
+            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg.get("timeframes", ["4h", "1d"]))
+            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg.get("indicator_multiplier", 100)))))
+            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg.get("candle_limit", 150)))))
         with right:
-            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg["risk_usdt"]))
-            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg["max_notional_usdt"]))
-            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg["max_positions"]))
-            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg["max_leverage"]))
-            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg["enable_roe"]))
-            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg["sl_roe"]))), help="Zamknięcie przy ROE równym minus tej wartości.")
-            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg["tp_roe"]))), help="Zamknięcie przy ROE równym tej wartości.")
-            allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]))
-            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]))
+            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg.get("risk_usdt", 10.0)))
+            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg.get("max_notional_usdt", 200.0)))
+            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg.get("max_positions", 3)))
+            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg.get("max_leverage", 10)))
+            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)))
+            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg.get("sl_roe", 30)))))
+            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg.get("tp_roe", 60)))))
+            allow_long = st.checkbox("Pozwól na LONG", bool(cfg.get("allow_long", True)))
+            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg.get("allow_short", True)))
+
         st.markdown(f"### Parametry bazowe dla {selected_tf}")
         c1, c2, c3 = st.columns(3)
         with c1:
-            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base["ema_fast"]))))
+            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base.get("ema_fast", 9)))))
         with c2:
-            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base["ema_slow"]))))
+            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base.get("ema_slow", 21)))))
         with c3:
-            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base["adx_threshold"]))
+            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base.get("adx_threshold", 20.0)))
+
         st.markdown("#### Ustawienia RSI")
         r1, r2, r3 = st.columns(3)
         with r1:
-            rsi_period = st.number_input("RSI okres", 2, 100, int(base["rsi_period"]), 1)
+            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1)
         with r2:
-            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base["rsi_long_min"]), 1.0)
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 50.0)), 1.0)
         with r3:
-            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base["rsi_long_max"]), 1.0)
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 65.0)), 1.0)
+            
         r4, r5 = st.columns(2)
         with r4:
-            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base["rsi_short_min"]), 1.0)
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 35.0)), 1.0)
         with r5:
-            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base["rsi_short_max"]), 1.0)
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 50.0)), 1.0)
+
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
+
     if save:
         if fast >= slow:
             st.error("EMA szybka musi być mniejsza od EMA wolnej.")
