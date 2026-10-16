@@ -892,7 +892,7 @@ if page == "Ustawienia Strategii":
     if "selected_tf_edit" not in st.session_state:
         st.session_state["selected_tf_edit"] = "1d"
         
-    selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]))
+    selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]), key="sb_selected_tf")
     st.session_state["selected_tf_edit"] = selected_tf
 
     defaults = get_dynamic_default_tf_settings()
@@ -907,46 +907,46 @@ if page == "Ustawienia Strategii":
     with st.form("cfgform"):
         left, right = st.columns(2)
         with left:
-            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]) if cfg["exchange"] in EXCHANGE_OPTIONS else 0)
-            market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
-            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg.get("scan_limit_count", 10)))))
-            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg.get("timeframes", ["4h", "1d"]))
-            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg.get("indicator_multiplier", 100)))))
-            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg.get("candle_limit", 150)))))
+            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]) if cfg["exchange"] in EXCHANGE_OPTIONS else 0, key="cfg_exchange")
+            market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1, key="cfg_market_type")
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg.get("scan_limit_count", 10)))), key="cfg_scan_limit")
+            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg.get("timeframes", ["4h", "1d"]), key="cfg_timeframes")
+            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg.get("indicator_multiplier", 100)))), key="cfg_multiplier")
+            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg.get("candle_limit", 150)))), key="cfg_candle_limit")
         with right:
-            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg.get("risk_usdt", 10.0)))
-            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg.get("max_notional_usdt", 200.0)))
-            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg.get("max_positions", 3)))
-            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg.get("max_leverage", 10)))
-            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)))
-            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg.get("sl_roe", 30)))))
-            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg.get("tp_roe", 60)))))
-            allow_long = st.checkbox("Pozwól na LONG", bool(cfg.get("allow_long", True)))
-            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg.get("allow_short", True)))
+            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg.get("risk_usdt", 10.0)), key="cfg_risk")
+            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg.get("max_notional_usdt", 200.0)), key="cfg_max_notional")
+            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg.get("max_positions", 3)), key="cfg_max_positions")
+            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg.get("max_leverage", 10)), key="cfg_max_leverage")
+            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)), key="cfg_enable_roe")
+            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg.get("sl_roe", 30)))), key="cfg_sl_roe")
+            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg.get("tp_roe", 60)))), key="cfg_tp_roe")
+            allow_long = st.checkbox("Pozwól na LONG", bool(cfg.get("allow_long", True)), key="cfg_allow_long")
+            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg.get("allow_short", True)), key="cfg_allow_short")
 
         st.markdown(f"### Parametry bazowe dla {selected_tf}")
         c1, c2, c3 = st.columns(3)
         with c1:
-            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base.get("ema_fast", 9)))))
+            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base.get("ema_fast", 9)))), key=f"cfg_fast_{selected_tf}")
         with c2:
-            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base.get("ema_slow", 21)))))
+            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base.get("ema_slow", 21)))), key=f"cfg_slow_{selected_tf}")
         with c3:
-            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base.get("adx_threshold", 20.0)))
+            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base.get("adx_threshold", 20.0)), key=f"cfg_adx_{selected_tf}")
 
         st.markdown("#### Ustawienia RSI")
         r1, r2, r3 = st.columns(3)
         with r1:
-            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1)
+            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1, key=f"cfg_rsi_per_{selected_tf}")
         with r2:
-            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 50.0)), 1.0)
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 50.0)), 1.0, key=f"cfg_rsi_l_min_{selected_tf}")
         with r3:
-            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 65.0)), 1.0)
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 65.0)), 1.0, key=f"cfg_rsi_l_max_{selected_tf}")
             
         r4, r5 = st.columns(2)
         with r4:
-            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 35.0)), 1.0)
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 35.0)), 1.0, key=f"cfg_rsi_s_min_{selected_tf}")
         with r5:
-            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 50.0)), 1.0)
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 50.0)), 1.0, key=f"cfg_rsi_s_max_{selected_tf}")
 
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
 
