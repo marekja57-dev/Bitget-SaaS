@@ -876,6 +876,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
     @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
     def render_full_dashboard():
+        # KLUCZOWE: Odświeżanie cfg z bazy przy każdym renderowaniu/odświeżeniu fragmentu!
+        current_cfg = load_cfg()
         st.caption(f"Odświeżanie co {refresh_sec} s.")
         total_balance = free_balance = session_pnl = used_margin = 0.0
         active = []
@@ -888,11 +890,11 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     api_key_saved,
                     secret_saved,
                     passphrase_saved,
-                    cfg["market_type"],
+                    current_cfg["market_type"],
                 )
                 active = active_positions(client)
-                if not cfg.get("paper_mode", True) and active:
-                    for msg in manage_position_exits(client, active, cfg):
+                if not current_cfg.get("paper_mode", True) and active:
+                    for msg in manage_position_exits(client, active, current_cfg):
                         st.warning(msg)
                     active = active_positions(client)
                 free_balance, total_balance = balance_usdt(client, active)
@@ -926,7 +928,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         with m3:
             metric_card(
                 "Otwarte pozycje",
-                f"{len(active)} / {int(cfg['max_positions'])}",
+                f"{len(active)} / {int(current_cfg['max_positions'])}",
                 f"Margin w użyciu: {used_margin:.2f} USDT",
             )
         with m4:
@@ -965,16 +967,16 @@ if page == "Automatyczny Skaner i Auto-Handel":
         st.markdown("### 🏆 Skaner Rynku i Najlepsze Okazje")
         
         try:
-            ex = exchange_client(cfg["exchange"], "", "", "", cfg["market_type"])
-            ranked = ranked_symbols(ex, int(cfg.get("scan_limit_count", 30)))
+            ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
+            ranked = ranked_symbols(ex, int(current_cfg.get("scan_limit_count", 30)))
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
-            tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+            tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
             
             all_signals = []
             for symbol in symbols:
                 for tf in tfs:
-                    res = signal_for_symbol(cfg, symbol, tf)
+                    res = signal_for_symbol(current_cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                     adx_val = res.get("adx") or 0.0
                     res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
@@ -997,7 +999,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
 
-            if cfg["auto_trade"] and is_user_paid() and not cfg["paper_mode"]:
+            if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
                     try:
                         live_client = exchange_client(
@@ -1005,9 +1007,9 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             api_key_saved,
                             secret_saved,
                             passphrase_saved,
-                            cfg["market_type"],
+                            current_cfg["market_type"],
                         )
-                        max_pos = int(cfg.get("max_positions", 3))
+                        max_pos = int(current_cfg.get("max_positions", 3))
                         
                         valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
                         valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -1039,11 +1041,11 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                 continue
 
                             qty, notional = calc_qty(
-                                live_client, sym, total, free, price, cfg
+                                live_client, sym, total, free, price, current_cfg
                             )
                             if qty > 0 and notional >= MIN_ORDER_NOTIONAL_USDT:
                                 try:
-                                    live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                    live_client.set_leverage(int(current_cfg["max_leverage"]), sym)
                                 except Exception:
                                     pass
                                 order_side = "buy" if sig == "LONG" else "sell"
@@ -1086,7 +1088,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             f"Kwota USDT ({sym})",
                             min_value=10.0,
                             max_value=1000.0,
-                            value=float(cfg.get("risk_usdt", 10.0)),
+                            value=float(current_cfg.get("risk_usdt", 10.0)),
                             step=5.0,
                             key=f"inv_amt_{sym}_{i}",
                         )
@@ -1104,7 +1106,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                         api_key_saved,
                                         secret_saved,
                                         passphrase_saved,
-                                        cfg["market_type"],
+                                        current_cfg["market_type"],
                                     )
                                     positions = active_positions(live_client)
                                     free, total = balance_usdt(live_client, positions)
@@ -1118,18 +1120,18 @@ if page == "Automatyczny Skaner i Auto-Handel":
                                             total,
                                             free,
                                             price,
-                                            cfg,
+                                            current_cfg,
                                             custom_usdt=invest_amount,
                                         )
                                         if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
                                             st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum {MIN_ORDER_NOTIONAL_USDT} USDT lub brak środków.")
                                         else:
                                             try:
-                                                live_client.set_leverage(int(cfg["max_leverage"]), sym)
+                                                live_client.set_leverage(int(current_cfg["max_leverage"]), sym)
                                             except Exception:
                                                 pass
                                             order_side = "buy" if sig == "LONG" else "sell"
-                                            if cfg["paper_mode"]:
+                                            if current_cfg["paper_mode"]:
                                                 st.success(f"[PAPER] Zasymulowano otwarcie {sig} na {sym} o wartości {notional:.2f} USDT!")
                                                 event("TRADE", f"[PAPER] Ręczna inwestycja Top 3: {sig} {sym} notional={notional:.2f} USDT")
                                             else:
@@ -1476,4 +1478,3 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
             st.error(f"Błąd panelu admina: {exc}")
-
