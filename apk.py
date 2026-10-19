@@ -41,108 +41,108 @@ DEFAULT_TF_SETTINGS = {
     "1m": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 25.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 25.0,
         "rsi_max": 75.0,
     },
     "3m": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 25.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 25.0,
         "rsi_max": 75.0,
     },
     "5m": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 25.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 25.0,
         "rsi_max": 75.0,
     },
     "15m": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 25.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 25.0,
         "rsi_max": 75.0,
     },
     "30m": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 25.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 25.0,
         "rsi_max": 75.0,
     },
     "1h": {
         "ema_fast": 12,
         "ema_slow": 26,
-        "adx_threshold": 22.0,
+        "adx_threshold": 20.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 30.0,
         "rsi_max": 70.0,
     },
     "2h": {
         "ema_fast": 12,
         "ema_slow": 26,
-        "adx_threshold": 20.0,
+        "adx_threshold": 18.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 30.0,
         "rsi_max": 70.0,
     },
     "4h": {
         "ema_fast": 9,
         "ema_slow": 21,
-        "adx_threshold": 20.0,
+        "adx_threshold": 18.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 30.0,
         "rsi_max": 70.0,
     },
     "1d": {
         "ema_fast": 20,
         "ema_slow": 50,
-        "adx_threshold": 18.0,
+        "adx_threshold": 15.0,
         "rsi_period": 14,
-        "rsi_long_min": 52.0,
-        "rsi_long_max": 68.0,
-        "rsi_short_min": 32.0,
-        "rsi_short_max": 48.0,
+        "rsi_long_min": 45.0,
+        "rsi_long_max": 75.0,
+        "rsi_short_min": 25.0,
+        "rsi_short_max": 55.0,
         "rsi_min": 30.0,
         "rsi_max": 70.0,
     },
@@ -169,7 +169,6 @@ DEFAULTS = {
     "allow_short": True,
     "allow_long": True,
     "scan_limit_count": 10,
-    "indicator_multiplier": 100,
 }
 
 st.markdown(
@@ -379,26 +378,19 @@ def effective_tf_cfg(cfg, tf):
     base = cfg.get("tf_settings", {}).get(
         tf, DEFAULT_TF_SETTINGS.get(tf, DEFAULT_TF_SETTINGS["1h"])
     )
-    mult = float(cfg.get("indicator_multiplier", 100)) / 100
     fast = max(2, int(round(float(base["ema_fast"]))))
     slow = max(fast + 1, int(round(float(base["ema_slow"]))))
-    rsi_long_min = float(base.get("rsi_long_min", 52.0))
-    rsi_long_max = float(base.get("rsi_long_max", 68.0))
-    rsi_short_min = float(base.get("rsi_short_min", 32.0))
-    rsi_short_max = float(base.get("rsi_short_max", 48.0))
     return {
         "ema_fast": fast,
         "ema_slow": slow,
-        "adx_threshold": max(
-            2.0, min(90.0, float(base["adx_threshold"]) * mult)
-        ),
+        "adx_threshold": float(base["adx_threshold"]),
         "rsi_period": max(2, min(100, int(base.get("rsi_period", 14)))),
-        "rsi_long_min": max(0.0, min(100.0, rsi_long_min)),
-        "rsi_long_max": max(0.0, min(100.0, rsi_long_max)),
-        "rsi_short_min": max(0.0, min(100.0, rsi_short_min)),
-        "rsi_short_max": max(0.0, min(100.0, rsi_short_max)),
-        "rsi_min": max(0.0, min(100.0, float(base.get("rsi_min", 30.0)))),
-        "rsi_max": max(0.0, min(100.0, float(base.get("rsi_max", 70.0)))),
+        "rsi_long_min": float(base.get("rsi_long_min", 45.0)),
+        "rsi_long_max": float(base.get("rsi_long_max", 75.0)),
+        "rsi_short_min": float(base.get("rsi_short_min", 25.0)),
+        "rsi_short_max": float(base.get("rsi_short_max", 55.0)),
+        "rsi_min": float(base.get("rsi_min", 30.0)),
+        "rsi_max": float(base.get("rsi_max", 70.0)),
     }
 
 def signal_for_symbol(cfg, symbol, timeframe):
@@ -424,7 +416,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
             }
             
         r = d.iloc[-2]
-        prev = d.iloc[-3]
         
         if not all(
             pd.notna(r[x]) and np.isfinite(float(r[x]))
@@ -443,41 +434,36 @@ def signal_for_symbol(cfg, symbol, timeframe):
         trend_up = r["ema_fast"] > r["ema_slow"]
         trend_down = r["ema_fast"] < r["ema_slow"]
         
-        ema_rising = r["ema_fast"] > prev["ema_fast"]
-        ema_falling = r["ema_fast"] < prev["ema_fast"]
-        price_growing = r["close"] > prev["close"]
-        price_falling = r["close"] < prev["close"]
+        adx_val = float(r["adx"])
+        rsi_val = float(r["rsi"])
         
-        adx_ok = r["adx"] >= t["adx_threshold"]
-        long_rsi_ok = t["rsi_long_min"] <= float(r["rsi"]) <= t["rsi_long_max"]
-        short_rsi_ok = t["rsi_short_min"] <= float(r["rsi"]) <= t["rsi_short_max"]
+        adx_ok = adx_val >= t["adx_threshold"]
+        long_rsi_ok = t["rsi_long_min"] <= rsi_val <= t["rsi_long_max"]
+        short_rsi_ok = t["rsi_short_min"] <= rsi_val <= t["rsi_short_max"]
         
-        long_ok = bool(
-            cfg["allow_long"]
-            and trend_up
-            and ema_rising
-            and price_growing
-            and adx_ok
-            and long_rsi_ok
-            and r["close"] > r["ema_fast"]
-        )
-        short_ok = bool(
-            cfg["allow_short"]
-            and trend_down
-            and ema_falling
-            and price_falling
-            and adx_ok
-            and short_rsi_ok
-            and r["close"] < r["ema_fast"]
-        )
+        reasons = []
+        if not adx_ok:
+            reasons.append(f"ADX {adx_val:.1f} < {t['adx_threshold']}")
+        if trend_up and not long_rsi_ok:
+            reasons.append(f"RSI {rsi_val:.1f} poza [LONG: {t['rsi_long_min']}-{t['rsi_long_max']}]")
+        if trend_down and not short_rsi_ok:
+            reasons.append(f"RSI {rsi_val:.1f} poza [SHORT: {t['rsi_short_min']}-{t['rsi_short_max']}]")
+        if not trend_up and not trend_down:
+            reasons.append("EMA trend neutralny")
+
+        long_ok = bool(cfg["allow_long"] and trend_up and adx_ok and long_rsi_ok)
+        short_ok = bool(cfg["allow_short"] and trend_down and adx_ok and short_rsi_ok)
+        
+        reason_str = "OK" if (long_ok or short_ok) else (", ".join(reasons) if reasons else "Warunki niespełnione")
+
         return {
             "symbol": symbol,
             "tf": timeframe,
             "signal": "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY",
             "price": float(r["close"]),
-            "adx": float(r["adx"]),
-            "rsi": float(r["rsi"]),
-            "reason": "OK",
+            "adx": adx_val,
+            "rsi": rsi_val,
+            "reason": reason_str,
         }
     except Exception as exc:
         return {
@@ -489,33 +475,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
             "rsi": None,
             "reason": str(exc)[:180],
         }
-    finally:
-        gc.collect()
-
-def trend_direction_for_symbol(cfg, symbol, timeframe="1d"):
-    try:
-        t = effective_tf_cfg(cfg, timeframe)
-        raw = get_candles(
-            cfg["exchange"],
-            cfg["market_type"],
-            symbol,
-            timeframe,
-            cfg["candle_limit"],
-        )
-        d = indicators(raw, t["ema_fast"], t["ema_slow"], t["rsi_period"])
-        if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
-            return None
-        r = d.iloc[-2]
-        prev = d.iloc[-3]
-        if pd.isna(r["ema_fast"]) or pd.isna(r["ema_slow"]):
-            return None
-        if r["ema_fast"] > r["ema_slow"] and r["close"] > r["ema_fast"] and r["ema_fast"] > prev["ema_fast"]:
-            return "LONG"
-        if r["ema_fast"] < r["ema_slow"] and r["close"] < r["ema_fast"] and r["ema_fast"] < prev["ema_fast"]:
-            return "SHORT"
-        return None
-    except Exception:
-        return None
     finally:
         gc.collect()
 
@@ -1270,13 +1229,6 @@ if page == "Ustawienia Strategii":
                 default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS],
                 key="cfg_timeframes_multiselect"
             )
-            multiplier = st.slider(
-                "Mnożnik progów ADX (%)",
-                10,
-                150,
-                int(cfg.get("indicator_multiplier", 100)),
-                key="cfg_multiplier"
-            )
             candle_limit = st.slider(
                 "Liczba świec do analizy",
                 100,
@@ -1346,7 +1298,7 @@ if page == "Ustawienia Strategii":
                 "RSI LONG — minimum",
                 0.0,
                 100.0,
-                float(base.get("rsi_long_min", 52.0)),
+                float(base.get("rsi_long_min", 45.0)),
                 1.0,
                 key=f"rsi_long_min_{selected_tf}"
             )
@@ -1355,7 +1307,7 @@ if page == "Ustawienia Strategii":
                 "RSI LONG — maksimum",
                 0.0,
                 100.0,
-                float(base.get("rsi_long_max", 68.0)),
+                float(base.get("rsi_long_max", 75.0)),
                 1.0,
                 key=f"rsi_long_max_{selected_tf}"
             )
@@ -1365,7 +1317,7 @@ if page == "Ustawienia Strategii":
                 "RSI SHORT — minimum",
                 0.0,
                 100.0,
-                float(base.get("rsi_short_min", 32.0)),
+                float(base.get("rsi_short_min", 25.0)),
                 1.0,
                 key=f"rsi_short_min_{selected_tf}"
             )
@@ -1374,7 +1326,7 @@ if page == "Ustawienia Strategii":
                 "RSI SHORT — maksimum",
                 0.0,
                 100.0,
-                float(base.get("rsi_short_max", 48.0)),
+                float(base.get("rsi_short_max", 55.0)),
                 1.0,
                 key=f"rsi_short_max_{selected_tf}"
             )
@@ -1393,7 +1345,6 @@ if page == "Ustawienia Strategii":
                     market_type=market_type,
                     scan_limit_count=scan_limit,
                     timeframes=timeframes or ["4h", "1d"],
-                    indicator_multiplier=multiplier,
                     candle_limit=candle_limit,
                     risk_usdt=risk,
                     max_notional_usdt=max_notional,
