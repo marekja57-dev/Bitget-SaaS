@@ -876,9 +876,25 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
     @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
     def render_full_dashboard():
-        # KLUCZOWE: Odświeżanie cfg z bazy przy każdym renderowaniu/odświeżeniu fragmentu!
+        # Zawsze świeży odczyt konfigów z bazy!
         current_cfg = load_cfg()
         st.caption(f"Odświeżanie co {refresh_sec} s.")
+
+        # --- PANEL DEBUGOWANIA / PODGLĄDU AKTYWNYCH WARTOŚCI ---
+        with st.expander("🔍 Podgląd aktualnie wczytanych progów wskaźników (Debug)", expanded=True):
+            dbg_tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+            dbg_cols = st.columns(len(dbg_tfs) if dbg_tfs else 1)
+            for idx, tf_name in enumerate(dbg_tfs):
+                t_params = effective_tf_cfg(current_cfg, tf_name)
+                with dbg_cols[idx]:
+                    st.markdown(f"""
+                    **Interwał: `{tf_name}`**
+                    - EMA szybka: `{t_params['ema_fast']}` | wolna: `{t_params['ema_slow']}`
+                    - Min. ADX: `{t_params['adx_threshold']}`
+                    - RSI Long: `{t_params['rsi_long_min']} - {t_params['rsi_long_max']}`
+                    - RSI Short: `{t_params['rsi_short_min']} - {t_params['rsi_short_max']}`
+                    """)
+
         total_balance = free_balance = session_pnl = used_margin = 0.0
         active = []
         connected = bool(api_key_saved and secret_saved)
