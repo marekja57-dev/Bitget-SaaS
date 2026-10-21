@@ -26,6 +26,7 @@ except ImportError:
     Fernet = None
     InvalidToken = Exception
 
+
 st.set_page_config(page_title="Bitget-SaaS Futures", page_icon="📈", layout="wide")
 
 APP_DIR = Path(__file__).resolve().parent
@@ -147,6 +148,7 @@ def verify_password(stored, password):
             return hmac.compare_digest(check, digest), False
     except (ValueError, AttributeError):
         pass
+    # Migracja starszych haseł zapisanych jawnie.
     return hmac.compare_digest(str(stored), str(password)), True
 
 def _fernet():
@@ -169,6 +171,7 @@ def encrypt_secret(value):
 def decrypt_secret(value):
     if not value:
         return ""
+    # Starsze wpisy jawne są odrzucane, a nie traktowane jako zaszyfrowane.
     try:
         return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
     except Exception as exc:
@@ -371,6 +374,7 @@ def signal_for_symbol(cfg, symbol, timeframe):
         d = indicators(raw, t["ema_fast"], t["ema_slow"], t["rsi_period"])
         if len(d) < max(35, t["ema_slow"] + 5, t["rsi_period"] + 5):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": None, "adx": None, "rsi": None, "reason": "Za mało świec"}
+        # Ostatnia świeca może być nadal otwarta; sygnał bazuje na zamkniętej świecy.
         r = d.iloc[-2]
         fields = ["close", "ema_fast", "ema_slow", "adx", "rsi"]
         if not all(pd.notna(r[x]) and np.isfinite(float(r[x])) for x in fields):
@@ -393,39 +397,27 @@ def signal_for_symbol(cfg, symbol, timeframe):
         gc.collect()
 
 def balance_usdt(ex, positions=None):
-    try:
-        balance = ex.fetch_balance() or {}
-        usdt_info = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
-        
-        # Pobieramy bezpośrednio z surowych danych giełdy jeśli dostępne, lub z standardowych struktur ccxt
-        free = asfloat(usdt_info.get("free"), -1.0)
-        total = asfloat(usdt_info.get("total"), -1.0)
-        
-        if free < 0 or total < 0:
-            free = asfloat((balance.get("free") or {}).get("USDT"), 0.0)
-            total = asfloat((balance.get("total") or {}).get("total" if "total" in balance else "USDT"), free)
+    balance = ex.fetch_balance() or {}
+    row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
+    free_map, used_map, total_map = balance.get("free") or {}, balance.get("used") or {}, balance.get("total") or {}
 
-        # Precyzyjne obliczanie/sumowanie marginesu z aktywnych pozycji
-        used_margin = 0.0
-        if positions:
-            for p in positions:
-                m = asfloat(p.get("initialMargin") or p.get("margin"))
-                if m <= 0:
-                    contracts = abs(asfloat(p.get("contracts")))
-                    contract_size = asfloat(p.get("contractSize"), 1.0) or 1.0
-                    price = asfloat(p.get("markPrice") or p.get("entryPrice"))
-                    leverage = max(1.0, asfloat(p.get("leverage"), 1.0))
-                    m = (contracts * contract_size * price) / leverage
-                used_margin += m
+    def number(*values):
+        for value in values:
+            if value is None or value == "":
+                continue
+            n = asfloat(value, -1)
+            if n >= 0:
+                return n
+        return None
 
-        # Korygujemy wolne środki o faktyczny margines zajęty przez pozycje
-        if used_margin > 0:
-            free = max(0.0, total - used_margin)
-
-        return max(0.0, free), max(0.0, total)
-    except Exception:
-        logging.exception("Błąd pobierania salda USDT")
-        return 0.0, 0.0
+    free = number(row.get("free"), free_map.get("USDT"))
+    used = number(row.get("used"), used_map.get("USDT"))
+    total = number(row.get("total"), total_map.get("USDT"))
+    free = 0.0 if free is None else free
+    if total is None:
+        total = free + (used or 0.0)
+    # Nie odejmujemy margin ponownie, jeśli giełda już podała free.
+    return max(0.0, free), max(0.0, total)
 
 def active_positions(ex):
     return [p for p in (ex.fetch_positions() or []) if abs(asfloat(p.get("contracts"))) > 0]
@@ -442,7 +434,6 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
             raise ValueError("Brak prawidłowej ceny do sprawdzenia wartości pozycji.")
         market = ex.market(symbol)
         contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
-        # NAPRAWIONE: Dodano operator mnożenia (*)
         notional = qty * price * contract_size
         limits = market.get("limits") or {}
         minimum = asfloat((limits.get("cost") or {}).get("min"), MIN_ORDER_NOTIONAL_USDT)
@@ -474,7 +465,6 @@ def manage_position_exits(ex, positions, cfg):
                 continue
             roe = pnl / margin * 100
         else:
-            # NAPRAWIONE: Dodano brakujące operatory mnożenia (*)
             roe = ((mark - entry) / entry if side == "long" else (entry - mark) / entry) * leverage * 100
         reason = f"STOP LOSS (ROE: {roe:.2f}%)" if roe <= -sl_roe else (
             f"TAKE PROFIT (ROE: {roe:.2f}%)" if roe >= tp_roe else None
@@ -494,40 +484,31 @@ def manage_position_exits(ex, positions, cfg):
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
-    
-    # Pobieramy sztywny limit z suwaka Maks. wartość pozycji (USDT)
-    max_allowed_notional = float(cfg.get("max_notional_usdt", 200.0))
-    
     if custom_usdt is None:
         risk_budget = min(max(0.0, float(cfg.get("risk_usdt", 10))), max(0.0, total_usdt) * 0.05)
     else:
         risk_budget = max(0.0, float(custom_usdt))
-
+    sl_roe = max(1.0, float(cfg.get("sl_roe", 30)))
     if price <= 0 or free_usdt <= 0 or risk_budget <= 0:
         return 0.0, 0.0
-
-    # Ograniczamy docelową wartość pozycji ściśle do tego, co użytkownik ustawił na suwaku Maks. wartość pozycji
+    # Przybliżenie straty na SL: zmiana ceny = ROE / dźwignia.
+    stop_fraction = max(0.001, (sl_roe / 100.0) / leverage)
     target = min(
-        risk_budget * leverage,
-        max_allowed_notional,
+        risk_budget / stop_fraction,
+        max(0.0, float(cfg.get("max_notional_usdt", 200))),
         free_usdt * leverage * 0.90,
     )
-
     if target < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
-
     market = ex.market(symbol)
     contract_size = asfloat(market.get("contractSize"), 1.0) or 1.0
     min_amount = asfloat(((market.get("limits") or {}).get("amount") or {}).get("min"))
-    
     qty = float(ex.amount_to_precision(symbol, target / (price * contract_size)))
     if min_amount > qty:
         qty = float(ex.amount_to_precision(symbol, min_amount))
-        
-    # NAPRAWIONE: Dodano operator mnożenia (*)
     notional = qty * price * contract_size
-    
-    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.05:
+    # Nie przekraczaj limitu ryzyka/wartości przez automatyczne podbicie do minimum giełdy.
+    if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT or notional > target * 1.001:
         return 0.0, 0.0
     return qty, notional
 
@@ -576,6 +557,7 @@ if "session_started_at" not in st.session_state:
     st.session_state["session_started_at"] = time.time()
 
 def is_user_admin():
+    # Rola administratora wynika wyłącznie z jawnej listy dozwolonych adresów e-mail.
     email = str(st.session_state.get("user_email", "")).strip().lower()
     return bool(email) and email in ADMIN_EMAILS
 
@@ -691,6 +673,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 refresh_seconds = st.slider("Odstęp odświeżania (s)", 10, 120, int(cfg["refresh_seconds"]))
             save_controls = st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True)
         if save_controls:
+            # Tryb live wymaga świadomego przełączenia; PAPER pozostaje domyślny.
             cfg.update(auto_trade=auto_trade, paper_mode=paper_mode, auto_refresh=auto_refresh, refresh_seconds=refresh_seconds)
             save_cfg(cfg)
             st.rerun()
@@ -896,81 +879,114 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
 if page == "Ustawienia Strategii":
     st.subheader("Ustawienia strategii i ryzyka")
-    if "selected_tf_edit" not in st.session_state:
-        st.session_state["selected_tf_edit"] = "1d"
-    selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]))
-    st.session_state["selected_tf_edit"] = selected_tf
+    
+    # Wybór interwału do edycji z użyciem st.selectbox i callbacka / klucza
+    selected_tf = st.selectbox(
+        "Interwał do edycji", 
+        TF_OPTIONS, 
+        index=TF_OPTIONS.index(cfg.get("timeframes", ["4h", "1d"])[0] if cfg.get("timeframes") else "1d") if cfg.get("timeframes", ["4h", "1d"])[0] in TF_OPTIONS else 0,
+        key="strategy_edit_tf"
+    )
+    
     defaults = get_dynamic_default_tf_settings()
-    base = cfg["tf_settings"].get(selected_tf, defaults[selected_tf])
+    # Pobieramy aktualne ustawienia dla wybranego interwału (z uwzględnieniem zapisu w cfg)
+    base = cfg.get("tf_settings", {}).get(selected_tf, defaults.get(selected_tf, defaults["1h"]))
+
     with st.form("cfgform"):
         left, right = st.columns(2)
         with left:
-            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]))
+            exchange_name = st.selectbox("Giełda", EXCHANGE_OPTIONS, index=EXCHANGE_OPTIONS.index(cfg["exchange"]) if cfg["exchange"] in EXCHANGE_OPTIONS else 0)
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1)
-            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg["scan_limit_count"]))))
-            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg["timeframes"])
-            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg["indicator_multiplier"]))))
-            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg["candle_limit"]))))
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, max(5, min(200, int(cfg.get("scan_limit_count", 10)))))
+            timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=cfg.get("timeframes", ["4h", "1d"]))
+            multiplier = st.slider("Mnożnik progów ADX (%)", 10, 150, max(10, min(150, int(cfg.get("indicator_multiplier", 100)))))
+            candle_limit = st.slider("Liczba świec do analizy", 100, 250, max(100, min(250, int(cfg.get("candle_limit", 150)))))
         with right:
-            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg["risk_usdt"]))
-            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg["max_notional_usdt"]))
-            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg["max_positions"]))
-            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg["max_leverage"]))
-            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg["enable_roe"]))
-            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg["sl_roe"]))), help="Zamknięcie przy ROE równym minus tej wartości.")
-            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg["tp_roe"]))), help="Zamknięcie przy ROE równym tej wartości.")
-            allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]))
-            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]))
-        st.markdown(f"### Parametry bazowe dla {selected_tf}")
+            risk = st.number_input("Maks. ryzyko na pozycję (USDT)", 1.0, 10000.0, float(cfg.get("risk_usdt", 10.0)))
+            max_notional = st.number_input("Maks. wartość pozycji (USDT)", 10.0, 100000.0, float(cfg.get("max_notional_usdt", 200.0)))
+            max_positions = st.number_input("Maks. liczba otwartych pozycji", 1, 20, int(cfg.get("max_positions", 3)))
+            max_leverage = st.number_input("Maksymalna dźwignia", 1, 50, int(cfg.get("max_leverage", 10)))
+            enable_roe = st.checkbox("Włącz aktywne zarządzanie TP/SL (ROE)", bool(cfg.get("enable_roe", True)))
+            sl_roe = st.slider("Stop Loss — ROE (%)", 5, 95, max(5, min(95, int(cfg.get("sl_roe", 30)))))
+            tp_roe = st.slider("Take Profit — ROE (%)", 5, 500, max(5, min(500, int(cfg.get("tp_roe", 60)))))
+            allow_long = st.checkbox("Pozwól na LONG", bool(cfg.get("allow_long", True)))
+            allow_short = st.checkbox("Pozwól na SHORT", bool(cfg.get("allow_short", True)))
+
+        st.markdown(f"### Parametry wskaźników dla interwału: {selected_tf}")
         c1, c2, c3 = st.columns(3)
         with c1:
-            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base["ema_fast"]))))
+            fast = st.slider("EMA szybka", 2, 100, max(2, min(100, int(base.get("ema_fast", 9)))), key=f"form_fast_{selected_tf}")
         with c2:
-            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base["ema_slow"]))))
+            slow = st.slider("EMA wolna", 3, 300, max(3, min(300, int(base.get("ema_slow", 21)))), key=f"form_slow_{selected_tf}")
         with c3:
-            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base["adx_threshold"]))
+            adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base.get("adx_threshold", 20.0)), key=f"form_adx_{selected_tf}")
+
         st.markdown("#### Ustawienia RSI")
         r1, r2, r3 = st.columns(3)
         with r1:
-            rsi_period = st.number_input("RSI okres", 2, 100, int(base["rsi_period"]), 1)
+            rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1, key=f"form_rsi_p_{selected_tf}")
         with r2:
-            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base["rsi_long_min"]), 1.0)
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 50.0)), 1.0, key=f"form_rl_min_{selected_tf}")
         with r3:
-            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base["rsi_long_max"]), 1.0)
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 70.0)), 1.0, key=f"form_rl_max_{selected_tf}")
+
         r4, r5 = st.columns(2)
         with r4:
-            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base["rsi_short_min"]), 1.0)
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 30.0)), 1.0, key=f"form_rs_min_{selected_tf}")
         with r5:
-            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base["rsi_short_max"]), 1.0)
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 50.0)), 1.0, key=f"form_rs_max_{selected_tf}")
+
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
+
     if save:
         if fast >= slow:
             st.error("EMA szybka musi być mniejsza od EMA wolnej.")
         elif rsi_long_min >= rsi_long_max or rsi_short_min >= rsi_short_max:
             st.error("W każdym zakresie RSI minimum musi być mniejsze od maksimum.")
         else:
+            # Upewniamy się, że struktura słownika tf_settings istnieje
+            if "tf_settings" not in cfg:
+                cfg["tf_settings"] = get_dynamic_default_tf_settings()
+            
             cfg.update(
-                exchange=exchange_name, market_type=market_type, scan_limit_count=scan_limit,
-                timeframes=timeframes or ["4h", "1d"], indicator_multiplier=multiplier,
-                candle_limit=candle_limit, risk_usdt=risk, max_notional_usdt=max_notional,
-                max_positions=int(max_positions), max_leverage=int(max_leverage),
-                enable_roe=enable_roe, sl_roe=float(sl_roe), tp_roe=float(tp_roe),
-                allow_long=allow_long, allow_short=allow_short,
+                exchange=exchange_name, 
+                market_type=market_type, 
+                scan_limit_count=scan_limit,
+                timeframes=timeframes or ["4h", "1d"], 
+                indicator_multiplier=multiplier,
+                candle_limit=candle_limit, 
+                risk_usdt=risk, 
+                max_notional_usdt=max_notional,
+                max_positions=int(max_positions), 
+                max_leverage=int(max_leverage),
+                enable_roe=enable_roe, 
+                sl_roe=float(sl_roe), 
+                tp_roe=float(tp_roe),
+                allow_long=allow_long, 
+                allow_short=allow_short,
             )
+            
             cfg["tf_settings"][selected_tf] = {
-                "ema_fast": int(fast), "ema_slow": int(slow), "adx_threshold": float(adx),
-                "rsi_period": int(rsi_period), "rsi_long_min": float(rsi_long_min),
-                "rsi_long_max": float(rsi_long_max), "rsi_short_min": float(rsi_short_min),
-                "rsi_short_max": float(rsi_short_max), "rsi_min": float(base.get("rsi_min", 25)),
+                "ema_fast": int(fast), 
+                "ema_slow": int(slow), 
+                "adx_threshold": float(adx),
+                "rsi_period": int(rsi_period), 
+                "rsi_long_min": float(rsi_long_min),
+                "rsi_long_max": float(rsi_long_max), 
+                "rsi_short_min": float(rsi_short_min),
+                "rsi_short_max": float(rsi_short_max), 
+                "rsi_min": float(base.get("rsi_min", 25)),
                 "rsi_max": float(base.get("rsi_max", 75)),
             }
+            
             save_cfg(cfg)
             exchange_client.clear()
             get_candles.clear()
             st.cache_data.clear()
-            st.success("Zapisano ustawienia.")
+            st.success(f"Zapisano ustawienia dla interwału {selected_tf}.")
             st.rerun()
 
+       
 # -------------------- Połączenie API --------------------
 
 if page == "Połączenie API":
@@ -996,8 +1012,8 @@ if page == "Połączenie API":
 
 if page == "Dziennik":
     st.subheader("Dziennik zdarzeń i transakcji bota")
-    _, deletecol = st.columns([4, 1])
-    with deletecol:
+    _, delete_col = st.columns([4, 1])
+    with delete_col:
         if st.button("🗑️ Wyczyść dziennik", use_container_width=True):
             with db() as con:
                 con.execute("DELETE FROM events")
@@ -1016,9 +1032,53 @@ if page == "Dziennik":
 
 # -------------------- Regulamin i Instrukcja --------------------
 
-if page == "Regulamin i Instrukcja":
-    st.subheader("Regulamin i instrukcja obsługi")
-    st.markdown(""" ### Witaj w Bitget-SaaS Futures System analizuje rynek kontraktów i może składać zlecenia, jeśli włączysz handel rzeczywisty. - Tryb PAPER: służy do testowania; nie wysyła nowych zleceń otwierających. - Auto-Trade: wymaga aktywnej subskrypcji, skonfigurowanego API i wyłączenia trybu PAPER. - TP/SL aplikacji: kontrola działa tylko wtedy, gdy aplikacja jest uruchomiona i odpytywanie działa poprawnie. To nie jest gwarantowany stop na giełdzie. - Ryzyko: futures i dźwignia mogą doprowadzić do utraty środków. Najpierw testuj na koncie demo. - API: nie przyznawaj kluczom uprawnień do wypłat. Ogranicz je do niezbędnych uprawnień. - Płatności: powrót z linku Stripe sam w sobie nie potwierdza płatności; status jest aktywowany ręcznie przez administratora. """)
+def show_terms_and_manual():
+    st.title("Regulamin i Instrukcja Obsługi")
+    st.subheader("Witaj w Bitget-SaaS Futures")
+    st.write("System automatycznego handlu kontraktami futures na rynkach kryptowalutowych.")
+
+    st.markdown("---")
+
+    st.subheader("1. Instrukcja Obsługi i Tryby Pracy")
+    
+    st.markdown("""
+    * **Tryb Paper Trading (Symulacja / Demo):**
+      * Pozwala bezpiecznie testować sygnały i strategie bez otwierania prawdziwych pozycji na giełdzie.
+      * Pozycje są otwierane wirtualnie, co pozwala zweryfikować skuteczność ustawień wskaźników (EMA, RSI, ADX) przed zaangażowaniem kapitału.
+    
+    * **Tryb Auto-Trade (Handel Rzeczywisty):**
+      * Po wyłączeniu trybu Paper Trading i poprawnym skonfigurowaniu kluczy API, bot sam otwiera i zamyka zlecenia bezpośrednio na Twoim koncie giełdowym.
+      * Skanning i automatyczna egzekucja odbywają się w oparciu o wykryte trendy na wybranych interwałach czasowych (od 1m do 1d).
+    
+    * **Zarządzanie Ryzykiem i Ochrona Kapitału:**
+      * Automatyczny **Stop Loss** oraz **Take Profit** (w tym funkcja **ROE Guard**) pilnują otwartych pozycji zgodnie z przyjętymi ustawieniami.
+      * Możesz elastycznie dostosowywać wielkość dźwigni, maksymalną liczbę otwartych pozycji oraz podział kapitału.
+    """)
+
+    st.markdown("---")
+
+    st.subheader("2. Bezpieczeństwo i Konfiguracja API")
+    
+    st.markdown("""
+    * **Uprawnienia Kluczy API:** Do poprawnego działania bota wymagane są klucze API z giełdy z uprawnieniami do **Odczytu (Read)** oraz **Handlu Futures (Trade)**. **Nigdy nie włączaj uprawnień do wypłat (Transfer / Withdrawal)**.
+    * **Ochrona Danych:** Twoje dane dostępowe oraz klucze API są szyfrowane i bezpiecznie przechowywane w bazie danych.
+    """)
+
+    st.markdown("---")
+
+    st.subheader("3. Regulamin i Wyłączenie Odpowiedzialności (Disclaimer)")
+    
+    st.markdown("""
+    1. **Ostrzeżenie o Ryzyku:** Handel kontraktami pochodnymi (Futures) z użyciem dźwigni finansowej wiąże się z wysokim ryzykiem utraty kapitału. Ceny kryptowalut charakteryzują się wysoką zmiennością.
+    2. **Brak Porady Inwestycyjnej:** Oprogramowanie *Bitget-SaaS Futures* jest narzędziem technologicznym i nie stanowi porady inwestycyjnej ani finansowej.
+    3. **Odpowiedzialność Użytkownika:** Użytkownik ponosi pełną odpowiedzialność za dobór parametrów handlowych (dźwignia, Stop Loss, wskaźniki) oraz za wszelkie zyski lub straty wynikające z pracy bota.
+    4. **Ciągłość Działania:** Twórcy bota nie ponoszą odpowiedzialności za opóźnienia w realizacji zleceń wynikające z prac konserwacyjnych lub awarii po stronie API giełdy.
+    """)
+
+# Zmień "Regulamin" w cudzysłowie poniżej na dokładnie taki tekst, jaki masz w menu bocznym (sidebarze) dla tej zakładki:
+if page == "Regulamin Instrukcja":
+    show_terms_and_manual()
+
 
 # -------------------- Panel Administratora --------------------
 
