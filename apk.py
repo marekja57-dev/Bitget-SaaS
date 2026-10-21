@@ -405,14 +405,21 @@ def balance_usdt(ex, positions=None):
             free = asfloat((balance.get("free") or {}).get("USDT"), 0.0)
             total = asfloat((balance.get("total") or {}).get("total" if "total" in balance else "USDT"), free)
 
-        # Jeśli giełda nie odjęła marginu od 'free', obliczamy go z aktywnych pozycji
+        # Precyzyjne obliczanie/sumowanie marginesu z aktywnych pozycji
         used_margin = 0.0
         if positions:
             for p in positions:
-                used_margin += asfloat(p.get("initialMargin") or p.get("margin") or 0.0)
-        
-        # Jeśli wolne środki są równe całkowitym, korygujemy je o faktyczny margin pozycji
-        if free >= total and used_margin > 0:
+                m = asfloat(p.get("initialMargin") or p.get("margin"))
+                if m <= 0:
+                    contracts = abs(asfloat(p.get("contracts")))
+                    contract_size = asfloat(p.get("contractSize"), 1.0) or 1.0
+                    price = asfloat(p.get("markPrice") or p.get("entryPrice"))
+                    leverage = max(1.0, asfloat(p.get("leverage"), 1.0))
+                    m = (contracts * contract_size * price) / leverage
+                used_margin += m
+
+        # Korygujemy wolne środki o faktyczny margines zajęty przez pozycje
+        if used_margin > 0:
             free = max(0.0, total - used_margin)
 
         return max(0.0, free), max(0.0, total)
