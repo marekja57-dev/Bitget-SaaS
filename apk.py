@@ -14,6 +14,12 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import streamlit as st
+def asfloat(value):
+    try:
+        number = float(value)
+        return number if np.isfinite(number) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 try:
     import ccxt
@@ -78,7 +84,6 @@ st.markdown(
 )
 
 # -------------------- Baza danych i funkcje pomocnicze --------------------
-
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
     con.row_factory = sqlite3.Row
@@ -91,13 +96,6 @@ def db():
     con.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,subscription TEXT,stripe_paid INTEGER NOT NULL DEFAULT 0,email TEXT UNIQUE)")
     con.commit()
     return con
-
-def asfloat(value):
-    try:
-        number = float(value)
-        return number if np.isfinite(number) else 0.0
-    except (TypeError, ValueError):
-        return 0.0
 
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
@@ -172,14 +170,9 @@ def pair_cooldown_remaining(symbol, seconds=1800):
 def load_creds(user_id):
     if not user_id:
         return ("bitget", "", "", "")
-    try:
-        with db() as con:
-            row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
-            if not row:
-                return ("bitget", "", "", "")
-            return (row["exchange"] or "bitget", row["api_key"] or "", row["secret"] or "", row["password"] or "")
-    except Exception:
-        return ("bitget", "", "", "")
+    with db() as con:
+        row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
+        return tuple(row) if row else ("bitget", "", "", "")
 
 def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
@@ -192,6 +185,7 @@ def create_stripe_checkout_url():
     if not STRIPE_CHECKOUT_FALLBACK.startswith("https://buy.stripe.com/"):
         raise ValueError("Ustaw prawidłowy aktywny link płatności Stripe.")
     return STRIPE_CHECKOUT_FALLBACK
+
 
 # -------------------- Giełda --------------------
 
