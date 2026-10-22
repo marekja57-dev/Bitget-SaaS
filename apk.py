@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 import time
 from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -76,7 +77,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -------------------- Baza danych --------------------
+# -------------------- Baza danych i funkcje pomocnicze --------------------
 
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
@@ -90,6 +91,13 @@ def db():
     con.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,subscription TEXT,stripe_paid INTEGER NOT NULL DEFAULT 0,email TEXT UNIQUE)")
     con.commit()
     return con
+
+def asfloat(value):
+    try:
+        number = float(value)
+        return number if np.isfinite(number) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
@@ -294,13 +302,6 @@ def signal_for_symbol(cfg, symbol, timeframe):
     finally:
         gc.collect()
 
-def asfloat(value):
-    try:
-        number = float(value)
-        return number if np.isfinite(number) else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
 def balance_usdt(ex, positions=None):
     balance = ex.fetch_balance() or {}
     row = balance.get("USDT") if isinstance(balance.get("USDT"), dict) else {}
@@ -495,7 +496,7 @@ if not st.session_state["authenticated"]:
         with st.form("login_form"):
             login_name = st.text_input("Nazwa użytkownika / e-mail")
             login_pass = st.text_input("Hasło", type="password")
-            submit_login = st.form_submit_button("ZALOGUJ SIĘ", use_container_width=True)
+            submit_login = st.form_submit_button("ZALOGUJ SIĘ", width="stretch")
             if submit_login:
                 with db() as con:
                     row = con.execute("SELECT id,password,stripe_paid,email,username FROM users WHERE username=? OR email=?", (login_name.strip(), login_name.strip().lower())).fetchone()
@@ -524,7 +525,7 @@ if not st.session_state["authenticated"]:
             reg_email = st.text_input("Adres e-mail")
             reg_pass = st.text_input("Hasło", type="password")
             reg_plan = st.selectbox("Subskrypcja", ["Pro Trader (49 PLN / miesiąc)", "VIP SaaS (Roczny)"])
-            submit_reg = st.form_submit_button("ZAREJESTRUJ SIĘ", use_container_width=True)
+            submit_reg = st.form_submit_button("ZAREJESTRUJ SIĘ", width="stretch")
             if submit_reg:
                 if not reg_user.strip() or not reg_pass.strip() or not reg_email.strip():
                     st.error("Uzupełnij login, e-mail i hasło.")
@@ -564,11 +565,11 @@ with st.sidebar:
     else:
         st.warning("Subskrypcja nieopłacona")
         try:
-            st.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", create_stripe_checkout_url(), use_container_width=True)
+            st.link_button("OPŁAĆ SUBSKRYPCJĘ (49 PLN)", create_stripe_checkout_url(), width="stretch")
         except Exception as exc:
             st.error(f"Błąd linku Stripe: {exc}")
         st.caption("Po płatności administrator potwierdza transakcję.")
-    if st.button("Wyloguj", use_container_width=True):
+    if st.button("Wyloguj", width="stretch"):
         for key, default in [
             ("authenticated", False),
             ("logged_in", False),
@@ -579,7 +580,7 @@ with st.sidebar:
         ]:
             st.session_state[key] = default
         st.rerun()
-    if st.button("Wyczyść cache danych", use_container_width=True):
+    if st.button("Wyczyść cache danych", width="stretch"):
         get_candles.clear()
         st.cache_data.clear()
         st.cache_resource.clear()
@@ -599,7 +600,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
             with c2:
                 auto_refresh = st.checkbox("Włącz ciągłe skanowanie", value=bool(cfg["auto_refresh"]))
                 refresh_seconds = st.slider("Odstęp odświeżania (s)", 10, 120, int(cfg["refresh_seconds"]))
-            if st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True):
+            if st.form_submit_button("ZAPISZ USTAWIENIA PRACY", width="stretch"):
                 cfg.update(
                     auto_trade=auto_trade,
                     paper_mode=paper_mode,
@@ -674,7 +675,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 "Cena wejścia": p.get("entryPrice"),
                 "PnL (USDT)": p.get("unrealizedPnl"),
                 "Margin (USDT)": p.get("initialMargin"),
-            } for p in active]), use_container_width=True, hide_index=True)
+            } for p in active]), width="stretch", hide_index=True)
         elif connected and api_ok and not active:
             st.info("Brak otwartych pozycji.")
         elif not connected:
@@ -711,7 +712,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
             if not df_scanner.empty:
                 st.markdown("#### Pełne zestawienie skanera")
-                st.dataframe(df_scanner, use_container_width=True, hide_index=True)
+                st.dataframe(df_scanner, width="stretch", hide_index=True)
 
             if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
@@ -893,7 +894,7 @@ if page == "Ustawienia Strategii":
         with r5:
             rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 55.0)), 1.0, key=f"rsi_short_max_{selected_tf}")
 
-        save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
+        save = st.form_submit_button("ZAPISZ USTAWIENIA", width="stretch")
         if save:
             if fast >= slow:
                 st.error("EMA szybka musi być mniejsza od EMA wolnej.")
@@ -947,7 +948,7 @@ if page == "Połączenie API":
         api_key_input = st.text_input("API Key", value=api_key_saved, type="password")
         secret_input = st.text_input("Secret Key", value=secret_saved, type="password")
         passphrase_input = st.text_input("Passphrase / Hasło", value=passphrase_saved, type="password")
-        submit_creds = st.form_submit_button("ZAPISZ KLUCZE API", use_container_width=True)
+        submit_creds = st.form_submit_button("ZAPISZ KLUCZE API", width="stretch")
         if submit_creds:
             if not current_user_id:
                 st.error("Musisz być zalogowany, aby zapisać klucze.")
@@ -963,7 +964,7 @@ if page == "Dziennik":
     st.subheader("Dziennik zdarzeń i transakcji bota")
     col_del1, col_del2 = st.columns([4, 1])
     with col_del2:
-        if st.button("🗑️ Wyczyść dziennik", use_container_width=True):
+        if st.button("🗑️ Wyczyść dziennik", width="stretch"):
             try:
                 with db() as con:
                     con.execute("DELETE FROM events")
@@ -977,7 +978,7 @@ if page == "Dziennik":
         with db() as con:
             rows = con.execute("SELECT ts, level, message FROM events ORDER BY id DESC LIMIT 100").fetchall()
         if rows:
-            st.dataframe(pd.DataFrame([dict(r) for r in rows]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame([dict(r) for r in rows]), width="stretch", hide_index=True)
         else:
             st.info("Brak wpisów w dzienniku.")
     except Exception as exc:
@@ -1004,7 +1005,7 @@ if page == "Panel Administratora" and is_user_admin():
             users = con.execute("SELECT id, username, email, stripe_paid, subscription FROM users").fetchall()
         if users:
             df_users = pd.DataFrame([dict(u) for u in users])
-            st.dataframe(df_users, use_container_width=True, hide_index=True)
+            st.dataframe(df_users, width="stretch", hide_index=True)
             selected_uid = st.number_input("ID użytkownika do aktywacji subskrypcji", min_value=1, step=1)
             if st.button("Aktywuj subskrypcję dla wybranego ID"):
                 with db() as con:
@@ -1016,3 +1017,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
+
