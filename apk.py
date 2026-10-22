@@ -20,11 +20,6 @@ try:
 except ImportError:
     ccxt = None
 
-try:
-    from cryptography.fernet import Fernet
-except ImportError:
-    Fernet = None
-
 st.set_page_config(page_title="Bitget-SaaS Futures", page_icon="📈", layout="wide")
 
 APP_DIR = Path(__file__).resolve().parent
@@ -81,26 +76,6 @@ st.markdown(
     """<style> .stApp{background:radial-gradient(ellipse at 40% -20%,#103e78 0%,#071a36 42%,#050e20 100%);color:#eaf3ff} [data-testid="stHeader"]{background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container{padding-top:2rem;max-width:1600px} [data-testid="stSidebar"]{background:linear-gradient(180deg,#06152d,#081f42)} .brand{font-weight:900;font-size:30px;color:#eaf5ff;margin:.5rem 0} .metric-card{border:1px solid #d8ad52;border-radius:14px;padding:18px;height:150px;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#1b2b44,#061225);overflow:hidden} .metric-label{color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-value{color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-note{color:#a9bdd7;font-size:12px;margin-top:8px} </style>""",
     unsafe_allow_html=True,
 )
-
-# -------------------- Automatyczny klucz szyfrowania --------------------
-def get_fernet():
-    if Fernet is None:
-        return None
-    key = os.getenv("BITGET_SAAS_ENCRYPTION_KEY")
-    if not key:
-        key_file = APP_DIR / "encryption.key"
-        if key_file.exists():
-            key = key_file.read_text().strip()
-        else:
-            key = Fernet.generate_key().decode()
-            try:
-                key_file.write_text(key)
-            except Exception:
-                pass
-    try:
-        return Fernet(key.encode())
-    except Exception:
-        return None
 
 # -------------------- Baza danych i funkcje pomocnicze --------------------
 
@@ -202,41 +177,15 @@ def load_creds(user_id):
             row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
             if not row:
                 return ("bitget", "", "", "")
-            
-            ex, ak, sk, pw = row["exchange"], row["api_key"], row["secret"], row["password"]
-            f = get_fernet()
-            if f:
-                try:
-                    if ak and ak.startswith("gAAAAA"): ak = f.decrypt(ak.encode()).decode()
-                except Exception: pass
-                try:
-                    if sk and sk.startswith("gAAAAA"): sk = f.decrypt(sk.encode()).decode()
-                except Exception: pass
-                try:
-                    if pw and pw.startswith("gAAAAA"): pw = f.decrypt(pw.encode()).decode()
-                except Exception: pass
-            return (ex or "bitget", ak or "", sk or "", pw or "")
+            return (row["exchange"] or "bitget", row["api_key"] or "", row["secret"] or "", row["password"] or "")
     except Exception:
         return ("bitget", "", "", "")
 
 def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
         return
-    f = get_fernet()
-    ak, sk, pw = api_key, secret, passphrase
-    if f:
-        try:
-            if ak: ak = f.encrypt(ak.encode()).decode()
-        except Exception: pass
-        try:
-            if sk: sk = f.encrypt(sk.encode()).decode()
-        except Exception: pass
-        try:
-            if pw: pw = f.encrypt(pw.encode()).decode()
-        except Exception: pass
-
     with db() as con:
-        con.execute("INSERT INTO user_credentials(user_id,exchange,api_key,secret,password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange, api_key=excluded.api_key,secret=excluded.secret,password=excluded.password", (user_id, exchange, ak, sk, pw))
+        con.execute("INSERT INTO user_credentials(user_id,exchange,api_key,secret,password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange, api_key=excluded.api_key,secret=excluded.secret,password=excluded.password", (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
 def create_stripe_checkout_url():
@@ -1073,3 +1022,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
+
