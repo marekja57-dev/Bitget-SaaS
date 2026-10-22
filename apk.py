@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import gc
 import hashlib
 import hmac
@@ -16,20 +14,16 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-
 try:
     import ccxt
 except ImportError:
     ccxt = None
 
-
 st.set_page_config(page_title="Bitget-SaaS Futures", page_icon="📈", layout="wide")
-
 
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("BITGET_SAAS_DB", str(APP_DIR / "bitget_saas.db")))
 LOG_PATH = APP_DIR / "trading.log"
-
 
 logging.basicConfig(
     filename=str(LOG_PATH),
@@ -37,12 +31,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 
-
 STRIPE_CHECKOUT_FALLBACK = "https://buy.stripe.com/8x2dRa4CbdaXfSAf6V3oA03"
 ADMIN_EMAILS = {"marekja57@wp.pl", "admin@bot-bitget.pl"}
 TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
-
 
 DEFAULT_TF_SETTINGS = {
     "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
@@ -55,7 +47,6 @@ DEFAULT_TF_SETTINGS = {
     "4h": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 18.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
     "1d": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
 }
-
 
 DEFAULTS = {
     "exchange": "bitget",
@@ -80,15 +71,12 @@ DEFAULTS = {
     "scan_limit_count": 10,
 }
 
-
 st.markdown(
     """<style> .stApp{background:radial-gradient(ellipse at 40% -20%,#103e78 0%,#071a36 42%,#050e20 100%);color:#eaf3ff} [data-testid="stHeader"]{background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container{padding-top:2rem;max-width:1600px} [data-testid="stSidebar"]{background:linear-gradient(180deg,#06152d,#081f42)} .brand{font-weight:900;font-size:30px;color:#eaf5ff;margin:.5rem 0} .metric-card{border:1px solid #d8ad52;border-radius:14px;padding:18px;height:150px;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#1b2b44,#061225);overflow:hidden} .metric-label{color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-value{color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-note{color:#a9bdd7;font-size:12px;margin-top:8px} </style>""",
     unsafe_allow_html=True,
 )
 
-
 # -------------------- Baza danych --------------------
-
 
 def db():
     con = sqlite3.connect(DB_PATH, timeout=20)
@@ -103,12 +91,10 @@ def db():
     con.commit()
     return con
 
-
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 240000).hex()
     return f"pbkdf2${salt}${digest}"
-
 
 def verify_password(stored, password):
     if stored == password:
@@ -121,7 +107,6 @@ def verify_password(stored, password):
         return hmac.compare_digest(check, digest), False
     except Exception:
         return False, False
-
 
 def load_cfg():
     cfg = json.loads(json.dumps(DEFAULTS))
@@ -139,12 +124,10 @@ def load_cfg():
         logging.exception("Nie udało się wczytać ustawień")
     return cfg
 
-
 def save_cfg(cfg):
     with db() as con:
         con.execute("INSERT INTO settings(k,v) VALUES('main',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (json.dumps(cfg, ensure_ascii=False),))
         con.commit()
-
 
 def event(level, message):
     message = str(message)[:1500]
@@ -153,14 +136,12 @@ def event(level, message):
         con.execute("INSERT INTO events(ts,level,message) VALUES(?,?,?)", (datetime.now(timezone.utc).isoformat(), str(level), message))
         con.commit()
 
-
 def set_pair_cooldown(symbol, reason, seconds=1800):
     if not symbol:
         return
     with db() as con:
         con.execute("INSERT INTO pair_cooldowns(symbol, closed_at, reason) VALUES(?,?,?) ON CONFLICT(symbol) DO UPDATE SET closed_at=excluded.closed_at, reason=excluded.reason", (str(symbol), time.time(), str(reason)))
         con.commit()
-
 
 def pair_cooldown_remaining(symbol, seconds=1800):
     if not symbol:
@@ -180,14 +161,12 @@ def pair_cooldown_remaining(symbol, seconds=1800):
         logging.exception("Nie udało się sprawdzić blokady pary %s", symbol)
         return int(seconds)
 
-
 def load_creds(user_id):
     if not user_id:
         return ("bitget", "", "", "")
     with db() as con:
         row = con.execute("SELECT exchange,api_key,secret,password FROM user_credentials WHERE user_id=?", (user_id,)).fetchone()
         return tuple(row) if row else ("bitget", "", "", "")
-
 
 def save_creds(user_id, exchange, api_key, secret, passphrase):
     if not user_id:
@@ -196,15 +175,12 @@ def save_creds(user_id, exchange, api_key, secret, passphrase):
         con.execute("INSERT INTO user_credentials(user_id,exchange,api_key,secret,password) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET exchange=excluded.exchange, api_key=excluded.api_key,secret=excluded.secret,password=excluded.password", (user_id, exchange, api_key, secret, passphrase))
         con.commit()
 
-
 def create_stripe_checkout_url():
     if not STRIPE_CHECKOUT_FALLBACK.startswith("https://buy.stripe.com/"):
         raise ValueError("Ustaw prawidłowy aktywny link płatności Stripe.")
     return STRIPE_CHECKOUT_FALLBACK
 
-
 # -------------------- Giełda --------------------
-
 
 @st.cache_resource(show_spinner=False)
 def exchange_client(ex_id, api_key, secret, passphrase, market_type):
@@ -224,21 +200,11 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
         opts["password"] = passphrase
     return cls(opts)
 
-
 @st.cache_data(ttl=30, max_entries=20, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
     return pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
-
-
-def asfloat(value):
-    try:
-        number = float(value)
-        return number if np.isfinite(number) else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
 
 def indicators(df, fast, slow, rsi_period=14):
     d = df.copy()
@@ -268,7 +234,6 @@ def indicators(df, fast, slow, rsi_period=14):
     d["adx"] = dx.ewm(alpha=1 / 14, adjust=False).mean()
     return d
 
-
 def effective_tf_cfg(cfg, tf):
     base = cfg.get("tf_settings", {}).get(tf, DEFAULT_TF_SETTINGS.get(tf, DEFAULT_TF_SETTINGS["1h"]))
     fast = max(2, int(round(float(base["ema_fast"]))))
@@ -285,7 +250,6 @@ def effective_tf_cfg(cfg, tf):
         "rsi_min": float(base.get("rsi_min", 30.0)),
         "rsi_max": float(base.get("rsi_max", 70.0)),
     }
-
 
 def signal_for_symbol(cfg, symbol, timeframe):
     try:
@@ -330,6 +294,12 @@ def signal_for_symbol(cfg, symbol, timeframe):
     finally:
         gc.collect()
 
+def asfloat(value):
+    try:
+        number = float(value)
+        return number if np.isfinite(number) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 def balance_usdt(ex, positions=None):
     balance = ex.fetch_balance() or {}
@@ -382,10 +352,8 @@ def balance_usdt(ex, positions=None):
 
     return max(0.0, free), max(0.0, total)
 
-
 def active_positions(ex):
     return [p for p in (ex.fetch_positions() or []) if abs(asfloat(p.get("contracts"))) > 0]
-
 
 def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None):
     qty = float(ex.amount_to_precision(symbol, qty))
@@ -400,7 +368,6 @@ def market_order(ex, symbol, side, qty, reduce_only=False, reference_price=None)
         if not np.isfinite(notional) or notional < MIN_ORDER_NOTIONAL_USDT:
             raise ValueError(f"Wartość zlecenia {notional:.4f} USDT jest poniżej minimum 10 USDT.")
     return ex.create_order(symbol, "market", side, qty, None, {"reduceOnly": True} if reduce_only else {})
-
 
 def manage_position_exits(ex, positions, cfg):
     sl_roe = max(5.0, float(cfg.get("sl_roe", 20.0)))
@@ -447,7 +414,6 @@ def manage_position_exits(ex, positions, cfg):
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
     return closed
 
-
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
@@ -468,7 +434,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     if not np.isfinite(qty) or qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
         return 0.0, 0.0
     return qty, notional
-
 
 def ranked_symbols(ex, limit_count):
     now = time.time()
@@ -497,9 +462,7 @@ def ranked_symbols(ex, limit_count):
     gc.collect()
     return ranked
 
-
 # -------------------- Sesja / logowanie --------------------
-
 
 for key, default in {
     "authenticated": False,
@@ -512,23 +475,18 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-
 if "session_started_at" not in st.session_state:
     st.session_state["session_started_at"] = time.time()
-
 
 def is_user_admin():
     return str(st.session_state.get("user_email", "")).strip().lower() in ADMIN_EMAILS or str(st.session_state.get("username", "")).strip().lower() == "admin"
 
-
 def is_user_paid():
     return bool(st.session_state.get("stripe_paid", 0)) or is_user_admin()
-
 
 if st.query_params.get("success") == "true":
     st.info("Powrót z płatności. Administrator potwierdzi płatność przed aktywacją dostępu.")
     st.query_params.clear()
-
 
 if not st.session_state["authenticated"]:
     st.markdown('<div class="brand" style="text-align:center">Bitget-SaaS</div><div style="text-align:center">AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
@@ -582,11 +540,9 @@ if not st.session_state["authenticated"]:
                         st.error("Taki login lub adres e-mail już istnieje.")
     st.stop()
 
-
 cfg = load_cfg()
 current_user_id = st.session_state.get("user_id")
 ex_id, api_key_saved, secret_saved, passphrase_saved = load_creds(current_user_id)
-
 
 with st.sidebar:
     st.markdown(f'<div class="brand">Bitget-SaaS</div><div>Witaj, {st.session_state["username"]}</div>', unsafe_allow_html=True)
@@ -630,9 +586,7 @@ with st.sidebar:
         st.success("Cache wyczyszczony. Odśwież stronę.")
     st.markdown('<div class="brand">Bitget-SaaS Futures</div><div>AUTONOMICZNY SYSTEM TRANSAKCYJNY</div>', unsafe_allow_html=True)
 
-
 # -------------------- Pulpit --------------------
-
 
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Główny Pulpit Transakcyjny - Podgląd na żywo")
@@ -655,15 +609,12 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 save_cfg(cfg)
                 st.rerun()
 
-
     refresh_sec = max(10, int(cfg.get("refresh_seconds", 30)))
-
 
     @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
     def render_full_dashboard():
         current_cfg = load_cfg()
         st.caption(f"Odświeżanie co {refresh_sec} s.")
-
 
         with st.expander("🔍 Podgląd aktualnie wczytanych progów wskaźników (Debug)", expanded=True):
             dbg_tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
@@ -678,7 +629,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     - RSI Long: `{t_params['rsi_long_min']} - {t_params['rsi_long_max']}`
                     - RSI Short: `{t_params['rsi_short_min']} - {t_params['rsi_short_max']}`
                     """)
-
 
         total_balance = free_balance = session_pnl = used_margin = 0.0
         active = []
@@ -699,10 +649,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
             except Exception as exc:
                 st.warning(f"Błąd połączenia z giełdą / pozycjami: {exc}")
 
-
         def metric_card(label, value, note=""):
             st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div><div class="metric-note">{note}</div></div>', unsafe_allow_html=True)
-
 
         m1, m2, m3, m4 = st.columns(4, gap="medium")
         with m1:
@@ -715,7 +663,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
             elapsed = max(0, int(time.time() - st.session_state["session_started_at"]))
             clock = f"{elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}"
             metric_card("Czas sesji", clock, f"Odświeżanie co {refresh_sec}s")
-
 
         st.divider()
         st.markdown("### Aktywne pozycje na giełdzie")
@@ -733,10 +680,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
         elif not connected:
             st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
 
-
         st.divider()
         st.markdown("### 🏆 Skaner Rynku i Najlepsze Okazje")
-
 
         try:
             ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
@@ -744,7 +689,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
             tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-
 
             all_signals = []
             for symbol in symbols:
@@ -754,7 +698,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     adx_val = res.get("adx") or 0.0
                     res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
                     all_signals.append(res)
-
 
             df_scanner = pd.DataFrame([{
                 "Symbol": item["symbol"],
@@ -766,11 +709,9 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 "Komunikat": item["reason"]
             } for item in all_signals])
 
-
             if not df_scanner.empty:
                 st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
-
 
             if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
@@ -785,7 +726,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                             if s["symbol"] not in seen_symbols:
                                 seen_symbols.add(s["symbol"])
                                 unique_valid_signals.append(s)
-
 
                         for item in unique_valid_signals:
                             current_positions = active_positions(live_client)
@@ -816,10 +756,8 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     except Exception as exc:
                         event("ERROR", f"Błąd w pętli Auto-Trade: {exc}")
 
-
             st.markdown("### 🌟 Top 3 Najlepsze Okazje Rynkowe")
             top_3_list = sorted([s for s in all_signals if s["signal"] in ("LONG", "SHORT")], key=lambda x: x.get("score", 0), reverse=True)[:3]
-
 
             if top_3_list:
                 for i, item in enumerate(top_3_list, 1):
@@ -876,9 +814,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         finally:
             gc.collect()
 
-
     render_full_dashboard()
-
 
     st.divider()
     st.markdown("### Awaryjne zamknięcie wszystkich pozycji")
@@ -905,9 +841,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
         except Exception as exc:
             st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
 
-
 # -------------------- Ustawienia strategii --------------------
-
 
 if page == "Ustawienia Strategii":
     st.subheader("Ustawienia strategii i ryzyka")
@@ -916,7 +850,6 @@ if page == "Ustawienia Strategii":
     selected_tf = st.selectbox("Interwał do edycji", TF_OPTIONS, index=TF_OPTIONS.index(st.session_state["selected_tf_edit"]))
     st.session_state["selected_tf_edit"] = selected_tf
     base = cfg["tf_settings"].get(selected_tf, DEFAULT_TF_SETTINGS[selected_tf])
-
 
     with st.form("cfgform"):
         left, right = st.columns(2)
@@ -937,7 +870,6 @@ if page == "Ustawienia Strategii":
             allow_long = st.checkbox("Pozwól na LONG", bool(cfg["allow_long"]), key="cfg_allow_long")
             allow_short = st.checkbox("Pozwól na SHORT", bool(cfg["allow_short"]), key="cfg_allow_short")
 
-
         st.markdown(f"### Parametry bazowe dla {selected_tf}")
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -946,7 +878,6 @@ if page == "Ustawienia Strategii":
             slow = st.slider("EMA wolna", 3, 300, int(base["ema_slow"]), 1, key=f"ema_slow_{selected_tf}")
         with c3:
             adx = st.number_input("Minimalny ADX", 0.0, 100.0, float(base["adx_threshold"]), key=f"adx_threshold_{selected_tf}")
-
 
         st.markdown("#### Ustawienia RSI")
         r1, r2, r3 = st.columns(3)
@@ -961,7 +892,6 @@ if page == "Ustawienia Strategii":
             rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 25.0)), 1.0, key=f"rsi_short_min_{selected_tf}")
         with r5:
             rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 55.0)), 1.0, key=f"rsi_short_max_{selected_tf}")
-
 
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
         if save:
@@ -1004,14 +934,11 @@ if page == "Ustawienia Strategii":
                 exchange_client.clear()
                 get_candles.clear()
                 st.cache_data.clear()
-                st.cache_resource.clear()
                 gc.collect()
                 st.success("Zapisano ustawienia.")
                 st.rerun()
 
-
 # -------------------- Połączenie API --------------------
-
 
 if page == "Połączenie API":
     st.subheader("Połączenie z giełdą")
@@ -1030,9 +957,7 @@ if page == "Połączenie API":
                 st.success("Klucze API zostały zapisane pomyślnie.")
                 st.rerun()
 
-
 # -------------------- Dziennik --------------------
-
 
 if page == "Dziennik":
     st.subheader("Dziennik zdarzeń i transakcji bota")
@@ -1048,7 +973,6 @@ if page == "Dziennik":
             except Exception as exc:
                 st.error(f"Nie udało się wyczyścić dziennika: {exc}")
 
-
     try:
         with db() as con:
             rows = con.execute("SELECT ts, level, message FROM events ORDER BY id DESC LIMIT 100").fetchall()
@@ -1059,9 +983,7 @@ if page == "Dziennik":
     except Exception as exc:
         st.error(f"Nie udało się wczytać dziennika: {exc}")
 
-
 # -------------------- Regulamin i Instrukcja --------------------
-
 
 if page == "Regulamin i Instrukcja":
     st.subheader("Regulamin i Instrukcja Obsługi")
@@ -1073,9 +995,7 @@ if page == "Regulamin i Instrukcja":
     - Zarządzanie ryzykiem: Automatyczny Stop Loss oraz Take Profit pilnują otwartych pozycji zgodnie z ustawieniami.
     """)
 
-
 # -------------------- Panel Administratora --------------------
-
 
 if page == "Panel Administratora" and is_user_admin():
     st.subheader("Panel Administratora - Zarządzanie Użytkownikami")
@@ -1096,3 +1016,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
+
