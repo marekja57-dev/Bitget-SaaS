@@ -1,3 +1,5 @@
+                run_engine_iteration()
+
 import gc
 import hashlib
 import hmac
@@ -1116,7 +1118,18 @@ else:
                             set_pair_cooldown(sym, "AUTO_OPEN", 1800)
             else:
                 print("Worker tła: Brak skonfigurowanych kluczy API w bazie danych.")
-        except Exception as e:
-            print(f"Błąd w pętli workera tła: {e}")
-        
-        time.sleep(max(10, int(load_cfg().get("refresh_seconds", 30))))
+
+        except Exception as exc:
+            log_event("ERROR", f"Ogólny błąd w pętli silnika: {exc}")
+
+    def main_loop():
+        log_event("INFO", "--- AUTONOMICZNY SILNIK SAAS URUCHOMIONY ---")
+        while True:
+            try:
+                run_engine_iteration()
+            except Exception as e:
+                log_event("ERROR", f"Krytyczny błąd pętli głównej silnika: {e}")
+            time.sleep(30)
+
+    if __name__ == "__main__":
+        main_loop()
