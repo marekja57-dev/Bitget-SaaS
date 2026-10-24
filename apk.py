@@ -1,4 +1,3 @@
-                run_engine_iteration()
 
 import gc
 import hashlib
@@ -1107,29 +1106,32 @@ else:
                             continue
                         qty, notional = calc_qty(live_client, sym, total, free, price, cfg)
                         if qty > 0 and notional >= MIN_ORDER_NOTIONAL_USDT:
-                            try:
-                                live_client.set_leverage(int(cfg["max_leverage"]), sym)
-                            except Exception:
-                                pass
-                            order_side = "buy" if sig == "LONG" else "sell"
-                            ord_res = market_order(live_client, sym, order_side, qty, reference_price=price)
-                            msg = f"AUTO-TRADE [TŁO]: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
-                            event("TRADE", msg)
-                            set_pair_cooldown(sym, "AUTO_OPEN", 1800)
-            else:
-                print("Worker tła: Brak skonfigurowanych kluczy API w bazie danych.")
+                                        try:
+                                            client.set_leverage(int(cfg["max_leverage"]), symbol)
+                                        except Exception:
+                                            pass
+                                        
+                                        order_side = "buy" if sig == "LONG" else "sell"
+                                        ord_res = client.create_order(symbol, "market", order_side, qty, None, {})
+                                        log_event("TRADE", f"SILNIK [Konto: {acc['email']}]: Otwarto {sig} na {symbol} qty={qty} (ID: {ord_res.get('id')})")
+                                        break
+        except Exception:
+            continue
+
+        except Exception as acc_exc:
+            log_event("ERROR", f"Błąd silnika dla konta {acc['email']}: {acc_exc}")
 
         except Exception as exc:
             log_event("ERROR", f"Ogólny błąd w pętli silnika: {exc}")
 
-    def main_loop():
-        log_event("INFO", "--- AUTONOMICZNY SILNIK SAAS URUCHOMIONY ---")
-        while True:
-            try:
-                run_engine_iteration()
-            except Exception as e:
-                log_event("ERROR", f"Krytyczny błąd pętli głównej silnika: {e}")
-            time.sleep(30)
+def main_loop():
+    log_event("INFO", "--- AUTONOMICZNY SILNIK SAAS URUCHOMIONY ---")
+    while True:
+        try:
+            run_engine_iteration()
+        except Exception as e:
+            log_event("ERROR", f"Krytyczny błąd pętli głównej silnika: {e}")
+        time.sleep(30)
 
-    if __name__ == "__main__":
-        main_loop()
+if __name__ == "__main__":
+    main_loop()
