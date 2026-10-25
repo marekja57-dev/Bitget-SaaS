@@ -486,6 +486,16 @@ def ranked_symbols(ex, limit_count):
     gc.collect()
     return ranked
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_all_usdt_symbols(ex_id, market_type):
+    try:
+        ex = exchange_client(ex_id, "", "", "", market_type)
+        markets = ex.load_markets()
+        all_syms = sorted([s for s, m in markets.items() if m.get("active") is not False and m.get("quote") == "USDT" and m.get("linear") and m.get("swap", False)])
+        return all_syms
+    except Exception:
+        return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
+
 # -------------------- Sesja / logowanie --------------------
 
 for key, default in {
@@ -614,19 +624,48 @@ with st.sidebar:
 
 if page == "Automatyczny Skaner i Auto-Handel":
     st.subheader("Główny Pulpit Transakcyjny - Podgląd na żywo")
-    with st.expander("Ustawienia trybu pracy", expanded=False):
+
+    # --- SZYBKI PANEL STEROWANIA TRYBEM AUTOMATYCZNYM ---
+    st.markdown("### 🛑 Szybki Panel: Automat / Tryb Ręczny")
+    col_mode1, col_mode2 = st.columns(2)
+    with col_mode1:
+        if cfg.get("auto_trade", False):
+            st.error("⚠️ AUTOHANDEL JEST WŁĄCZONY (Bot sam otwiera pozycje)")
+            if st.button("🔴 ZATRZYMAJ AUTOHANDEL (Przejdź na Tryb Ręczny)", use_container_width=True):
+                cfg["auto_trade"] = False
+                save_cfg(cfg)
+                event("INFO", "Wyłączono autohandel ręcznie z pulpitu.")
+                st.success("Autohandel zatrzymany! Jesteś w trybie czysto ręcznym.")
+                st.rerun()
+        else:
+            st.success("🟢 AUTOHANDEL JEST WYŁĄCZONY (Działa tylko Twój tryb ręczny)")
+            if st.button("🟢 WŁĄCZ AUTOHANDEL (Automatyczne wejścia)", use_container_width=True):
+                cfg["auto_trade"] = True
+                save_cfg(cfg)
+                event("INFO", "Włączono autohandel ręcznie z pulpitu.")
+                st.rerun()
+    with col_mode2:
+        # Przycisk szybkiego przełączania trybu Paper / Real
+        current_paper = bool(cfg.get("paper_mode", True))
+        paper_label = "Tryb: PAPER (Symulacja)" if current_paper else "Tryb: REAL (Prawdziwe środki)"
+        if st.button(f"🔄 Zmień {paper_label}", use_container_width=True):
+            cfg["paper_mode"] = not current_paper
+            save_cfg(cfg)
+            st.rerun()
+
+    with st.expander("Zaawansowane ustawienia trybu pracy", expanded=False):
         with st.form("control_form"):
             c1, c2 = st.columns(2)
             with c1:
-                auto_trade = st.checkbox("Włącz automatyczny handel", value=bool(cfg["auto_trade"]))
-                paper_mode = st.checkbox("Tryb PAPER - bez zleceń na giełdzie", value=bool(cfg["paper_mode"]))
+                auto_trade_form = st.checkbox("Włącz automatyczny handel", value=bool(cfg["auto_trade"]))
+                paper_mode_form = st.checkbox("Tryb PAPER - bez zleceń na giełdzie", value=bool(cfg["paper_mode"]))
             with c2:
                 auto_refresh = st.checkbox("Włącz ciągłe skanowanie", value=bool(cfg["auto_refresh"]))
                 refresh_seconds = st.slider("Odstęp odświeżania (s)", 10, 120, int(cfg["refresh_seconds"]))
             if st.form_submit_button("ZAPISZ USTAWIENIA PRACY", use_container_width=True):
                 cfg.update(
-                    auto_trade=auto_trade,
-                    paper_mode=paper_mode,
+                    auto_trade=auto_trade_form,
+                    paper_mode=paper_mode_form,
                     auto_refresh=auto_refresh,
                     refresh_seconds=refresh_seconds,
                 )
@@ -691,17 +730,19 @@ if page == "Automatyczny Skaner i Auto-Handel":
             st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
 
         st.divider()
-        st.markdown("### 🎛️ RĘCZNY PANEL STEROWANIA (Tryb Ręczny)")
-        st.caption("Wybierz parę i zdecyduj sam, czy wchodzisz w LONG czy SHORT, pomijając automatyczne filtry wskaźników.")
+        st.markdown("### 🎛️ RĘCZNY PANEL STEROWANIA (Wszystkie pary z giełdy)")
+        st.caption("Wybierz dowolną parę z listy i zdecyduj sam, czy wchodzisz w LONG czy SHORT, całkowicie ręcznie.")
         
+        all_market_symbols = get_all_usdt_symbols(current_cfg["exchange"], current_cfg["market_type"])
+
         with st.form("manual_trade_form"):
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
-                manual_symbol = st.text_input("Symbol pary (np. BTCUSDT, ETHUSDT, APRUSDT)", value="BTCUSDT")
+                manual_symbol = st.selectbox("Wybierz parę kryptowalut", all_market_symbols, index=0 if all_market_symbols else 0)
             with mc2:
                 manual_amount = st.number_input("Kwota inwestycji (USDT)", min_value=10.0, max_value=5000.0, value=float(current_cfg.get("risk_usdt", 10.0)), step=5.0)
             with mc3:
-                manual_direction = st.selectbox("Kierunek zlecenia", ["LONG", "SHORT"])
+                manual_direction = st.selectbox("Kierunek", ["LONG", "SHORT"])
             
             msub1, msub2 = st.columns(2)
             with msub1:
@@ -711,18 +752,13 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
             if submit_manual_long or submit_manual_short:
                 chosen_dir = "LONG" if submit_manual_long else "SHORT"
-                sym_input = manual_symbol.strip().upper()
-                if not sym_input.endswith("/USDT") and not sym_input.endswith("USDT"):
-                    sym_input = sym_input + "USDT"
-                if "/" not in sym_input and sym_input.endswith("USDT"):
-                    sym_input = sym_input[:-4] + "/USDT"
+                sym_input = manual_symbol
 
                 if not (api_key_saved and secret_saved):
                     st.error("Brak kluczy API! Uzupełnij je w zakładce 'Połączenie API'.")
                 else:
                     try:
                         live_client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
-                        # Pobieramy aktualną cenę rynkową dla wpisanego symbolu
                         ticker = live_client.fetch_ticker(sym_input)
                         current_price = asfloat(ticker.get("last") or ticker.get("close"))
                         positions = active_positions(live_client)
@@ -751,7 +787,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         st.error(f"Błąd składania zlecenia ręcznego dla {sym_input}: {exc}")
 
         st.divider()
-        st.markdown("### 🏆 Skaner Rynku i Automatyczne Okazje")
+        st.markdown("### 🏆 Skaner Rynku (Podgląd okazji)")
 
         try:
             ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
@@ -783,7 +819,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
 
-            # Auto-trade pętla
+            # AUTOMATYCZNY HANDEL WYKONYWANY TYLKO WTEDY, GDY AUTO-TRADE JEST WŁĄCZONY
             if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
                     try:
@@ -1033,4 +1069,3 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
-
