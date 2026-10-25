@@ -645,7 +645,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 event("INFO", "Włączono autohandel ręcznie z pulpitu.")
                 st.rerun()
     with col_mode2:
-        # Przycisk szybkiego przełączania trybu Paper / Real
         current_paper = bool(cfg.get("paper_mode", True))
         paper_label = "Tryb: PAPER (Symulacja)" if current_paper else "Tryb: REAL (Prawdziwe środki)"
         if st.button(f"🔄 Zmień {paper_label}", use_container_width=True):
@@ -713,6 +712,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
             clock = f"{elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}"
             metric_card("Czas sesji", clock, f"Odświeżanie co {refresh_sec}s")
 
+        # --- PEŁNA SEKCJA AKTYWNYCH POZYCJI NA GIEŁDZIE (ZARAZ POD METRYKAMI) ---
         st.divider()
         st.markdown("### Aktywne pozycje na giełdzie")
         if active:
@@ -721,8 +721,10 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 "Strona": str(p.get("side")).upper(),
                 "Kontrakty": p.get("contracts"),
                 "Cena wejścia": p.get("entryPrice"),
+                "Cena rynkowa (Mark)": p.get("markPrice"),
                 "PnL (USDT)": p.get("unrealizedPnl"),
-                "Margin (USDT)": p.get("initialMargin"),
+                "Margin (USDT)": p.get("initialMargin") or p.get("margin"),
+                "Dźwignia": p.get("leverage"),
             } for p in active]), use_container_width=True, hide_index=True)
         elif connected and api_ok and not active:
             st.info("Brak otwartych pozycji.")
@@ -819,7 +821,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
 
-            # AUTOMATYCZNY HANDEL WYKONYWANY TYLKO WTEDY, GDY AUTO-TRADE JEST WŁĄCZONY
+            # AUTOMAT DZIAŁA WYŁĄCZNIE GDY AUTO_TRADE JEST WŁĄCZONY
             if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
                     try:
@@ -1069,3 +1071,4 @@ if page == "Panel Administratora" and is_user_admin():
             st.info("Brak zarejestrowanych użytkowników.")
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
+
