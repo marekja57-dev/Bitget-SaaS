@@ -261,30 +261,51 @@ def signal_for_symbol(cfg, symbol, timeframe):
         r = d.iloc[-2]
         if not all(pd.notna(r[x]) and np.isfinite(float(r[x])) for x in ["close", "ema_fast", "ema_slow", "adx", "rsi"]):
             return {"symbol": symbol, "tf": timeframe, "signal": "NEUTRALNY", "price": asfloat(r["close"]), "adx": None, "rsi": None, "reason": "Brak danych wskaźników"}
-        trend_up = r["ema_fast"] > r["ema_slow"]
-        trend_down = r["ema_fast"] < r["ema_slow"]
+        
+        close_val = float(r["close"])
+        ema_f = float(r["ema_fast"])
+        ema_s = float(r["ema_slow"])
         adx_val = float(r["adx"])
         rsi_val = float(r["rsi"])
+
+        # Poprawiona logika anty-górka / anty-dołek (zapobiega wejściom na wyczerpanych ekstremach)
+        # 1. Trend bazowy z EMA
+        trend_up = ema_f > ema_s
+        trend_down = ema_f < ema_s
+
         adx_ok = adx_val >= t["adx_threshold"]
-        long_rsi_ok = t["rsi_long_min"] <= rsi_val <= t["rsi_long_max"]
-        short_rsi_ok = t["rsi_short_min"] <= rsi_val <= t["rsi_short_max"]
+        
+        # Odrzucamy wejścia, jeśli cena odjechała za daleko od szybkiej EMA (unikamy wchodzenia w szpilę/na samą górkę/dołek)
+        # Zapobiega pogoni za uciekającym kursem w ostatniej chwili świecy
+        deviation_pct = abs(close_val - ema_f) / ema_f * 100.0
+        max_allowed_deviation = 4.5 # Maksymalnie 4.5% odchylenia od szybkiej EMA
+        not_overextended = deviation_pct <= max_allowed_deviation
+
+        # Zakresy RSI dla zdrowego wejścia z trendem (bez skrajności typu napędzony szczyt)
+        long_rsi_ok = (t["rsi_long_min"] <= rsi_val <= t["rsi_long_max"]) and (rsi_val < 72.0)
+        short_rsi_ok = (t["rsi_short_min"] <= rsi_val <= t["rsi_short_max"]) and (rsi_val > 28.0)
+
         reasons = []
         if not adx_ok:
             reasons.append(f"ADX {adx_val:.1f} < {t['adx_threshold']}")
+        if not not_overextended:
+            reasons.append(f"Zbyt duże odchylenie od EMA ({deviation_pct:.1f}%)")
         if trend_up and not long_rsi_ok:
-            reasons.append(f"RSI {rsi_val:.1f} poza [LONG: {t['rsi_long_min']}-{t['rsi_long_max']}]")
+            reasons.append(f"RSI {rsi_val:.1f} poza bezpiecznym zakresem LONG")
         if trend_down and not short_rsi_ok:
-            reasons.append(f"RSI {rsi_val:.1f} poza [SHORT: {t['rsi_short_min']}-{t['rsi_short_max']}]")
+            reasons.append(f"RSI {rsi_val:.1f} poza bezpiecznym zakresem SHORT")
         if not trend_up and not trend_down:
             reasons.append("EMA trend neutralny")
-        long_ok = bool(cfg["allow_long"] and trend_up and adx_ok and long_rsi_ok)
-        short_ok = bool(cfg["allow_short"] and trend_down and adx_ok and short_rsi_ok)
+
+        long_ok = bool(cfg["allow_long"] and trend_up and adx_ok and long_rsi_ok and not_overextended)
+        short_ok = bool(cfg["allow_short"] and trend_down and adx_ok and short_rsi_ok and not_overextended)
+
         reason_str = "OK" if (long_ok or short_ok) else (", ".join(reasons) if reasons else "Warunki niespełnione")
         return {
             "symbol": symbol,
             "tf": timeframe,
             "signal": "LONG" if long_ok else "SHORT" if short_ok else "NEUTRALNY",
-            "price": float(r["close"]),
+            "price": close_val,
             "adx": adx_val,
             "rsi": rsi_val,
             "reason": reason_str,
