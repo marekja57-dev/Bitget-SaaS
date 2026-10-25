@@ -72,7 +72,35 @@ DEFAULTS = {
 }
 
 st.markdown(
-    """<style> .stApp{background:radial-gradient(ellipse at 40% -20%,#103e78 0%,#071a36 42%,#050e20 100%);color:#eaf3ff} [data-testid="stHeader"]{background:rgba(3,12,29,.96)} [data-testid="stAppViewContainer"] .main .block-container{padding-top:2rem;max-width:1600px} [data-testid="stSidebar"]{background:linear-gradient(180deg,#06152d,#081f42)} .brand{font-weight:900;font-size:30px;color:#eaf5ff;margin:.5rem 0} .metric-card{border:1px solid #d8ad52;border-radius:14px;padding:18px;height:150px;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#1b2b44,#061225);overflow:hidden} .metric-label{color:#b9c9df;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px} .metric-value{color:#fff2c7;font-size:clamp(20px,1.8vw,29px);font-weight:850;line-height:1.2;overflow-wrap:anywhere} .metric-note{color:#a9bdd7;font-size:12px;margin-top:8px} </style>""",
+    """<style> 
+    .stApp { background: radial-gradient(ellipse at 40% -20%,#103e78 0%,#071a36 42%,#050e20 100%); color: #eaf3ff; } 
+    [data-testid="stHeader"] { background: rgba(3,12,29,.96); } 
+    [data-testid="stAppViewContainer"] .main .block-container { padding-top: 2rem; max-width: 1600px; } 
+    [data-testid="stSidebar"] { background: linear-gradient(180deg,#06152d,#081f42); } 
+    .brand { font-weight: 900; font-size: 30px; color: #D4AF37; margin: .5rem 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; } 
+    
+    /* Ciemnozielone kafelki z ciemnozłotą obwódką */
+    div[data-testid="stMetric"], .metric-card { 
+        border: 2px solid #D4AF37 !important; 
+        border-radius: 14px; 
+        padding: 18px; 
+        height: 150px; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: center; 
+        background: linear-gradient(145deg,#0b2318,#061225) !important; 
+        overflow: hidden; 
+    } 
+    .metric-label { color: #b9c9df; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; } 
+    .metric-value { color: #fff2c7; font-size: clamp(20px,1.8vw,29px); font-weight: 850; line-height: 1.2; overflow-wrap: anywhere; } 
+    .metric-note { color: #a9bdd7; font-size: 12px; margin-top: 8px; } 
+
+    /* Złote nagłówki h1, h2, h3 */
+    h1, h2, h3 {
+        color: #D4AF37 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    </style>""",
     unsafe_allow_html=True,
 )
 
@@ -623,23 +651,22 @@ with st.sidebar:
 # -------------------- Pulpit --------------------
 
 if page == "Automatyczny Skaner i Auto-Handel":
-    st.subheader("Główny Pulpit Transakcyjny - Podgląd na żywo")
+    st.markdown("<h1>Bitget-SaaS — Główny Pulpit Transakcyjny</h1>", unsafe_allow_html=True)
 
-    # --- SZYBKI PANEL STEROWANIA TRYBEM AUTOMATYCZNYM ---
-    st.markdown("### 🛑 Szybki Panel: Automat / Tryb Ręczny")
+    st.markdown("### Szybki Panel: Automat / Tryb Ręczny")
     col_mode1, col_mode2 = st.columns(2)
     with col_mode1:
         if cfg.get("auto_trade", False):
-            st.error("⚠️ AUTOHANDEL JEST WŁĄCZONY (Bot sam otwiera pozycje)")
-            if st.button("🔴 ZATRZYMAJ AUTOHANDEL (Przejdź na Tryb Ręczny)", use_container_width=True):
+            st.error("Autohandel jest włączony (Bot sam otwiera pozycje)")
+            if st.button("Zatrzymaj autohandel (Przejdź na tryb ręczny)", use_container_width=True):
                 cfg["auto_trade"] = False
                 save_cfg(cfg)
                 event("INFO", "Wyłączono autohandel ręcznie z pulpitu.")
                 st.success("Autohandel zatrzymany! Jesteś w trybie czysto ręcznym.")
                 st.rerun()
         else:
-            st.success("🟢 AUTOHANDEL JEST WYŁĄCZONY (Działa tylko Twój tryb ręczny)")
-            if st.button("🟢 WŁĄCZ AUTOHANDEL (Automatyczne wejścia)", use_container_width=True):
+            st.success("Autohandel jest wyłączony (Działa tylko Twój tryb ręczny)")
+            if st.button("Włącz autohandel (Automatyczne wejścia)", use_container_width=True):
                 cfg["auto_trade"] = True
                 save_cfg(cfg)
                 event("INFO", "Włączono autohandel ręcznie z pulpitu.")
@@ -647,7 +674,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
     with col_mode2:
         current_paper = bool(cfg.get("paper_mode", True))
         paper_label = "Tryb: PAPER (Symulacja)" if current_paper else "Tryb: REAL (Prawdziwe środki)"
-        if st.button(f"🔄 Zmień {paper_label}", use_container_width=True):
+        if st.button(f"Zmień {paper_label}", use_container_width=True):
             cfg["paper_mode"] = not current_paper
             save_cfg(cfg)
             st.rerun()
@@ -712,7 +739,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
             clock = f"{elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}"
             metric_card("Czas sesji", clock, f"Odświeżanie co {refresh_sec}s")
 
-        # --- PEŁNA SEKCJA AKTYWNYCH POZYCJI NA GIEŁDZIE (ZARAZ POD METRYKAMI) ---
         st.divider()
         st.markdown("### Aktywne pozycje na giełdzie")
         if active:
@@ -732,7 +758,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
             st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
 
         st.divider()
-        st.markdown("### 🎛️ RĘCZNY PANEL STEROWANIA (Wszystkie pary z giełdy)")
+        st.markdown("### Ręczny Panel Sterowania (Wszystkie pary z giełdy)")
         st.caption("Wybierz dowolną parę z listy i zdecyduj sam, czy wchodzisz w LONG czy SHORT, całkowicie ręcznie.")
         
         all_market_symbols = get_all_usdt_symbols(current_cfg["exchange"], current_cfg["market_type"])
@@ -745,12 +771,12 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 manual_amount = st.number_input("Kwota inwestycji (USDT)", min_value=10.0, max_value=5000.0, value=float(current_cfg.get("risk_usdt", 10.0)), step=5.0)
             with mc3:
                 manual_direction = st.selectbox("Kierunek", ["LONG", "SHORT"])
-            
+           
             msub1, msub2 = st.columns(2)
             with msub1:
-                submit_manual_long = st.form_submit_button("🚀 OTWÓRZ RĘCZNY LONG", use_container_width=True)
+                submit_manual_long = st.form_submit_button("Otwórz ręczny LONG", use_container_width=True)
             with msub2:
-                submit_manual_short = st.form_submit_button("🔻 OTWÓRZ RĘCZNY SHORT", use_container_width=True)
+                submit_manual_short = st.form_submit_button("Otwórz ręczny SHORT", use_container_width=True)
 
             if submit_manual_long or submit_manual_short:
                 chosen_dir = "LONG" if submit_manual_long else "SHORT"
@@ -789,7 +815,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         st.error(f"Błąd składania zlecenia ręcznego dla {sym_input}: {exc}")
 
         st.divider()
-        st.markdown("### 🏆 Skaner Rynku (Podgląd okazji)")
+        st.markdown("### Skaner Rynku (Podgląd okazji)")
 
         try:
             ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
@@ -821,7 +847,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
 
-            # AUTOMAT DZIAŁA WYŁĄCZNIE GDY AUTO_TRADE JEST WŁĄCZONY
             if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
                 if connected and api_ok:
                     try:
@@ -1018,7 +1043,7 @@ if page == "Dziennik":
     st.subheader("Dziennik zdarzeń i transakcji bota")
     col_del1, col_del2 = st.columns([4, 1])
     with col_del2:
-        if st.button("🗑️ Wyczyść dziennik", use_container_width=True):
+        if st.button("Wyczyść dziennik", use_container_width=True):
             try:
                 with db() as con:
                     con.execute("DELETE FROM events")
