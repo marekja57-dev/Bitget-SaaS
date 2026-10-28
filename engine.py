@@ -17,7 +17,7 @@ import pandas as pd
 # ============================================================
 
 ROOT = Path("/opt/bitget-saas")
-DB_PATH = ROOT / "bitget_sas.db"
+DB_PATH = ROOT / "bitget_saas.db"
 LOG_PATH = ROOT / "logs" / "engine.log"
 
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
