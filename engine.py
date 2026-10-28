@@ -12,10 +12,6 @@ from pathlib import Path
 import ccxt
 import pandas as pd
 
-# ============================================================
-# CZYSTY SKRYPT SILNIKA W TLE
-# ============================================================
-
 ROOT = Path("/opt/bitget-saas")
 DB_PATH = ROOT / "bitget_saas.db"
 LOG_PATH = ROOT / "logs" / "engine.log"
@@ -44,8 +40,19 @@ def get_db():
     con.row_factory = sqlite3.Row
     return con
 
+def init_db():
+    with get_db() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                k TEXT PRIMARY KEY,
+                v TEXT
+            )
+        """)
+        con.commit()
+
 def load_config():
     try:
+        init_db()
         with get_db() as con:
             row = con.execute("SELECT v FROM settings WHERE k='main'").fetchone()
             if row:
@@ -61,19 +68,16 @@ def run_engine():
         try:
             cfg = load_config()
             auto_trade = cfg.get("auto_trade", False)
-            exchange_id = cfg.get("exchange", "bitget")
-            market_type = cfg.get("market_type", "swap")
             
             if auto_trade:
                 logger.info("Autohandel jest włączony w bazie. Skanowanie rynku...")
-                # Tutaj silnik może wykonywać pętlę sprawdzającą okazje
             else:
                 logger.debug("Autohandel wyłączony w konfiguracji. Oczekiwanie...")
-
+                
         except Exception as exc:
             logger.error("Błąd w pętli silnika: %s", exc)
-
-        for _ in range(30): # Sprawdzaj co 30 sekund
+            
+        for _ in range(30):
             if STOP:
                 break
             time.sleep(1)
@@ -82,4 +86,3 @@ def run_engine():
 
 if __name__ == "__main__":
     run_engine()
-
