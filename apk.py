@@ -1126,47 +1126,89 @@ def background_loop():
             cfg = load_cfg()
             if not cfg.get("auto_trade", False):
                 continue
-            
+          
             with db() as con:
                 cred = con.execute("SELECT user_id, exchange, api_key, secret, password FROM user_credentials WHERE api_key IS NOT NULL AND api_key != '' LIMIT 1").fetchone()
-            
+          
             if not cred:
                 continue
-            
+          
             ex_id_bg = cred["exchange"] or cfg["exchange"]
             client = exchange_client(ex_id_bg, cred["api_key"], cred["secret"], cred["password"], cfg["market_type"])
-            
+          
             active = active_positions(client)
             if not cfg.get("paper_mode", True) and active:
                 for msg in manage_position_exits(client, active, cfg):
                     event("TRADE", msg)
                 active = active_positions(client)
-            
-            ranked = ranked_symbols(client, int(cfg.get("scan_limit_count", 10)))
+
+            # 1. Pobieramy ŚCIŚLE ograniczoną listę topowych par według wolumenu
+            scan_limit = int(cfg.get("scan_limit_count", 10))
+            ranked = ranked_symbols(client, scan_limit)
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-            
-            all_signals = []
+          
+            all_signals = {} # Słownik do szybkiego sprawdzenia sygnału dla danej pary
             for symbol in symbols:
                 for tf in tfs:
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                     adx_val = res.get("adx") or 0.0
                     res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
-                    all_signals.append(res)
-            
+                    
+                    # Zapisujemy sygnały do słownika dla logiki odwrócenia
+                    if symbol not in all_signals:
+                        all_signals[symbol] = res["signal"]
+                    elif res["signal"] in ("LONG", "SHORT"):
+                        all_signals[symbol] = res["signal"]
+
+            # --- NOWOŚĆ: Automatyczne zamknięcie przy odwróceniu kierunku ---
+            for pos in active:
+                sym = pos.get("symbol")
+                pos_side = str(pos.get("side") or "").lower() # 'long' lub 'short'
+                current_sig = all_signals.get(sym, "NEUTRALNY")
+                
+                # Jeśli kierunek pozycji jest sprzeczny z nowym sygnałem (np. mamy LONG, a sygnał to SHORT)
+                if (pos_side == "long" and current_sig == "SHORT") or (pos_side == "short" and current_sig == "LONG"):
+                    qty = abs(asfloat(pos.get("contracts")))
+                    close_side = "sell" if pos_side == "long" else "buy"
+                    try:
+                        if cfg.get("paper_mode", True):
+                            msg = f"[BG PAPER ODWRÓCENIE] Zamknięto {pos_side.upper()} na {sym} z powodu odwrócenia sygnału na {current_sig}"
+                            event("TRADE", msg)
+                        else:
+                            ord_res = market_order(client, sym, close_side, qty, reduce_only=True)
+                            msg = f"[BG REAL ODWRÓCENIE] Zamknięto {pos_side.upper()} na {sym} (Odwrócenie na {current_sig}), ID: {ord_res.get('id')}"
+                            event("TRADE", msg)
+                        set_pair_cooldown(sym, "SIGNAL_REVERSAL", 1800)
+                    except Exception as exc:
+                        event("ERROR", f"Nie udało się zamknąć pozycji przy odwróceniu dla {sym}: {exc}")
+
+            # Odświeżamy listę pozycji po ewentualnych zamknięciach
+            active = active_positions(client)
             max_pos = int(cfg.get("max_positions", 3))
-            valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
-            valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
             
+            # Tworzymy listę ważnych sygnałów WYŁĄCZNIE dla symboli z oficjalnej listy `symbols`
+            valid_signals = []
+            for symbol in symbols:
+                for tf in tfs:
+                    # Pobieramy lub generujemy dla pewności
+                    res = signal_for_symbol(cfg, symbol, tf)
+                    res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
+                    res["score"] = (res.get("adx") or 0.0) * np.log1p(res["volume_24h_usdt"])
+                    if res["signal"] in ("LONG", "SHORT"):
+                        valid_signals.append(res)
+
+            valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+          
             seen_symbols = set()
             unique_signals = []
             for s in valid_signals:
-                if s["symbol"] not in seen_symbols:
+                if s["symbol"] not in seen_symbols and s["symbol"] in symbols:
                     seen_symbols.add(s["symbol"])
                     unique_signals.append(s)
-            
+          
             for item in unique_signals:
                 current_positions = active_positions(client)
                 if len(current_positions) >= max_pos:
@@ -1203,4 +1245,3 @@ if "bg_thread_started" not in st.session_state:
     st.session_state["bg_thread_started"] = True
     t = threading.Thread(target=background_loop, daemon=True)
     t.start()
-
