@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import streamlit as st
-import threading
 
 try:
     import ccxt
@@ -80,6 +79,7 @@ st.markdown(
 [data-testid="stAppViewContainer"] .main .block-container { padding-top: 2rem; max-width: 1600px; }
 [data-testid="stSidebar"] { background: linear-gradient(180deg,#06152d,#081f42); }
 
+/* Złoty nagłówek marki / ramka */
 .brand-box {
 border: 2px solid #D4AF37;
 border-radius: 16px;
@@ -91,6 +91,7 @@ margin-bottom: 25px;
 .brand { font-weight: 900; font-size: 36px; color: #D4AF37; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; letter-spacing: 1.5px; }
 .brand-sub { font-size: 14px; color: #b9c9df; letter-spacing: 2px; text-transform: uppercase; margin-top: 5px; font-weight: 700; }
 
+/* Ciemnozielone kafelki z ciemnozłotą obwódką */
 div[data-testid="stMetric"], .metric-card, .status-card {
 border: 2px solid #D4AF37 !important;
 border-radius: 14px;
@@ -108,6 +109,7 @@ margin-bottom: 15px;
 .metric-label { color: #b9c9df; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
 .metric-value { color: #fff2c7; font-size: clamp(16px,1.5vw,24px); font-weight: 850; line-height: 1.2; overflow-wrap: anywhere; }
 .metric-note { color: #a9bdd7; font-size: 12px; margin-top: 6px; }
+/* Złote nagłówki h1, h2, h3 */
 h1, h2, h3 {
 color: #D4AF37 !important;
 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -467,31 +469,6 @@ def manage_position_exits(ex, positions, cfg):
             event("ERROR", f"{reason}: nie udało się zamknąć {symbol}: {exc}")
     return closed
 
-def manage_signal_reversals(ex, positions, all_signals, cfg):
-    closed_messages = []
-    for pos in positions:
-        sym = pos.get("symbol")
-        pos_side = str(pos.get("side") or "").lower()
-        current_sig = all_signals.get(sym, "NEUTRALNY")
-
-        if (pos_side == "long" and current_sig == "SHORT") or (pos_side == "short" and current_sig == "LONG"):
-            qty = abs(asfloat(pos.get("contracts")))
-            close_side = "sell" if pos_side == "long" else "buy"
-            try:
-                if cfg.get("paper_mode", True):
-                    msg = f"[PAPER ODWRÓCENIE] Zamknięto {pos_side.upper()} na {sym} z powodu odwrócenia sygnału na {current_sig}"
-                    event("TRADE", msg)
-                else:
-                    ord_res = market_order(ex, sym, close_side, qty, reduce_only=True)
-                    msg = f"[REAL ODWRÓCENIE] Zamknięto {pos_side.upper()} na {sym} (Odwrócenie na {current_sig}), ID: {ord_res.get('id')}"
-                    event("TRADE", msg)
-                 
-                set_pair_cooldown(sym, "SIGNAL_REVERSAL", 1800)
-                closed_messages.append(msg)
-            except Exception as exc:
-                event("ERROR", f"Nie udało się zamknąć pozycji przy odwróceniu dla {sym}: {exc}")
-    return closed_messages
-
 def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     price = asfloat(price)
     leverage = max(1, int(cfg.get("max_leverage", 10)))
@@ -513,13 +490,6 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
         return 0.0, 0.0
     return qty, notional
 
-def asfloat(value):
-    try:
-        number = float(value)
-        return number if np.isfinite(number) else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
 def ranked_symbols(ex, limit_count):
     now = time.time()
     limit_count = max(1, int(limit_count))
@@ -528,16 +498,8 @@ def ranked_symbols(ex, limit_count):
     cached = st.session_state.get(cache_key)
     if cached and now - cached.get("ts", 0) < 180:
         return cached["ranked"]
-    
     markets = ex.load_markets()
-    candidates = [
-        s for s, m in markets.items() 
-        if m.get("active") is not False 
-        and m.get("quote") == "USDT" 
-        and m.get("linear") 
-        and m.get("swap", False)
-    ]
-    
+    candidates = [s for s, m in markets.items() if m.get("active") is not False and m.get("quote") == "USDT" and m.get("linear") and m.get("swap", False)]
     ranked = []
     for offset in range(0, len(candidates), 40):
         batch = candidates[offset : offset + 40]
@@ -549,37 +511,21 @@ def ranked_symbols(ex, limit_count):
                 volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
             if volume > 0:
                 ranked.append((symbol, volume))
-                
     ranked.sort(key=lambda x: x[1], reverse=True)
     ranked = ranked[:limit_count]
     st.session_state[cache_key] = {"ts": now, "ranked": ranked}
     gc.collect()
     return ranked
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_usdt_symbols(ex_id, market_type):
     try:
         ex = exchange_client(ex_id, "", "", "", market_type)
         markets = ex.load_markets()
-        blocked_keywords = [
-            "INTC", "MRVL", "GOOGL", "SNDK", "XAG", "XAU", "SNXX", "SOXL", 
-            "IDOL", "BZ", "TQQQ", "AAPL", "CL", "SPCX", "PAXG", "USDC"
-        ]
-        all_syms = sorted([
-            s for s, m in markets.items() 
-            if m.get("active") is not False 
-            and m.get("quote") == "USDT" 
-            and m.get("linear") 
-            and m.get("swap", False)
-            and m.get("base", "").upper() not in blocked_keywords
-            and not any(kw in s for kw in blocked_keywords)
-            and "." not in s
-        ])
+        all_syms = sorted([s for s, m in markets.items() if m.get("active") is not False and m.get("quote") == "USDT" and m.get("linear") and m.get("swap", False)])
         return all_syms
     except Exception:
         return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
-
 
 # -------------------- Sesja / logowanie --------------------
 
@@ -893,17 +839,13 @@ if page == "Automatyczny Skaner i Auto-Handel":
                         st.error(f"Błąd składania zlecenia ręcznego dla {sym_input}: {exc}")
 
         st.divider()
-        st.markdown("### Skaner Rynku (Podgląd okazji — Topowe pary według wolumenu)")
+        st.markdown("### Skaner Rynku (Podgląd okazji)")
         try:
             ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
-            scan_limit_val = int(current_cfg.get("scan_limit_count", 10))
-            ranked = ranked_symbols(ex, scan_limit_val)
+            ranked = ranked_symbols(ex, int(current_cfg.get("scan_limit_count", 30)))
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
-            
-            # POPRAWKA: Pobieramy interwały bezpośrednio z konfiguracji użytkownika
             tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-
             all_signals = []
             for symbol in symbols:
                 for tf in tfs:
@@ -912,10 +854,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                     adx_val = res.get("adx") or 0.0
                     res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
                     all_signals.append(res)
-
-            # Sortowanie skanera od najwyższego wyniku (siła trendu * wolumen)
-            all_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
-
             df_scanner = pd.DataFrame([{
                 "Symbol": item["symbol"],
                 "Interwał": item["tf"],
@@ -925,11 +863,50 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 "RSI": round(item["rsi"], 1) if item["rsi"] is not None else 0.0,
                 "Komunikat": item["reason"]
             } for item in all_signals])
-
             if not df_scanner.empty:
-                st.markdown("#### Pełne zestawienie skanera (Posortowane według najlepszego wolumenu i ADX)")
+                st.markdown("#### Pełne zestawienie skanera")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
 
+            if current_cfg["auto_trade"] and is_user_paid() and not current_cfg["paper_mode"]:
+                if connected and api_ok:
+                    try:
+                        live_client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
+                        max_pos = int(current_cfg.get("max_positions", 3))
+                        valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
+                        valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+                        seen_symbols = set()
+                        unique_valid_signals = []
+                        for s in valid_signals:
+                            if s["symbol"] not in seen_symbols:
+                                seen_symbols.add(s["symbol"])
+                                unique_valid_signals.append(s)
+                        for item in unique_valid_signals:
+                            current_positions = active_positions(live_client)
+                            if len(current_positions) >= max_pos:
+                                break
+                            sym = item["symbol"]
+                            sig = item["signal"]
+                            price = item["price"]
+                            if any(p.get("symbol") == sym for p in current_positions):
+                                continue
+                            if pair_cooldown_remaining(sym) > 0:
+                                continue
+                            free, total = balance_usdt(live_client, current_positions)
+                            if free < MIN_ORDER_NOTIONAL_USDT:
+                                continue
+                            qty, notional = calc_qty(live_client, sym, total, free, price, current_cfg)
+                            if qty > 0 and notional >= MIN_ORDER_NOTIONAL_USDT:
+                                try:
+                                    live_client.set_leverage(int(current_cfg["max_leverage"]), sym)
+                                except Exception:
+                                    pass
+                                order_side = "buy" if sig == "LONG" else "sell"
+                                ord_res = market_order(live_client, sym, order_side, qty, reference_price=price)
+                                msg = f"AUTO-TRADE: Otwarto {sig} na {sym} qty={qty} (ID: {ord_res.get('id')})"
+                                event("TRADE", msg)
+                                set_pair_cooldown(sym, "AUTO_OPEN", 1800)
+                    except Exception as exc:
+                        event("ERROR", f"Błąd w pętli Auto-Trade: {exc}")
         except Exception as exc:
             st.error(f"Błąd analizy rynków: {exc}")
         finally:
@@ -976,7 +953,7 @@ if page == "Ustawienia Strategii":
         with left:
             exchange_name = st.selectbox("Giełda", ["bitget", "binanceusdm", "bybit", "okx"], index=(["bitget", "binanceusdm", "bybit", "okx"].index(cfg["exchange"]) if cfg["exchange"] in ["bitget", "binanceusdm", "bybit", "okx"] else 0), key="cfg_exchange_select")
             market_type = st.selectbox("Rynek", ["swap", "future"], index=0 if cfg["market_type"] == "swap" else 1, key="cfg_market_type_select")
-            scan_limit = st.slider("Liczba skanowanych par (Top według wolumenu)", 5, 200, int(cfg.get("scan_limit_count", 10)), key="cfg_scan_limit")
+            scan_limit = st.slider("Liczba skanowanych par", 5, 200, int(cfg.get("scan_limit_count", 30)), key="cfg_scan_limit")
             timeframes = st.multiselect("Interwały skanowania", TF_OPTIONS, default=[x for x in cfg.get("timeframes", ["4h", "1d"]) if x in TF_OPTIONS], key="cfg_timeframes_multiselect")
             candle_limit = st.slider("Liczba świec do analizy", 100, 250, min(250, int(cfg.get("candle_limit", 150))), key="cfg_candle_limit")
         with right:
@@ -1110,10 +1087,9 @@ if page == "Regulamin i Instrukcja":
     ### Witaj w Bitget-SaaS Futures
 
     System automatycznego handlu kontraktami futures.
-    - **Skaner Wolumenowy**: Analizuje wyłącznie wybraną w ustawieniach liczbę topowych kryptowalut (np. Top 10/20) o największym obrocie USDT, odrzucając mniej płynne aktywa.
-    - **Odwrócenie Trendu**: Jeśli kierunek sygnału zmieni się na przeciwny (np. z LONG na SHORT), bot automatycznie zamyka dotychczasową pozycję rynkowo.
-    - **Tryb Paper**: Pozwala testować sygnały bez otwierania prawdziwych pozycji na giełdzie.
-    - **Auto-Trade**: Po włączeniu bot sam dba o otwieranie i zamykanie pozycji 24/7.
+    - Tryb Paper: Pozwala testować sygnały bez otwierania prawdziwych pozycji na giełdzie.
+    - Auto-Trade: Po włączeniu i wyłączeniu trybu Paper bot sam otwiera zlecenia na podstawie wykrytych trendów.
+    - Zarządzanie ryzykiem: Automatyczny Stop Loss oraz Take Profit pilnują otwartych pozycji zgodnie z ustawieniami.
     """)
 
 # -------------------- Panel Administratora --------------------
@@ -1138,71 +1114,59 @@ if page == "Panel Administratora" and is_user_admin():
     except Exception as exc:
         st.error(f"Błąd panelu admina: {exc}")
 
+
 # -------------------- AUTONOMICZNY WĄTEK TŁA (24/7 na Hetznerze) --------------------
+import threading
 
 def background_loop():
+    """Lekkawa pętla działająca w tle, wykonująca skanowanie i auto-handel niezależnie od przeglądarki."""
     while True:
         try:
             time.sleep(20)
             cfg = load_cfg()
             if not cfg.get("auto_trade", False):
                 continue
-         
+            
             with db() as con:
                 cred = con.execute("SELECT user_id, exchange, api_key, secret, password FROM user_credentials WHERE api_key IS NOT NULL AND api_key != '' LIMIT 1").fetchone()
-         
+            
             if not cred:
                 continue
-         
+            
             ex_id_bg = cred["exchange"] or cfg["exchange"]
             client = exchange_client(ex_id_bg, cred["api_key"], cred["secret"], cred["password"], cfg["market_type"])
-         
+            
             active = active_positions(client)
             if not cfg.get("paper_mode", True) and active:
                 for msg in manage_position_exits(client, active, cfg):
                     event("TRADE", msg)
                 active = active_positions(client)
-
-            scan_limit = int(cfg.get("scan_limit_count", 10))
-            ranked = ranked_symbols(client, scan_limit)
+            
+            ranked = ranked_symbols(client, int(cfg.get("scan_limit_count", 10)))
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
-            
-            # POPRAWKA: Pobieramy interwały bezpośrednio z konfiguracji w tle
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-         
-            all_signals = {}
-            valid_signals = []
-
+            
+            all_signals = []
             for symbol in symbols:
                 for tf in tfs:
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                     adx_val = res.get("adx") or 0.0
                     res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
-                    
-                    if symbol not in all_signals:
-                        all_signals[symbol] = res["signal"]
-                    elif res["signal"] in ("LONG", "SHORT"):
-                        all_signals[symbol] = res["signal"]
-
-                    if res["signal"] in ("LONG", "SHORT"):
-                        valid_signals.append(res)
-
-            manage_signal_reversals(client, active, all_signals, cfg)
-
-            active = active_positions(client)
+                    all_signals.append(res)
+            
             max_pos = int(cfg.get("max_positions", 3))
-
+            valid_signals = [s for s in all_signals if s["signal"] in ("LONG", "SHORT")]
             valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
-         
+            
             seen_symbols = set()
             unique_signals = []
             for s in valid_signals:
-                if s["symbol"] not in seen_symbols and s["symbol"] in symbols:
+                if s["symbol"] not in seen_symbols:
                     seen_symbols.add(s["symbol"])
                     unique_signals.append(s)
-         
+            
             for item in unique_signals:
                 current_positions = active_positions(client)
                 if len(current_positions) >= max_pos:
@@ -1210,16 +1174,13 @@ def background_loop():
                 sym = item["symbol"]
                 sig = item["signal"]
                 price = item["price"]
-                
                 if any(p.get("symbol") == sym for p in current_positions):
                     continue
                 if pair_cooldown_remaining(sym) > 0:
                     continue
-                    
                 free, total = balance_usdt(client, current_positions)
                 if free < MIN_ORDER_NOTIONAL_USDT:
                     continue
-                    
                 qty, notional = calc_qty(client, sym, total, free, price, cfg)
                 if qty > 0 and notional >= MIN_ORDER_NOTIONAL_USDT:
                     try:
