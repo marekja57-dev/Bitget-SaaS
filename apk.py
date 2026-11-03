@@ -80,7 +80,6 @@ st.markdown(
 [data-testid="stAppViewContainer"] .main .block-container { padding-top: 2rem; max-width: 1600px; }
 [data-testid="stSidebar"] { background: linear-gradient(180deg,#06152d,#081f42); }
 
-/* Złoty nagłówek marki / ramka */
 .brand-box {
 border: 2px solid #D4AF37;
 border-radius: 16px;
@@ -92,7 +91,6 @@ margin-bottom: 25px;
 .brand { font-weight: 900; font-size: 36px; color: #D4AF37; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; letter-spacing: 1.5px; }
 .brand-sub { font-size: 14px; color: #b9c9df; letter-spacing: 2px; text-transform: uppercase; margin-top: 5px; font-weight: 700; }
 
-/* Ciemnozielone kafelki z ciemnozłotą obwódką */
 div[data-testid="stMetric"], .metric-card, .status-card {
 border: 2px solid #D4AF37 !important;
 border-radius: 14px;
@@ -470,7 +468,6 @@ def manage_position_exits(ex, positions, cfg):
     return closed
 
 def manage_signal_reversals(ex, positions, all_signals, cfg):
-    """Zamyka pozycję, jeśli kierunek sygnału rynkowego uległ odwróceniu."""
     closed_messages = []
     for pos in positions:
         sym = pos.get("symbol")
@@ -488,7 +485,7 @@ def manage_signal_reversals(ex, positions, all_signals, cfg):
                     ord_res = market_order(ex, sym, close_side, qty, reduce_only=True)
                     msg = f"[REAL ODWRÓCENIE] Zamknięto {pos_side.upper()} na {sym} (Odwrócenie na {current_sig}), ID: {ord_res.get('id')}"
                     event("TRADE", msg)
-                
+                 
                 set_pair_cooldown(sym, "SIGNAL_REVERSAL", 1800)
                 closed_messages.append(msg)
             except Exception as exc:
@@ -872,8 +869,10 @@ if page == "Automatyczny Skaner i Auto-Handel":
             ranked = ranked_symbols(ex, scan_limit_val)
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
-            tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
             
+            # POPRAWKA: Pobieramy interwały bezpośrednio z konfiguracji użytkownika
+            tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+
             all_signals = []
             for symbol in symbols:
                 for tf in tfs:
@@ -895,7 +894,7 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 "RSI": round(item["rsi"], 1) if item["rsi"] is not None else 0.0,
                 "Komunikat": item["reason"]
             } for item in all_signals])
-            
+
             if not df_scanner.empty:
                 st.markdown("#### Pełne zestawienie skanera (Posortowane według najlepszego wolumenu i ADX)")
                 st.dataframe(df_scanner, use_container_width=True, hide_index=True)
@@ -1111,7 +1110,6 @@ if page == "Panel Administratora" and is_user_admin():
 # -------------------- AUTONOMICZNY WĄTEK TŁA (24/7 na Hetznerze) --------------------
 
 def background_loop():
-    """Lekka pętla działająca w tle, wykonująca skanowanie, auto-handel i odwrócenia trendu."""
     while True:
         try:
             time.sleep(20)
@@ -1134,11 +1132,12 @@ def background_loop():
                     event("TRADE", msg)
                 active = active_positions(client)
 
-            # 1. Pobieramy ŚCIŚLE ograniczoną listę topowych par według wolumenu
             scan_limit = int(cfg.get("scan_limit_count", 10))
             ranked = ranked_symbols(client, scan_limit)
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
+            
+            # POPRAWKA: Pobieramy interwały bezpośrednio z konfiguracji w tle
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
          
             all_signals = {}
@@ -1159,10 +1158,8 @@ def background_loop():
                     if res["signal"] in ("LONG", "SHORT"):
                         valid_signals.append(res)
 
-            # 2. Automatyczne zamknięcie pozycji przy odwróceniu trendu
             manage_signal_reversals(client, active, all_signals, cfg)
 
-            # Odświeżamy listę pozycji po ewentualnych zamknięciach
             active = active_positions(client)
             max_pos = int(cfg.get("max_positions", 3))
 
@@ -1175,7 +1172,6 @@ def background_loop():
                     seen_symbols.add(s["symbol"])
                     unique_signals.append(s)
          
-            # 3. Otwieranie nowych pozycji zgodnie z najlepszymi sygnałami
             for item in unique_signals:
                 current_positions = active_positions(client)
                 if len(current_positions) >= max_pos:
