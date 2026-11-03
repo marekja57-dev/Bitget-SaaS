@@ -516,44 +516,52 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
 def ranked_symbols(ex, limit_count):
     now = time.time()
     limit_count = max(1, int(limit_count))
-    default_type = ex.options.get("defaultType", "")
-    cache_key = f"ranked_symbols:{ex.id}:{default_type}:{limit_count}"
+    
+    # Wymuszenie typu swap USDT na giełdzie
+    ex.options['defaultType'] = 'swap'
+    
+    cache_key = f"ranked_symbols:{ex.id}:{limit_count}"
     cached = st.session_state.get(cache_key)
     if cached and now - cached.get("ts", 0) < 180:
         return cached["ranked"]
     
     markets = ex.load_markets()
-    # Odrzucamy akcje/aktywa tradycyjne (zostawiamy czyste crypto USDT)
-    excluded_keywords = ["/USD:USD", "INTC", "MRVL", "GOOGL", "XAG", "XAU", "SNXX", "SOXL", "IDOL"]
     
-    candidates = [
-        s for s, m in markets.items() 
-        if m.get("active") is not False 
-        and m.get("quote") == "USDT" 
-        and m.get("linear") 
-        and m.get("swap", False)
-        and not any(k in s for k in ["/USD:USD", "INTC", "MRVL", "GOOGL", "XAG", "XAU"])
-    ]
+    # Pobieramy tylko czyste pary krypto USDT, odrzucając indeksy, akcje i metale (np. .P, akcje tradycyjne)
+    candidates = []
+    for s, m in markets.items():
+        if m.get('active') is False:
+            continue
+        if m.get('quote') != 'USDT' or not m.get('linear') or not m.get('swap'):
+            continue
+        # Odrzucamy wszystko, co nie jest parą walutową crypto (np. indeksy USD, akcje)
+        if any(x in s for x in ['.', 'USD/USD', 'INTC', 'MRVL', 'GOOGL', 'SNDK', 'XAG', 'XAU']):
+            continue
+        candidates.append(s)
     
     ranked = []
     for offset in range(0, len(candidates), 40):
         batch = candidates[offset : offset + 40]
-        tickers = ex.fetch_tickers(batch)
-        for symbol in batch:
-            ticker = tickers.get(symbol) or {}
-            volume = asfloat(ticker.get("quoteVolume"))
-            if volume <= 0:
-                volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
-            if volume > 0:
-                ranked.append((symbol, volume))
+        try:
+            tickers = ex.fetch_tickers(batch)
+            for symbol in batch:
+                ticker = tickers.get(symbol) or {}
+                # Priorytetowo bierzemy wolumen w USDT (quoteVolume)
+                volume = float(ticker.get('quoteVolume') or 0)
+                if volume <= 0:
+                    volume = float(ticker.get('baseVolume') or 0) * float(ticker.get('last') or 0)
+                if volume > 0:
+                    ranked.append((symbol, volume))
+        except Exception:
+            continue
                 
+    # Sortowanie malejąco według prawdziwego wolumenu obrotu
     ranked.sort(key=lambda x: x[1], reverse=True)
     ranked = ranked[:limit_count]
+    
     st.session_state[cache_key] = {"ts": now, "ranked": ranked}
     gc.collect()
     return ranked
-
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_usdt_symbols(ex_id, market_type):
