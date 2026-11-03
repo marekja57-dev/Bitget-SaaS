@@ -562,10 +562,24 @@ def get_all_usdt_symbols(ex_id, market_type):
     try:
         ex = exchange_client(ex_id, "", "", "", market_type)
         markets = ex.load_markets()
-        all_syms = sorted([s for s, m in markets.items() if m.get("active") is not False and m.get("quote") == "USDT" and m.get("linear") and m.get("swap", False)])
+        blocked_keywords = [
+            "INTC", "MRVL", "GOOGL", "SNDK", "XAG", "XAU", "SNXX", "SOXL", 
+            "IDOL", "BZ", "TQQQ", "AAPL", "CL", "SPCX", "PAXG", "USDC"
+        ]
+        all_syms = sorted([
+            s for s, m in markets.items() 
+            if m.get("active") is not False 
+            and m.get("quote") == "USDT" 
+            and m.get("linear") 
+            and m.get("swap", False)
+            and m.get("base", "").upper() not in blocked_keywords
+            and not any(kw in s for kw in blocked_keywords)
+            and "." not in s
+        ])
         return all_syms
     except Exception:
         return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
+
 
 # -------------------- Sesja / logowanie --------------------
 
