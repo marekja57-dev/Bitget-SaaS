@@ -529,32 +529,45 @@ def ranked_symbols(ex, limit_count):
     if cached and now - cached.get("ts", 0) < 180:
         return cached["ranked"]
     
-    markets = ex.load_markets()
-    candidates = [
-        s for s, m in markets.items()
-        if m.get("active") is not False
-        and m.get("quote") == "USDT"
-        and m.get("linear")
-        and m.get("swap", False)
-    ]
-    
-    ranked = []
-    for offset in range(0, len(candidates), 40):
-        batch = candidates[offset : offset + 40]
-        tickers = ex.fetch_tickers(batch)
-        for symbol in batch:
-            ticker = tickers.get(symbol) or {}
-            volume = asfloat(ticker.get("quoteVolume"))
-            if volume <= 0:
-                volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
-            if volume > 0:
+    try:
+        markets = ex.load_markets()
+        candidates = [
+            s for s, m in markets.items()
+            if m.get("active") is not False
+            and m.get("quote") == "USDT"
+            and m.get("linear")
+            and m.get("swap", False)
+        ]
+        if not candidates:
+            candidates = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
+        
+        ranked = []
+        for offset in range(0, len(candidates), 40):
+            batch = candidates[offset : offset + 40]
+            try:
+                tickers = ex.fetch_tickers(batch)
+            except Exception:
+                tickers = {}
+            for symbol in batch:
+                ticker = tickers.get(symbol) or {}
+                volume = asfloat(ticker.get("quoteVolume"))
+                if volume <= 0:
+                    volume = asfloat(ticker.get("baseVolume")) * asfloat(ticker.get("last"))
+                if volume <= 0:
+                    volume = 1000.0
                 ranked.append((symbol, volume))
                 
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    ranked = ranked[:limit_count]
-    st.session_state[cache_key] = {"ts": now, "ranked": ranked}
-    gc.collect()
-    return ranked
+        if not ranked:
+            ranked = [("BTC/USDT", 1000000.0), ("ETH/USDT", 500000.0)]
+            
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        ranked = ranked[:limit_count]
+        st.session_state[cache_key] = {"ts": now, "ranked": ranked}
+        gc.collect()
+        return ranked
+    except Exception as exc:
+        logging.exception("Błąd w ranked_symbols: %s", exc)
+        return [("BTC/USDT", 1000000.0), ("ETH/USDT", 500000.0)]
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_usdt_symbols(ex_id, market_type):
@@ -767,161 +780,156 @@ if page == "Automatyczny Skaner i Auto-Handel":
 
     refresh_sec = max(10, int(cfg.get("refresh_seconds", 30)))
 
-    @st.fragment(run_every=refresh_sec if cfg.get("auto_refresh", True) else None)
-    def render_full_dashboard():
-        current_cfg = load_cfg()
-        st.caption(f"Odświeżanie co {refresh_sec} s.")
-        total_balance = free_balance = session_pnl = used_margin = 0.0
-        active = []
-        connected = bool(api_key_saved and secret_saved)
-        api_ok = False
-        if connected:
-            try:
-                client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
-                active = active_positions(client)
-                if not current_cfg.get("paper_mode", True) and active:
-                    for msg in manage_position_exits(client, active, current_cfg):
-                        st.warning(msg)
-                    active = active_positions(client)
-                free_balance, total_balance = balance_usdt(client, active)
-                session_pnl = sum(asfloat(p.get("unrealizedPnl")) for p in active)
-                used_margin = sum(asfloat(p.get("initialMargin") or p.get("margin")) for p in active)
-                api_ok = True
-            except Exception as exc:
-                st.warning(f"Błąd połączenia z giełdą / pozycjami: {exc}")
-
-        def metric_card(label, value, note=""):
-            st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div><div class="metric-note">{note}</div></div>', unsafe_allow_html=True)
-
-        m1, m2, m3, m4 = st.columns(4, gap="medium")
-        with m1:
-            metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT", "Saldo całkowite / dostępne")
-        with m2:
-            metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT", "Łączny PnL otwartych pozycji")
-        with m3:
-            metric_card("Otwarte pozycje", f"{len(active)} / {int(current_cfg['max_positions'])}", f"Margin w użyciu: {used_margin:.2f} USDT")
-        with m4:
-            elapsed = max(0, int(time.time() - st.session_state["session_started_at"]))
-            clock = f"{elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}"
-            metric_card("Czas sesji", clock, f"Odświeżanie co {refresh_sec}s")
-
-        st.divider()
-        st.markdown("### Aktywne pozycje na giełdzie")
-        if active:
-            st.dataframe(pd.DataFrame([{
-                "Symbol": p.get("symbol"),
-                "Strona": str(p.get("side")).upper(),
-                "Kontrakty": p.get("contracts"),
-                "Cena wejścia": p.get("entryPrice"),
-                "Cena rynkowa (Mark)": p.get("markPrice"),
-                "PnL (USDT)": p.get("unrealizedPnl"),
-                "Margin (USDT)": p.get("initialMargin") or p.get("margin"),
-                "Dźwignia": p.get("leverage"),
-            } for p in active]), use_container_width=True, hide_index=True)
-        elif connected and api_ok and not active:
-            st.info("Brak otwartych pozycji.")
-        elif not connected:
-            st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
-
-        st.divider()
-        st.markdown("### Ręczny Panel Sterowania (Wszystkie pary z giełdy)")
-        st.caption("Wybierz dowolną parę z listy i zdecyduj sam, czy wchodzisz w LONG czy SHORT, całkowicie ręcznie.")
-
-        all_market_symbols = get_all_usdt_symbols(current_cfg["exchange"], current_cfg["market_type"])
-        with st.form("manual_trade_form"):
-            mc1, mc2, mc3 = st.columns(3)
-            with mc1:
-                manual_symbol = st.selectbox("Wybierz parę kryptowalut", all_market_symbols, index=0 if all_market_symbols else 0)
-            with mc2:
-                manual_amount = st.number_input("Kwota inwestycji (USDT)", min_value=10.0, max_value=5000.0, value=float(current_cfg.get("risk_usdt", 10.0)), step=5.0)
-            with mc3:
-                manual_direction = st.selectbox("Kierunek", ["LONG", "SHORT"])
-
-            msub1, msub2 = st.columns(2)
-            with msub1:
-                submit_manual_long = st.form_submit_button("Otwórz ręczny LONG", use_container_width=True)
-            with msub2:
-                submit_manual_short = st.form_submit_button("Otwórz ręczny SHORT", use_container_width=True)
-
-            if submit_manual_long or submit_manual_short:
-                chosen_dir = "LONG" if submit_manual_long else "SHORT"
-                sym_input = manual_symbol
-                if not (api_key_saved and secret_saved):
-                    st.error("Brak kluczy API! Uzupełnij je w zakładce 'Połączenie API'.")
-                else:
-                    try:
-                        live_client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
-                        ticker = live_client.fetch_ticker(sym_input)
-                        current_price = asfloat(ticker.get("last") or ticker.get("close"))
-                        positions = active_positions(live_client)
-                        free, total = balance_usdt(live_client, positions)
-                        if free < MIN_ORDER_NOTIONAL_USDT:
-                            st.error(f"Za mało wolnych środków: {free:.2f} USDT (minimum {MIN_ORDER_NOTIONAL_USDT} USDT).")
-                        else:
-                            qty, notional = calc_qty(live_client, sym_input, total, free, current_price, current_cfg, custom_usdt=manual_amount)
-                            if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
-                                st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum 10 USDT.")
-                            else:
-                                try:
-                                    live_client.set_leverage(int(current_cfg["max_leverage"]), sym_input)
-                                except Exception:
-                                    pass
-                                order_side = "buy" if chosen_dir == "LONG" else "sell"
-                                if current_cfg["paper_mode"]:
-                                    st.success(f"[PAPER RĘCZNY] Otwarto {chosen_dir} na {sym_input} po cenie ${current_price} o wartości {notional:.2f} USDT!")
-                                    event("TRADE", f"[PAPER RĘCZNY] {chosen_dir} {sym_input} notional={notional:.2f} USDT")
-                                else:
-                                    ord_res = market_order(live_client, sym_input, order_side, qty, reference_price=current_price)
-                                    st.success(f"Sukces! Ręcznie otwarto {chosen_dir} na {sym_input} (ID: {ord_res.get('id')})")
-                                    event("TRADE", f"Ręczna decyzja: {chosen_dir} {sym_input} qty={qty} notional={notional:.2f} USDT")
-                    except Exception as exc:
-                        st.error(f"Błąd składania zlecenia ręcznego dla {sym_input}: {exc}")
-
-        st.divider()
-        st.markdown("### Skaner Rynku (Analiza tylko na wybranych interwałach)")
+    # --- POBIERANIE DANYCH DO DASHBOARDU ---
+    current_cfg = load_cfg()
+    total_balance = free_balance = session_pnl = used_margin = 0.0
+    active = []
+    connected = bool(api_key_saved and secret_saved)
+    api_ok = False
+    if connected:
         try:
-            ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
-            scan_limit_val = int(current_cfg.get("scan_limit_count", 10))
-            ranked = ranked_symbols(ex, scan_limit_val)
-            symbols = [x[0] for x in ranked]
-            volume_map = dict(ranked)
-            
-            # POBIERAMY WYŁĄCZNIE INTERWAŁY USTAWIONE PRZEZ UŻYTKOWNIKA
-            tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
-
-            all_signals = []
-            for symbol in symbols:
-                for tf in tfs:
-                    res = signal_for_symbol(current_cfg, symbol, tf)
-                    res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                    adx_val = res.get("adx") or 0.0
-                    # Wynik uwzględniający priorytet wolumenu i siłę trendu ADX
-                    res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
-                    all_signals.append(res)
-
-            # Sortowanie: w pierwszej kolejności najwyższy wynik (wolumen + ADX)
-            all_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-            df_scanner = pd.DataFrame([{
-                "Symbol": item["symbol"],
-                "Interwał": item["tf"],
-                "Sygnał": item["signal"],
-                "Cena": item["price"],
-                "ADX": round(item["adx"], 1) if item["adx"] is not None else 0.0,
-                "RSI": round(item["rsi"], 1) if item["rsi"] is not None else 0.0,
-                "Komunikat": item["reason"]
-            } for item in all_signals])
-
-            if not df_scanner.empty:
-                st.markdown("#### Zestawienie skanera (Priorytet wolumenu 24h)")
-                st.dataframe(df_scanner, use_container_width=True, hide_index=True)
-
+            client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
+            active = active_positions(client)
+            if not current_cfg.get("paper_mode", True) and active:
+                for msg in manage_position_exits(client, active, current_cfg):
+                    st.warning(msg)
+                active = active_positions(client)
+            free_balance, total_balance = balance_usdt(client, active)
+            session_pnl = sum(asfloat(p.get("unrealizedPnl")) for p in active)
+            used_margin = sum(asfloat(p.get("initialMargin") or p.get("margin")) for p in active)
+            api_ok = True
         except Exception as exc:
-            st.error(f"Błąd analizy rynków: {exc}")
-        finally:
-            gc.collect()
+            st.warning(f"Błąd połączenia z giełdą / pozycjami: {exc}")
 
-    render_full_dashboard()
+    def metric_card(label, value, note=""):
+        st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div><div class="metric-note">{note}</div></div>', unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4, gap="medium")
+    with m1:
+        metric_card("Saldo / wolne środki", f"{total_balance:.2f} / {free_balance:.2f} USDT", "Saldo całkowite / dostępne")
+    with m2:
+        metric_card("Niezrealizowany PnL", f"{session_pnl:+.2f} USDT", "Łączny PnL otwartych pozycji")
+    with m3:
+        metric_card("Otwarte pozycje", f"{len(active)} / {int(current_cfg['max_positions'])}", f"Margin w użyciu: {used_margin:.2f} USDT")
+    with m4:
+        elapsed = max(0, int(time.time() - st.session_state["session_started_at"]))
+        clock = f"{elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}"
+        metric_card("Czas sesji", clock, f"Odświeżanie co {refresh_sec}s")
+
+    st.divider()
+    st.markdown("### Aktywne pozycje na giełdzie")
+    if active:
+        st.dataframe(pd.DataFrame([{
+            "Symbol": p.get("symbol"),
+            "Strona": str(p.get("side")).upper(),
+            "Kontrakty": p.get("contracts"),
+            "Cena wejścia": p.get("entryPrice"),
+            "Cena rynkowa (Mark)": p.get("markPrice"),
+            "PnL (USDT)": p.get("unrealizedPnl"),
+            "Margin (USDT)": p.get("initialMargin") or p.get("margin"),
+            "Dźwignia": p.get("leverage"),
+        } for p in active]), use_container_width=True, hide_index=True)
+    elif connected and api_ok and not active:
+        st.info("Brak otwartych pozycji.")
+    elif not connected:
+        st.warning("Brak połączenia API - podaj klucze w zakładce Połączenie API.")
+
+    st.divider()
+    st.markdown("### Ręczny Panel Sterowania (Wszystkie pary z giełdy)")
+    st.caption("Wybierz dowolną parę z listy i zdecyduj sam, czy wchodzisz w LONG czy SHORT, całkowicie ręcznie.")
+
+    all_market_symbols = get_all_usdt_symbols(current_cfg["exchange"], current_cfg["market_type"])
+    with st.form("manual_trade_form"):
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            manual_symbol = st.selectbox("Wybierz parę kryptowalut", all_market_symbols, index=0 if all_market_symbols else 0)
+        with mc2:
+            manual_amount = st.number_input("Kwota inwestycji (USDT)", min_value=10.0, max_value=5000.0, value=float(current_cfg.get("risk_usdt", 10.0)), step=5.0)
+        with mc3:
+            manual_direction = st.selectbox("Kierunek", ["LONG", "SHORT"])
+
+        msub1, msub2 = st.columns(2)
+        with msub1:
+            submit_manual_long = st.form_submit_button("Otwórz ręczny LONG", use_container_width=True)
+        with msub2:
+            submit_manual_short = st.form_submit_button("Otwórz ręczny SHORT", use_container_width=True)
+
+        if submit_manual_long or submit_manual_short:
+            chosen_dir = "LONG" if submit_manual_long else "SHORT"
+            sym_input = manual_symbol
+            if not (api_key_saved and secret_saved):
+                st.error("Brak kluczy API! Uzupełnij je w zakładce 'Połączenie API'.")
+            else:
+                try:
+                    live_client = exchange_client(ex_id, api_key_saved, secret_saved, passphrase_saved, current_cfg["market_type"])
+                    ticker = live_client.fetch_ticker(sym_input)
+                    current_price = asfloat(ticker.get("last") or ticker.get("close"))
+                    positions = active_positions(live_client)
+                    free, total = balance_usdt(live_client, positions)
+                    if free < MIN_ORDER_NOTIONAL_USDT:
+                        st.error(f"Za mało wolnych środków: {free:.2f} USDT (minimum {MIN_ORDER_NOTIONAL_USDT} USDT).")
+                    else:
+                        qty, notional = calc_qty(live_client, sym_input, total, free, current_price, current_cfg, custom_usdt=manual_amount)
+                        if qty <= 0 or notional < MIN_ORDER_NOTIONAL_USDT:
+                            st.error(f"Wyliczona wartość zlecenia ({notional:.2f} USDT) jest poniżej minimum 10 USDT.")
+                        else:
+                            try:
+                                live_client.set_leverage(int(current_cfg["max_leverage"]), sym_input)
+                            except Exception:
+                                pass
+                            order_side = "buy" if chosen_dir == "LONG" else "sell"
+                            if current_cfg["paper_mode"]:
+                                st.success(f"[PAPER RĘCZNY] Otwarto {chosen_dir} na {sym_input} po cenie ${current_price} o wartości {notional:.2f} USDT!")
+                                event("TRADE", f"[PAPER RĘCZNY] {chosen_dir} {sym_input} notional={notional:.2f} USDT")
+                            else:
+                                ord_res = market_order(live_client, sym_input, order_side, qty, reference_price=current_price)
+                                st.success(f"Sukces! Ręcznie otwarto {chosen_dir} na {sym_input} (ID: {ord_res.get('id')})")
+                                event("TRADE", f"Ręczna decyzja: {chosen_dir} {sym_input} qty={qty} notional={notional:.2f} USDT")
+                except Exception as exc:
+                    st.error(f"Błąd składania zlecenia ręcznego dla {sym_input}: {exc}")
+
+    st.divider()
+    st.markdown("### Skaner Rynku (Ustawiony rygorystycznie według wolumenu)")
+    try:
+        ex = exchange_client(current_cfg["exchange"], "", "", "", current_cfg["market_type"])
+        scan_limit_val = int(current_cfg.get("scan_limit_count", 10))
+        ranked = ranked_symbols(ex, scan_limit_val)
+        symbols = [x[0] for x in ranked]
+        volume_map = dict(ranked)
+        
+        tfs = [tf for tf in current_cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
+
+        all_signals = []
+        for symbol in symbols:
+            for tf in tfs:
+                res = signal_for_symbol(current_cfg, symbol, tf)
+                res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
+                all_signals.append(res)
+
+        # KLUCZOWA ZMIANA: Czyste sortowanie najpierw po najwyższym wolumenie 24h
+        all_signals.sort(key=lambda x: x.get("volume_24h_usdt", 0), reverse=True)
+
+        df_scanner = pd.DataFrame([{
+            "Symbol": item["symbol"],
+            "Interwał": item["tf"],
+            "Sygnał": item["signal"],
+            "Cena": item["price"],
+            "Wolumen 24h (USDT)": round(item["volume_24h_usdt"], 2),
+            "ADX": round(item["adx"], 1) if item["adx"] is not None else 0.0,
+            "RSI": round(item["rsi"], 1) if item["rsi"] is not None else 0.0,
+            "Komunikat": item["reason"]
+        } for item in all_signals])
+
+        if not df_scanner.empty:
+            st.markdown("#### Zestawienie skanera (Posortowane ściśle wg największego wolumenu)")
+            st.dataframe(df_scanner, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Skaner nie zwrócił wyników.")
+
+    except Exception as exc:
+        st.error(f"Błąd analizy rynków: {exc}")
+    finally:
+        gc.collect()
 
     st.divider()
     st.markdown("### Awaryjne zamknięcie wszystkich pozycji")
@@ -947,6 +955,11 @@ if page == "Automatyczny Skaner i Auto-Handel":
             st.write("\n".join(outcomes) if outcomes else "Brak aktywnych pozycji.")
         except Exception as exc:
             st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
+
+    # PEWNY MECHANIZM AUTOMATYCZNEGO ODŚWIEŻANIA STRONY (BEZ ZAWASZCZANIA FRAGMENTÓW)
+    if cfg.get("auto_refresh", True):
+        time.sleep(refresh_sec)
+        st.rerun()
 
 # -------------------- Ustawienia strategii --------------------
 
@@ -1096,7 +1109,7 @@ if page == "Regulamin i Instrukcja":
     ### Witaj w Bitget-SaaS Futures
 
     System automatycznego handlu kontraktami futures.
-    - Skaner Wolumenowy: Analizuje wybraną liczbę topowych kryptowalut (np. Top 10/20) o największym obrocie USDT wyłącznie na interwałach zaznaczonych w konfiguracji.
+    - Skaner Wolumenowy: Analizuje wyłącznie wybraną liczbę topowych kryptowalut (np. Top 10/20) o największym obrocie USDT wyłącznie na interwałach zaznaczonych w konfiguracji.
     - Odwrócenie Trendu: Jeśli kierunek sygnału zmieni się na przeciwny (np. z LONG na SHORT), bot automatycznie zamyka dotychczasową pozycję rynkowo.
     - Tryb Paper: Pozwala testować sygnały bez otwierania prawdziwych pozycji na giełdzie.
     - Auto-Trade: Po włączeniu bot sam dba o otwieranie i zamykanie pozycji 24/7.
@@ -1154,7 +1167,6 @@ def background_loop():
             symbols = [x[0] for x in ranked]
             volume_map = dict(ranked)
             
-            # POBIERAMY WYŁĄCZNIE INTERWAŁY USTAWIONE W KONFIGURACJI W TLE
             tfs = [tf for tf in cfg.get("timeframes", ["4h", "1d"]) if tf in TF_OPTIONS]
          
             all_signals = {}
@@ -1164,8 +1176,6 @@ def background_loop():
                 for tf in tfs:
                     res = signal_for_symbol(cfg, symbol, tf)
                     res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
-                    adx_val = res.get("adx") or 0.0
-                    res["score"] = adx_val * np.log1p(res["volume_24h_usdt"])
                     
                     if symbol not in all_signals:
                         all_signals[symbol] = res["signal"]
@@ -1175,14 +1185,13 @@ def background_loop():
                     if res["signal"] in ("LONG", "SHORT"):
                         valid_signals.append(res)
 
-            # Obsługa odwrócenia trendu (zamknięcie pozycji, gdy sygnał się odwróci)
             manage_signal_reversals(client, active, all_signals, cfg)
 
             active = active_positions(client)
             max_pos = int(cfg.get("max_positions", 3))
 
-            # SORTOWANIE WEDŁUG NAJWYŻSZEGO WOLUMENU I ADX (PRIORYTET WOLUMENU)
-            valid_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+            # PRIORYTET WOLUMENU W TLE: Najpierw największy wolumen 24h
+            valid_signals.sort(key=lambda x: x.get("volume_24h_usdt", 0), reverse=True)
          
             seen_symbols = set()
             unique_signals = []
