@@ -223,7 +223,6 @@ def create_stripe_checkout_url():
 
 # -------------------- Giełda --------------------
 
-@st.cache_resource(show_spinner=False)
 def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     if ccxt is None:
         raise RuntimeError("Brak biblioteki ccxt. Zainstaluj: pip install ccxt")
@@ -241,7 +240,6 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
         opts["password"] = passphrase
     return cls(opts)
 
-@st.cache_data(ttl=30, max_entries=20, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
@@ -521,14 +519,7 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     return qty, notional
 
 def ranked_symbols(ex, limit_count):
-    now = time.time()
     limit_count = max(1, int(limit_count))
-    default_type = ex.options.get("defaultType", "")
-    cache_key = f"ranked_symbols:{ex.id}:{default_type}:{limit_count}"
-    cached = st.session_state.get(cache_key)
-    if cached and now - cached.get("ts", 0) < 180:
-        return cached["ranked"]
-    
     try:
         markets = ex.load_markets()
         candidates = [
@@ -562,14 +553,12 @@ def ranked_symbols(ex, limit_count):
             
         ranked.sort(key=lambda x: x[1], reverse=True)
         ranked = ranked[:limit_count]
-        st.session_state[cache_key] = {"ts": now, "ranked": ranked}
         gc.collect()
         return ranked
     except Exception as exc:
         logging.exception("Błąd w ranked_symbols: %s", exc)
-        return [("BTC/USDT", 1000000.0), ("ETH/USDT", 500000.0)]
+        return [("BTC/USDT", 1000000.0), ("ETH/USDT", 500000.0), ("SOL/USDT", 500000.0), ("XRP/USDT", 500000.0)]
 
-@st.cache_data(ttl=300, show_spinner=False)
 def get_all_usdt_symbols(ex_id, market_type):
     try:
         ex = exchange_client(ex_id, "", "", "", market_type)
@@ -906,7 +895,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
                 res["volume_24h_usdt"] = volume_map.get(symbol, 0.0)
                 all_signals.append(res)
 
-        # KLUCZOWA ZMIANA: Czyste sortowanie najpierw po najwyższym wolumenie 24h
         all_signals.sort(key=lambda x: x.get("volume_24h_usdt", 0), reverse=True)
 
         df_scanner = pd.DataFrame([{
@@ -956,7 +944,6 @@ if page == "Automatyczny Skaner i Auto-Handel":
         except Exception as exc:
             st.error(f"Zamknięcie awaryjne nie powiodło się: {exc}")
 
-    # PEWNY MECHANIZM AUTOMATYCZNEGO ODŚWIEŻANIA STRONY (BEZ ZAWASZCZANIA FRAGMENTÓW)
     if cfg.get("auto_refresh", True):
         time.sleep(refresh_sec)
         st.rerun()
@@ -1050,9 +1037,8 @@ if page == "Ustawienia Strategii":
                     "rsi_max": float(base.get("rsi_max", 70.0)),
                 }
                 save_cfg(cfg)
-                exchange_client.clear()
-                get_candles.clear()
                 st.cache_data.clear()
+                st.cache_resource.clear()
                 gc.collect()
                 st.success("Zapisano ustawienia.")
                 st.rerun()
@@ -1072,7 +1058,7 @@ if page == "Połączenie API":
                 st.error("Musisz być zalogowany, aby zapisać klucze.")
             else:
                 save_creds(current_user_id, exchange_choice, api_key_input.strip(), secret_input.strip(), passphrase_input.strip())
-                exchange_client.clear()
+                st.cache_resource.clear()
                 st.success("Klucze API zostały zapisane pomyślnie.")
                 st.rerun()
 
@@ -1190,7 +1176,6 @@ def background_loop():
             active = active_positions(client)
             max_pos = int(cfg.get("max_positions", 3))
 
-            # PRIORYTET WOLUMENU W TLE: Najpierw największy wolumen 24h
             valid_signals.sort(key=lambda x: x.get("volume_24h_usdt", 0), reverse=True)
          
             seen_symbols = set()
