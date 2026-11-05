@@ -40,15 +40,15 @@ TF_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 MIN_ORDER_NOTIONAL_USDT = 10.0
 
 DEFAULT_TF_SETTINGS = {
-    "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
-    "3m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
-    "5m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
-    "15m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
-    "30m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 25.0, "rsi_max": 75.0},
-    "1h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 20.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
-    "2h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 18.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
-    "4h": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 18.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
-    "1d": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 45.0, "rsi_long_max": 75.0, "rsi_short_min": 25.0, "rsi_short_max": 55.0, "rsi_min": 30.0, "rsi_max": 70.0},
+    "1m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "3m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "5m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "15m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "30m": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "1h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 15.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "2h": {"ema_fast": 12, "ema_slow": 26, "adx_threshold": 14.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "4h": {"ema_fast": 9, "ema_slow": 21, "adx_threshold": 14.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
+    "1d": {"ema_fast": 20, "ema_slow": 50, "adx_threshold": 12.0, "rsi_period": 14, "rsi_long_min": 40.0, "rsi_long_max": 80.0, "rsi_short_min": 20.0, "rsi_short_max": 60.0, "rsi_min": 20.0, "rsi_max": 80.0},
 }
 
 DEFAULTS = {
@@ -223,6 +223,7 @@ def create_stripe_checkout_url():
 
 # -------------------- Giełda --------------------
 
+@st.cache_resource(show_spinner=False)
 def exchange_client(ex_id, api_key, secret, passphrase, market_type):
     if ccxt is None:
         raise RuntimeError("Brak biblioteki ccxt. Zainstaluj: pip install ccxt")
@@ -240,6 +241,7 @@ def exchange_client(ex_id, api_key, secret, passphrase, market_type):
         opts["password"] = passphrase
     return cls(opts)
 
+@st.cache_data(ttl=30, max_entries=20, show_spinner=False)
 def get_candles(ex_id, market_type, symbol, timeframe, limit):
     ex = exchange_client(ex_id, "", "", "", market_type)
     rows = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=int(limit))
@@ -282,12 +284,12 @@ def effective_tf_cfg(cfg, tf):
         "ema_slow": slow,
         "adx_threshold": float(base["adx_threshold"]),
         "rsi_period": max(2, min(100, int(base.get("rsi_period", 14)))),
-        "rsi_long_min": float(base.get("rsi_long_min", 45.0)),
-        "rsi_long_max": float(base.get("rsi_long_max", 75.0)),
-        "rsi_short_min": float(base.get("rsi_short_min", 25.0)),
-        "rsi_short_max": float(base.get("rsi_short_max", 55.0)),
-        "rsi_min": float(base.get("rsi_min", 30.0)),
-        "rsi_max": float(base.get("rsi_max", 70.0)),
+        "rsi_long_min": float(base.get("rsi_long_min", 40.0)),
+        "rsi_long_max": float(base.get("rsi_long_max", 80.0)),
+        "rsi_short_min": float(base.get("rsi_short_min", 20.0)),
+        "rsi_short_max": float(base.get("rsi_short_max", 60.0)),
+        "rsi_min": float(base.get("rsi_min", 20.0)),
+        "rsi_max": float(base.get("rsi_max", 80.0)),
     }
 
 def signal_for_symbol(cfg, symbol, timeframe):
@@ -313,25 +315,22 @@ def signal_for_symbol(cfg, symbol, timeframe):
         adx_ok = adx_val >= t["adx_threshold"]
 
         deviation_pct = abs(close_val - ema_f) / ema_f * 100.0
-        not_overextended = deviation_pct <= 4.5
+        not_overextended = deviation_pct <= 6.0
         candle_body_pct = ((close_val - open_val) / open_val) * 100.0
-        is_exhausted_top = candle_body_pct > 5.0
-        rsi_falling = rsi_val < float(d.iloc[-3]["rsi"]) if len(d) > 3 else True
-        rsi_rising = rsi_val > float(d.iloc[-3]["rsi"]) if len(d) > 3 else True
-        long_rsi_ok = (t["rsi_long_min"] <= rsi_val <= t["rsi_long_max"]) and (rsi_val < 70.0) and rsi_rising
-        short_rsi_ok = (t["rsi_short_min"] <= rsi_val <= t["rsi_short_max"]) and (rsi_val > 30.0) and rsi_falling
+        is_exhausted_top = candle_body_pct > 8.0
+        
+        long_rsi_ok = (t["rsi_long_min"] <= rsi_val <= t["rsi_long_max"])
+        short_rsi_ok = (t["rsi_short_min"] <= rsi_val <= t["rsi_short_max"])
         
         reasons = []
         if not adx_ok:
             reasons.append(f"ADX {adx_val:.1f} < {t['adx_threshold']}")
         if not not_overextended:
             reasons.append(f"Zbyt duże odchylenie od EMA ({deviation_pct:.1f}%)")
-        if is_exhausted_top:
-            reasons.append(f"Świeca wyczerpana/szczytowa ({candle_body_pct:.1f}% korpusu)")
         if trend_up and not long_rsi_ok:
-            reasons.append("RSI LONG niespełnione / brak rosnącego momentum")
+            reasons.append(f"RSI LONG niespełnione ({rsi_val:.1f})")
         if trend_down and not short_rsi_ok:
-            reasons.append("RSI SHORT niespełnione / dołek lub brak spadku")
+            reasons.append(f"RSI SHORT niespełnione ({rsi_val:.1f})")
         if not trend_up and not trend_down:
             reasons.append("EMA trend neutralny")
 
@@ -519,7 +518,18 @@ def calc_qty(ex, symbol, total_usdt, free_usdt, price, cfg, custom_usdt=None):
     return qty, notional
 
 def ranked_symbols(ex, limit_count):
+    now = time.time()
     limit_count = max(1, int(limit_count))
+    default_type = ex.options.get("defaultType", "")
+    cache_key = f"ranked_symbols:{ex.id}:{default_type}:{limit_count}"
+    cached = None
+    try:
+        cached = st.session_state.get(cache_key)
+    except Exception:
+        pass
+    if cached and now - cached.get("ts", 0) < 180:
+        return cached["ranked"]
+    
     try:
         markets = ex.load_markets()
         candidates = [
@@ -553,12 +563,17 @@ def ranked_symbols(ex, limit_count):
             
         ranked.sort(key=lambda x: x[1], reverse=True)
         ranked = ranked[:limit_count]
+        try:
+            st.session_state[cache_key] = {"ts": now, "ranked": ranked}
+        except Exception:
+            pass
         gc.collect()
         return ranked
     except Exception as exc:
         logging.exception("Błąd w ranked_symbols: %s", exc)
         return [("BTC/USDT", 1000000.0), ("ETH/USDT", 500000.0), ("SOL/USDT", 500000.0), ("XRP/USDT", 500000.0)]
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_all_usdt_symbols(ex_id, market_type):
     try:
         ex = exchange_client(ex_id, "", "", "", market_type)
@@ -989,14 +1004,14 @@ if page == "Ustawienia Strategii":
         with r1:
             rsi_period = st.number_input("RSI okres", 2, 100, int(base.get("rsi_period", 14)), 1, key=f"rsi_period_{selected_tf}")
         with r2:
-            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 45.0)), 1.0, key=f"rsi_long_min_{selected_tf}")
+            rsi_long_min = st.number_input("RSI LONG — minimum", 0.0, 100.0, float(base.get("rsi_long_min", 40.0)), 1.0, key=f"rsi_long_min_{selected_tf}")
         with r3:
-            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 75.0)), 1.0, key=f"rsi_long_max_{selected_tf}")
+            rsi_long_max = st.number_input("RSI LONG — maksimum", 0.0, 100.0, float(base.get("rsi_long_max", 80.0)), 1.0, key=f"rsi_long_max_{selected_tf}")
         r4, r5 = st.columns(2)
         with r4:
-            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 25.0)), 1.0, key=f"rsi_short_min_{selected_tf}")
+            rsi_short_min = st.number_input("RSI SHORT — minimum", 0.0, 100.0, float(base.get("rsi_short_min", 20.0)), 1.0, key=f"rsi_short_min_{selected_tf}")
         with r5:
-            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 55.0)), 1.0, key=f"rsi_short_max_{selected_tf}")
+            rsi_short_max = st.number_input("RSI SHORT — maksimum", 0.0, 100.0, float(base.get("rsi_short_max", 60.0)), 1.0, key=f"rsi_short_max_{selected_tf}")
 
         save = st.form_submit_button("ZAPISZ USTAWIENIA", use_container_width=True)
         if save:
@@ -1032,8 +1047,8 @@ if page == "Ustawienia Strategii":
                     "rsi_long_max": float(rsi_long_max),
                     "rsi_short_min": float(rsi_short_min),
                     "rsi_short_max": float(rsi_short_max),
-                    "rsi_min": float(base.get("rsi_min", 30.0)),
-                    "rsi_max": float(base.get("rsi_max", 70.0)),
+                    "rsi_min": float(base.get("rsi_min", 20.0)),
+                    "rsi_max": float(base.get("rsi_max", 80.0)),
                 }
                 save_cfg(cfg)
                 st.cache_data.clear()
@@ -1223,3 +1238,4 @@ if "bg_thread_started" not in st.session_state:
     st.session_state["bg_thread_started"] = True
     t = threading.Thread(target=background_loop, daemon=True)
     t.start()
+
